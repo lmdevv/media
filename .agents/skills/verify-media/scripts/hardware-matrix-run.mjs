@@ -11,11 +11,14 @@
 //     --cli <media.js> --image IMG --out DIR --run RUN --uid U --gid G [--paths cpu,qsv,vaapi]
 //     [--rows decode,scale] [--grid-only]
 import { spawn, spawnSync } from "node:child_process";
-import { chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { chmodSync, copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { homedir } from "node:os";
 import { join, relative } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 import { parseArgs } from "node:util";
 
+import { readPatches } from "./colour-patches.mjs";
 import { cliEnv } from "./core-seed.mjs";
 import * as Matrix from "./hardware-matrix.mjs";
 
@@ -165,6 +168,36 @@ const nfo = (generate) =>
 
 const libraryCount = () => media("auth", "libraries", "list").page.length;
 
+/**
+ * Where fetched samples are kept: a cache of their own outside the repository and every side's
+ * state, by SHA-256, since they are untrusted downloads that only ffmpeg in a side's container reads.
+ */
+const SAMPLE_CACHE = join(process.env.XDG_CACHE_HOME ?? join(homedir(), ".cache"), "lar-verify-media", "samples");
+
+// Fetches `name` from SAMPLES into the cache unless it is there, checks its SHA-256, and copies it
+// into `folder`. The request carries nothing of the host or the person running it.
+const fetchSample = async (name, folder) => {
+  const sample = Matrix.SAMPLES[name];
+  if (sample === undefined) throw new Error(`no sample named ${name}`);
+  const cached = join(SAMPLE_CACHE, sample.sha256);
+  if (!existsSync(cached)) {
+    mkdirSync(SAMPLE_CACHE, { recursive: true });
+    say(`fetching ${name} (${sample.parts.length} part${sample.parts.length === 1 ? "" : "s"})`);
+    const parts = [];
+    for (const url of sample.parts) {
+      const response = await fetch(url, { headers: { "user-agent": "verify-media" } });
+      if (!response.ok) throw new Error(`fetching ${url} answered ${response.status}`);
+      parts.push(Buffer.from(await response.arrayBuffer()));
+    }
+    const bytes = Buffer.concat(parts);
+    const digest = createHash("sha256").update(bytes).digest("hex");
+    if (digest !== sample.sha256) throw new Error(`${name} has SHA-256 ${digest}, not ${sample.sha256}`);
+    writeFileSync(`${cached}.part`, bytes);
+    renameSync(`${cached}.part`, cached);
+  }
+  copyFileSync(cached, join(folder, name));
+};
+
 // Makes a generated fixture in the side's state, which `up` mounts at FIXTURE_ROOT, and scans it
 // into its own library. Returns why it can't, or nothing.
 const prepareGenerated = async (name, fixture) => {
@@ -179,6 +212,13 @@ const prepareGenerated = async (name, fixture) => {
   if (!existsSync(file)) {
     mkdirSync(folder, { recursive: true });
     for (const [named, make] of Object.entries(generate.files ?? {})) writeFileSync(join(folder, named), make());
+    for (const named of generate.fetch ?? []) {
+      try {
+        await fetchSample(named, folder);
+      } catch (error) {
+        return `fixture ${name} absent: could not fetch ${named}: ${error.message}`;
+      }
+    }
     say(`generating ${name} with ${flags.image}'s ffmpeg`);
     const result = docker([
       "run",
@@ -360,6 +400,19 @@ const readFetch = (fetch, dir) => {
     fetch.file,
   ]);
   writeFileSync(join(dir, `${fetch.name}.frames.json`), frames.stdout);
+  const sides = tool("ffprobe", [
+    "-v",
+    "error",
+    "-select_streams",
+    "v:0",
+    "-read_intervals",
+    "%+#1",
+    "-show_entries",
+    "stream_side_data=side_data_type:frame_side_data=side_data_type",
+    "-of",
+    "json",
+    fetch.file,
+  ]);
   const decoded = tool("ffmpeg", ["-v", "error", "-nostdin", "-i", fetch.file, "-map", "0:v:0", "-f", "null", "-"]);
   const audio = streamPackets(here, fetch.file, "a:0");
   const video = streamPackets(here, fetch.file, "v:0");
@@ -371,6 +424,7 @@ const readFetch = (fetch, dir) => {
     firstDecoded: decodes.length === 0 ? undefined : Math.min(...decodes),
     media: streams.status === 0 ? Matrix.parseProbe(streams.stdout) : undefined,
     frames: frames.status === 0 ? Matrix.parseFrames(frames.stdout) : [],
+    sideData: sides.status === 0 ? Matrix.parseSideData(sides.stdout) : undefined,
     decodeErrors: decoded.status === 0 ? decoded.stderr : `${decoded.stderr}\nffmpeg exited ${decoded.status}`,
     fingerprint: Matrix.fingerprint(readFileSync(fetch.file)),
   };
@@ -393,9 +447,12 @@ const analyseProgressive = (obs, found, dir) => {
   return { output: idetOf(output), source: idetOf(source) };
 };
 
-const analysePicture = (obs, found, params, dir) => {
+const analysePicture = async (obs, found, params, dir) => {
   const fetch = obs.fetches.seek;
   if (!fetch?.ok) return undefined;
+  // A fixture whose own picture no reference reads right (Dolby Vision 5) names another rendition of the same pictures.
+  const rendition = found.fixture.reference === undefined ? found : await resolveFixture(found.fixture.reference);
+  if (rendition.skipped) return undefined;
   const until = params.at + params.seconds;
   const output = tool("ffmpeg", [
     "-v",
@@ -422,7 +479,7 @@ const analysePicture = (obs, found, params, dir) => {
     "-t",
     String(params.seconds),
     "-i",
-    found.path,
+    rendition.path,
     "-map",
     "0:v:0",
     "-vf",
@@ -434,6 +491,30 @@ const analysePicture = (obs, found, params, dir) => {
   writeFileSync(join(dir, "picture.txt"), `output:\n${output.stdout}${output.stderr}\nreference:\n${reference.stdout}${reference.stderr}`);
   frameAt(fetch.file, params.at, join(dir, `output-${params.at}.png`));
   return { output: Matrix.parseSignalstats(output.stdout), reference: Matrix.parseSignalstats(reference.stdout) };
+};
+
+/** A 1920x1080 picture in 8-bit BT.709 R'G'B', converted from the stream's own colour tags. */
+const RGB_FRAME = "scale=1920:1080:flags=bicubic,zscale=p=bt709:t=bt709:m=gbr:r=full,format=gbrp,format=rgb24";
+
+// The patches of the seek fetch's picture at `params.at`, and what they should be: the reference
+// tone map's, or the source's own picture at that time, read in the side.
+const analyseColour = (obs, found, params, dir) => {
+  const fetch = obs.fetches.seek;
+  if (!fetch?.ok) return undefined;
+  const patches = Matrix.patchesOf(params.reference);
+  const output = tool("ffmpeg", ["-v", "error", "-nostdin", "-copyts", "-i", fetch.file, "-map", "0:v:0", "-vf", `select='gte(t\\,${params.at})',${RGB_FRAME}`, "-frames:v", "1", "-f", "rawvideo", "-"], { encoding: "buffer" });
+  frameAt(fetch.file, params.at, join(dir, `output-${params.at}.png`));
+  if (output.status !== 0 || output.stdout.length < 1920 * 1080 * 3) return { error: `the output picture at ${params.at} s: ${output.stderr.toString().trim().split("\n").at(-1) ?? "none"}` };
+  const measured = readPatches(output.stdout, 1920, patches.length);
+  let expected = Matrix.referencePatches(params.reference);
+  if (params.reference === "source") {
+    const source = inContainer(["ffmpeg", "-v", "error", "-nostdin", "-ss", String(params.at), "-i", found.path, "-map", "0:v:0", "-vf", RGB_FRAME, "-frames:v", "1", "-f", "rawvideo", "-"], { encoding: "buffer" });
+    if (source.status !== 0 || source.stdout.length < 1920 * 1080 * 3) return { error: `the source picture at ${params.at} s: ${source.stderr.toString().trim().split("\n").at(-1) ?? "none"}` };
+    expected = readPatches(source.stdout, 1920, patches.length);
+  }
+  const lines = patches.map((patch, index) => `${patch.name}\t${measured[index].map((value) => value.toFixed(1)).join("/")}\t${expected[index].map((value) => value.toFixed(1)).join("/")}`);
+  writeFileSync(join(dir, "patches.tsv"), `patch\toutput\texpected (${params.reference})\n${lines.join("\n")}\n`);
+  return { measured, expected, patches };
 };
 
 // Gray thumbnails of `args`' picture with their times, from a run here or (`where`) in the side,
@@ -625,7 +706,8 @@ const measure = async (cell, found, health, dir) => {
   obs.analysis = { timing: analyseTiming(obs, found, cell, dir) };
   for (const spec of row.checks) {
     if (spec.check === "progressive") obs.analysis.idet = analyseProgressive(obs, found, dir);
-    if (spec.check === "picture") obs.analysis.picture = analysePicture(obs, found, spec, dir);
+    if (spec.check === "picture") obs.analysis.picture = await analysePicture(obs, found, spec, dir);
+    if (spec.check === "colour") obs.analysis.colour = analyseColour(obs, found, spec, dir);
     if (spec.check === "burned-in") obs.analysis.burn = analyseBurn(obs, found, spec, dir);
     if (spec.check === "burned-text") obs.analysis.text = analyseText(obs, found, spec, dir);
   }

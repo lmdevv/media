@@ -87,6 +87,20 @@ const fieldOrder = v.union(
   v.literal("unknown"),
 );
 
+/** A video stream's colour as ffprobe reads it; mastering luminances and light levels in cd/m². */
+const videoColour = v.object({
+  transfer: v.optional(v.string()),
+  primaries: v.optional(v.string()),
+  matrix: v.optional(v.string()),
+  range: v.optional(v.union(v.literal("limited"), v.literal("full"))),
+  chromaLocation: v.optional(v.string()),
+  mastering: v.optional(v.object({ minLuminance: v.number(), maxLuminance: v.number() })),
+  contentLight: v.optional(v.object({ maxCll: v.number(), maxFall: v.number() })),
+});
+
+/** A Dolby Vision stream's profile, level, and base layer signal compatibility id. */
+const dolbyVision = v.object({ profile: v.number(), level: v.number(), compatibility: v.number() });
+
 const videoStream = v.object({
   index: v.number(),
   codec: v.string(),
@@ -101,6 +115,10 @@ const videoStream = v.object({
   bitRate: nullable(v.number()),
   /** Absent for a file last scanned before field orders were read. */
   fieldOrder: v.optional(fieldOrder),
+  /** Absent for a file last scanned before colours were read. */
+  colour: v.optional(videoColour),
+  /** Present for a Dolby Vision stream scanned since its configuration was read. */
+  dolbyVision: v.optional(dolbyVision),
 });
 
 const audioStream = v.object({

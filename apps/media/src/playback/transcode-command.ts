@@ -12,8 +12,11 @@
  * the encoder, each stage on the CPU or a GPU as the plan placed it. HEVC, copied or encoded, is
  * written with the `hvc1` sample entry Apple's players require (parameter sets in the sample entry
  * only); ffmpeg's default for it is `hev1`. H.264 (`avc1`) and AV1 (`av01`) have one entry each.
+ * A copy that keeps a stream's Dolby Vision (`DolbyVisionCopy`) writes its configuration box
+ * (`dvcC`, `dvvC`), which ffmpeg's MP4 muxer drops below `-strict unofficial`, and a profile 5
+ * stream in Dolby Vision's own sample entry, `dvh1`.
  */
-import { AudioPlan, VideoPlan } from "./playback-decision.ts";
+import { AudioPlan, type DolbyVisionCopy, VideoPlan } from "./playback-decision.ts";
 import type { LogOwners } from "./transcode-recovery.ts";
 import { type VideoPipeline } from "./video-pipeline.ts";
 import { graphArgs, type RenderedVideo, renderVideo, type RunFiles } from "./video-render.ts";
@@ -108,6 +111,19 @@ const rendered = (command: EncodeSource, video: Encode): RenderedVideo => {
 const sampleEntry = (codec: string): ReadonlyArray<string> =>
   codec === "hevc" ? ["-tag:v", "hvc1"] : [];
 
+/**
+ * A copy's sample entry and what keeps its Dolby Vision configuration: `dvh1` for a stream that is
+ * only Dolby Vision, and the muxer's unofficial mode, which writes `dvcC` or `dvvC`.
+ */
+const copiedEntry = (codec: string, dolbyVision: DolbyVisionCopy): ReadonlyArray<string> => {
+  if (dolbyVision === "none") return sampleEntry(codec);
+
+  const entry =
+    dolbyVision === "only" && codec === "hevc" ? ["-tag:v", "dvh1"] : sampleEntry(codec);
+
+  return [...entry, "-strict", "unofficial"];
+};
+
 const videoArgs = (
   command: EncodeSource,
   encoded: RenderedVideo | undefined,
@@ -118,7 +134,10 @@ const videoArgs = (
         `0:${String(command.videoIndex)}`,
         "-c:v",
         "copy",
-        ...sampleEntry(command.videoCodec),
+        ...copiedEntry(
+          command.videoCodec,
+          VideoPlan.$is("Copy")(command.video) ? command.video.dolbyVision : "none",
+        ),
       ]
     : [
         ...graphArgs(encoded, { input: 0, stream: command.videoIndex }),

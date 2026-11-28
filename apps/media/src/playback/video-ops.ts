@@ -53,12 +53,54 @@ export interface OutputTarget {
 }
 
 /**
+ * What a frame's samples encode: `sdr`; `pq`, HDR10's transfer, which HDR10+ and the base layer of
+ * Dolby Vision 7 and 8.1 share; `hlg`, which Dolby Vision 8.4's base layer shares; or `dovi`, the
+ * IPT-PQ-c2 of Dolby Vision 5, which only the stream's RPU, read picture by picture, reshapes into
+ * colour.
+ */
+export type Signal = "sdr" | "pq" | "hlg" | "dovi";
+
+/** The colour a frame's samples are in, as rows read and write it. */
+export interface Colour {
+  readonly signal: Signal;
+  /** The primaries, as ffprobe names them (`bt709`, `bt2020`, `smpte170m`); none when unstated. */
+  readonly primaries: string | undefined;
+  /** The matrix, as ffprobe's `color_space` names it (`bt709`, `bt2020nc`); none when unstated. */
+  readonly matrix: string | undefined;
+  readonly range: "limited" | "full";
+  /** Whether the frames carry mastering display metadata, which VA-API's tone map reads. */
+  readonly mastering: "present" | "absent";
+}
+
+/**
+ * SDR BT.709 in limited range with no HDR metadata: the colour every tone map's frames leave in,
+ * and every SDR target's.
+ */
+export const SDR_BT709: Colour = {
+  signal: "sdr",
+  primaries: "bt709",
+  matrix: "bt709",
+  range: "limited",
+  mastering: "absent",
+};
+
+const RANGE_OF_SIGNAL: Readonly<Record<Signal, DynamicRange>> = {
+  sdr: "sdr",
+  pq: "hdr10",
+  hlg: "hlg",
+  dovi: "dolby-vision",
+};
+
+/** The dynamic range the wire names frames of `colour` by. */
+export const dynamicRangeOf = (colour: Colour): DynamicRange => RANGE_OF_SIGNAL[colour.signal];
+
+/**
  * Whether a chain from a source of `colour` to `target` maps HDR to SDR: the target is SDR and the
  * source is not. Each target says it for itself, so one intent may offer an HDR source as HDR to
  * one target and tone-mapped to the next.
  */
-export const toneMapsTo = (colour: DynamicRange, target: OutputTarget): boolean =>
-  colour !== "sdr" && target.colour === "sdr";
+export const toneMapsTo = (colour: Colour, target: OutputTarget): boolean =>
+  colour.signal !== "sdr" && target.colour === "sdr";
 
 /** `codec` at 8-bit SDR, from any encoder and at any size: what probes encode. */
 export const sdrTarget = (codec: OutputCodec): OutputTarget => ({
@@ -78,7 +120,7 @@ export interface Frame {
   readonly memory: Domain;
   /** The render node of the device that holds it; none in CPU memory. */
   readonly device: string | undefined;
-  readonly colour: DynamicRange;
+  readonly colour: Colour;
   /** Bits per component: 8, 10, or 12. */
   readonly depth: number;
   /** The exact layout, such as `yuv420p`, `yuv420p10le`, or, on a GPU, `nv12` and `p010le`. */
@@ -367,14 +409,43 @@ export interface DomainSpec {
   readonly filterDurations: "trusted" | "untrusted";
 }
 
-/** Colours a tone map takes. */
-export const HDR_COLOURS: ReadonlySet<DynamicRange> = new Set(["hdr10", "hlg", "dolby-vision"]);
+/**
+ * The transfer a tone map of PQ and HLG frames works from, what changes whether it works; none for
+ * SDR frames and for Dolby Vision's IPT, which only a row that reads the RPU takes.
+ */
+export const toneMapTransfer = (frame: Frame): "pq" | "hlg" | undefined =>
+  frame.colour.signal === "pq" || frame.colour.signal === "hlg" ? frame.colour.signal : undefined;
 
 /**
- * The transfer a tone map works from: PQ for HDR10 and Dolby Vision, whose layers in practice
- * carry PQ, and HLG. It is what changes whether a tone map works.
+ * The HDR metadata a tone map's SDR frames must not keep: HDR10's mastering display and content
+ * light levels, HDR10+'s dynamic metadata, and Dolby Vision's RPU, parsed and raw. ffmpeg passes
+ * each on from the source's frames, and encoders write them into the stream (libx265 and libsvtav1
+ * all of them, the GPU encoders HDR10's), so an SDR stream would claim HDR.
  */
-export const transferOf = (colour: DynamicRange): "pq" | "hlg" => (colour === "hlg" ? "hlg" : "pq");
+const HDR_METADATA = [
+  "MASTERING_DISPLAY_METADATA",
+  "CONTENT_LIGHT_LEVEL",
+  "DYNAMIC_HDR_PLUS",
+  "DOVI_METADATA",
+  "DOVI_RPU_BUFFER",
+] as const;
+
+/** Filters that remove `HDR_METADATA` from frames in any memory. */
+export const STRIP_HDR_METADATA: ReadonlyArray<FilterCall> = HDR_METADATA.map((type) =>
+  filter("sidedata", ["mode", "delete"], ["type", type]),
+);
+
+/**
+ * Tags frames SDR BT.709 in limited range, whatever a filter before left on them, so encoders and
+ * libass, which reads the matrix to draw text in, see what the samples are.
+ */
+export const TAG_SDR_BT709: FilterCall = filter(
+  "setparams",
+  ["color_primaries", "bt709"],
+  ["color_trc", "bt709"],
+  ["colorspace", "bt709"],
+  ["range", "tv"],
+);
 
 /** The GPU surface layout frames of `depth` bits use: NV12 for 8 bits, P010 above. */
 export const surfaceFormat = (depth: number): "nv12" | "p010le" => (depth > 8 ? "p010le" : "nv12");
@@ -461,7 +532,7 @@ export const PROBE_IMAGE_SUBTITLE: SubtitleInput = {
   frame: {
     memory: "cpu",
     device: undefined,
-    colour: "sdr",
+    colour: SDR_BT709,
     depth: 8,
     pixelFormat: "bgra",
     scan: "progressive",

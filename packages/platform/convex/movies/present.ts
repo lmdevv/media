@@ -230,6 +230,7 @@ const directPlayFile = (file: Doc<"mediaFiles">): DirectPlayFile => {
             width: video.width,
             height: video.height,
             dynamicRange: dynamicRangeOf(video.hdr),
+            dolbyVision: video.dolbyVision,
           },
     audio: audio === undefined ? undefined : { codec: audio.codec, channels: audio.channels },
   };

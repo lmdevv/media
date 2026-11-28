@@ -36,6 +36,28 @@ export const stageLabel = (stage: TranscodeStage): string =>
     ? `${opLabel(stage.op)} · ${domainLabel(stage.domain)}`
     : `${opLabel(stage.op)} · ${domainLabel(stage.move.from)} → ${domainLabel(stage.move.to)}`;
 
+const SOURCES: ReadonlyMap<string, string> = new Map([
+  ["sdr", "SDR"],
+  ["sdr-bt601", "SDR BT.601"],
+  ["sdr-bt2020", "SDR BT.2020"],
+  ["sdr-full-range", "SDR full range"],
+  ["hdr10", "HDR10"],
+  ["hdr10plus", "HDR10+"],
+  ["hlg", "HLG"],
+  ["dolby-vision-5", "Dolby Vision 5"],
+  ["dolby-vision-7", "Dolby Vision 7"],
+  ["dolby-vision-8.1", "Dolby Vision 8.1"],
+  ["dolby-vision-8.2", "Dolby Vision 8.2"],
+  ["dolby-vision-8.4", "Dolby Vision 8.4"],
+  ["dolby-vision-other", "Dolby Vision"],
+]);
+
+/**
+ * What a stream's source colour is, in a few words, from the summary's code: `HDR10`, `Dolby
+ * Vision 8.1`; a code a newer server added reads as itself.
+ */
+export const sourceLabel = (source: string): string => SOURCES.get(source) ?? source;
+
 const CAUSES: ReadonlyMap<string, string> = new Map([
   ["capability", "stage failed"],
   ["source", "file failed"],

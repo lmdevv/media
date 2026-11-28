@@ -2,6 +2,7 @@ import {
   canonicalCodec as canonical,
   decodesAudio,
   decodesVideo,
+  playableAs,
   videoSupport,
 } from "@media/contracts/direct-play";
 import type {
@@ -14,6 +15,7 @@ import { Data, Result } from "effect";
 
 import type { AudioTrack, MediaProbe, VideoStream } from "../media/media-probe.ts";
 import { burnableText } from "../subtitles/burned-text.ts";
+import { decisionOf } from "./source-colours.ts";
 import {
   type CapabilitySnapshot,
   encodeDomain,
@@ -25,16 +27,26 @@ import {
 } from "./video-pipeline.ts";
 import {
   type Burn,
+  type Colour,
   Op,
   type OutputCodec,
   type OutputTarget,
+  SDR_BT709,
   type TextSubtitle,
   toneMapsTo,
 } from "./video-ops.ts";
 
+/**
+ * How a copy states a Dolby Vision stream for a client that declares Dolby Vision: `none` copies it
+ * as a plain stream of its base layer; `compatible` keeps its configuration over a base layer other
+ * players show; `only` keeps it in Dolby Vision's own sample entry, for a base layer that is no
+ * other format (profile 5).
+ */
+export type DolbyVisionCopy = "none" | "compatible" | "only";
+
 /** What happens to the video stream. */
 export type VideoPlan = Data.TaggedEnum<{
-  Copy: {};
+  Copy: { readonly dolbyVision: DolbyVisionCopy };
   Encode: {
     /** What the decision asked for: a replacement plans from it again and never relaxes it. */
     readonly intent: VideoIntent;
@@ -282,11 +294,9 @@ export const decideWithin = (
         : AudioPlan.Aac({ index: audio.index });
 
   if (videoOk && HLS_VIDEO_CODECS.has(canonical(video.codec)) && options.copyVideo !== false) {
-    return PlaybackPlan.Hls({
-      mode: modeOf(VideoPlan.Copy(), audioPlan),
-      video: VideoPlan.Copy(),
-      audio: audioPlan,
-    });
+    const copy = VideoPlan.Copy({ dolbyVision: dolbyVisionCopyOf(video, client) });
+
+    return PlaybackPlan.Hls({ mode: modeOf(copy, audioPlan), video: copy, audio: audioPlan });
   }
 
   const intent = encodeIntent(probe, video, client, options);
@@ -301,6 +311,23 @@ export const decideWithin = (
       PlaybackPlan.Hls({ mode: modeOf(plan, audioPlan), video: plan, audio: audioPlan }),
     onFailure: (reason) => PlaybackPlan.Unsupported({ reason }),
   });
+};
+
+/**
+ * How a copy of `video` for `client` states its Dolby Vision: its configuration is kept only for a
+ * client that declares Dolby Vision for the codec, and only where the table keeps it (not for
+ * profile 7, which such players do not apply).
+ */
+const dolbyVisionCopyOf = (video: VideoStream, client: ClientCapabilities): DolbyVisionCopy => {
+  const declared = (videoSupport(client, video.codec)?.dynamicRanges ?? []).includes(
+    "dolby-vision",
+  );
+
+  if (video.dynamicRange !== "dolby-vision" || !declared) return "none";
+
+  if (decisionOf(video).dolbyVisionCopy !== "kept") return "none";
+
+  return playableAs(video).length > 1 ? "compatible" : "only";
 };
 
 /**
@@ -351,7 +378,7 @@ const burnOf = (probe: MediaProbe, video: VideoStream, request: BurnRequest): Bu
               frame: {
                 memory: "cpu",
                 device: undefined,
-                colour: "sdr",
+                colour: SDR_BT709,
                 depth: 8,
                 pixelFormat: "pal8",
                 scan: "progressive",
@@ -376,19 +403,34 @@ export const replan = (
   video: VideoStream,
   intent: VideoIntent,
   capabilities: CapabilitySnapshot,
-): Result.Result<Extract<VideoPlan, { readonly _tag: "Encode" }>, UnsupportedReason> =>
-  Result.match(planVideo(sourceOf(video), intent, capabilities), {
+): Result.Result<Extract<VideoPlan, { readonly _tag: "Encode" }>, UnsupportedReason> => {
+  const source = sourceOf(video);
+
+  return Result.match(planVideo(source, intent, capabilities), {
     onSuccess: ({ output, pipeline }) =>
       Result.succeed(VideoPlan.Encode({ intent, output, pipeline })),
-    onFailure: () =>
-      Result.fail(
-        drawsNoSubtitle(video, intent, capabilities)
-          ? "subtitle-not-burnable"
-          : intent.targets.some((target) => toneMapsTo(video.dynamicRange, target))
-            ? "hdr-tone-mapping-requires-hardware"
-            : "no-transcode-target",
-      ),
+    onFailure: () => Result.fail(refusalOf(source.colour, video, intent, capabilities)),
   });
+};
+
+/**
+ * Why `intent` cannot be planned for `video`: the subtitle alone, Dolby Vision whose picture only
+ * its RPU gives, an HDR source no tone map this server proved takes, or no target at all.
+ */
+const refusalOf = (
+  colour: Colour,
+  video: VideoStream,
+  intent: VideoIntent,
+  capabilities: CapabilitySnapshot,
+): UnsupportedReason => {
+  if (drawsNoSubtitle(video, intent, capabilities)) return "subtitle-not-burnable";
+
+  if (!intent.targets.some((target) => toneMapsTo(colour, target))) return "no-transcode-target";
+
+  return colour.signal === "dovi"
+    ? "dolby-vision-not-convertible"
+    : "hdr-tone-mapping-requires-hardware";
+};
 
 /**
  * Whether the subtitle alone keeps `intent` from planning: the same encode without it plans. No

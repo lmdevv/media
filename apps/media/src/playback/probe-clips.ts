@@ -5,7 +5,14 @@
  * build cannot make proves nothing, and the keys that need it wait for a real source. Subtitle rows
  * also read a canvas or a script, and their probes read the first picture back (`readbackVerdict`).
  */
-import type { BuildFeature, ClipName, Readback, SourceVideo } from "./video-ops.ts";
+import {
+  type BuildFeature,
+  type ClipName,
+  type Colour,
+  type Readback,
+  SDR_BT709,
+  type SourceVideo,
+} from "./video-ops.ts";
 
 /** What a clip is and how it is made. */
 export interface ProbeClip {
@@ -48,11 +55,20 @@ const HLG =
 const HDR10_X265 =
   "log-level=error:hdr10=1:master-display=G(13250,34500)B(7500,3000)R(34000,16000)WP(15635,16450)L(10000000,1):max-cll=1000,400";
 
+/** The colour of the HDR clips: BT.2020 in limited range, with HDR10's metadata or none. */
+const hdr = (signal: "pq" | "hlg", mastering: Colour["mastering"]): Colour => ({
+  signal,
+  primaries: "bt2020",
+  matrix: "bt2020nc",
+  range: "limited",
+  mastering,
+});
+
 const sdr = (codec: string, pixelFormat: string, depth: number): SourceVideo => ({
   codec,
   pixelFormat,
   depth,
-  colour: "sdr",
+  colour: SDR_BT709,
   scan: "progressive",
   ...SIZE,
 });
@@ -91,7 +107,7 @@ export const PROBE_CLIPS: Readonly<Record<ClipName, ProbeClip>> = {
     args: [...PICTURE, ...libx265("yuv420p10le")],
   },
   "hevc-pq": {
-    source: { ...sdr("hevc", "yuv420p10le", 10), colour: "hdr10" },
+    source: { ...sdr("hevc", "yuv420p10le", 10), colour: hdr("pq", "present") },
     needs: "encoder:libx265",
     args: [
       ...PICTURE,
@@ -107,7 +123,7 @@ export const PROBE_CLIPS: Readonly<Record<ClipName, ProbeClip>> = {
     ],
   },
   "hevc-hlg": {
-    source: { ...sdr("hevc", "yuv420p10le", 10), colour: "hlg" },
+    source: { ...sdr("hevc", "yuv420p10le", 10), colour: hdr("hlg", "absent") },
     needs: "encoder:libx265",
     args: [
       ...PICTURE,

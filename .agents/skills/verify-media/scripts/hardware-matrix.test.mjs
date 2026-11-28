@@ -320,6 +320,7 @@ const healthy = (cell) => {
       { index: 2, start: from + 2, duration: 2, bytes: 800_000 },
     ],
     media: { codec: "h264", profile: "High", width: 1920, height: 818, bitDepth: 8, transfer: "bt709", primaries: "bt709", space: "bt709" },
+    sideData: { stream: [], frame: [] },
     frames: frames(from, 96),
     audio: { start: from, codec: "aac", sampleRate: "48000" },
     sourceAudio: { codec: "aac", sampleRate: "48000", packets: sounding(from - 3, from + 3) },

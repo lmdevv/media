@@ -34,6 +34,7 @@ import {
   type SourceVideo,
 } from "./video-ops.ts";
 import { renderVideo } from "./video-render.ts";
+import { HDR10, SDR_BT709 } from "../testing/colours.ts";
 
 const hasFfmpeg = await ffmpegAvailable();
 
@@ -43,7 +44,7 @@ const HDR: SourceVideo = {
   codec: "hevc",
   pixelFormat: "yuv420p10le",
   depth: 10,
-  colour: "hdr10",
+  colour: HDR10,
   scan: "progressive",
   width: 320,
   height: 240,
@@ -54,7 +55,7 @@ const JPEG_RANGE: SourceVideo = {
   codec: "h264",
   pixelFormat: "yuvj420p",
   depth: 8,
-  colour: "sdr",
+  colour: SDR_BT709,
 };
 
 const TONE_MAP_QSV = capabilityKey(ImplId("tonemap.qsv"), "pq");
@@ -618,7 +619,7 @@ describe.skipIf(!hasFfmpeg)("TranscodeCapabilities", () => {
           const tools = yield* MediaTools.Service;
           const warm = yield* capabilities.resolve(request(HDR));
           const pipeline = pipelineOf(HDR, warm);
-          const sdr: SourceVideo = { ...HDR, pixelFormat: "yuv420p", depth: 8, colour: "sdr" };
+          const sdr: SourceVideo = { ...HDR, pixelFormat: "yuv420p", depth: 8, colour: SDR_BT709 };
           const sdrPipeline = pipelineOf(sdr, yield* capabilities.resolve(request(sdr)));
           const identified = (yield* capabilities.inventory).devices.get("qsv");
 

@@ -301,11 +301,19 @@ export const TranscodeChange = Schema.Struct({
 export interface TranscodeChange extends Schema.Schema.Type<typeof TranscodeChange> {}
 
 /**
- * Where an HLS generation's video is made: its stages, none when the video is copied, and every
- * change of the chain up to that generation, oldest first. It carries no ffmpeg arguments, paths,
- * or log text: only codes and the implementation ids of the service's operation table.
+ * Where an HLS generation's video is made: what its source's colour is, its stages, none when the
+ * video is copied, and every change of the chain up to that generation, oldest first. It carries no
+ * ffmpeg arguments, paths, or log text: only codes and the implementation ids of the service's
+ * operation table.
  */
 export const TranscodeSummary = Schema.Struct({
+  /**
+   * What the source's colour is, as the service's table of source colours names it: `sdr`,
+   * `sdr-bt601`, `sdr-bt2020`, `sdr-full-range`, `hdr10`, `hdr10plus`, `hlg`, `dolby-vision-5`,
+   * `dolby-vision-7`, `dolby-vision-8.1`, `dolby-vision-8.2`, `dolby-vision-8.4`, or
+   * `dolby-vision-other`. A string, so a later kind changes no contract.
+   */
+  source: Schema.optionalKey(Schema.String),
   stages: Schema.Array(TranscodeStage),
   changes: Schema.Array(TranscodeChange),
 });
@@ -489,7 +497,11 @@ export const ClientConfigResponse = Schema.Struct({
 /** What an app needs to connect from this service's address. */
 export interface ClientConfigResponse extends Schema.Schema.Type<typeof ClientConfigResponse> {}
 
-/** Why no rung of the playback ladder fits the client. */
+/**
+ * Why no rung of the playback ladder fits the client. `dolby-vision-not-convertible`: the client
+ * does not play the file's Dolby Vision, and no conversion this server proved reads the stream's
+ * RPU, which its picture needs (profile 5, whose base layer is no other format).
+ */
 export const UnsupportedReason = Schema.Literals([
   "no-video-stream",
   "audio-track-not-found",
@@ -498,16 +510,30 @@ export const UnsupportedReason = Schema.Literals([
   "hdr-tone-mapping-requires-hardware",
   "unknown-duration",
   "subtitle-not-burnable",
+  "dolby-vision-not-convertible",
 ]);
 
 /** Why no rung of the playback ladder fits the client. */
 export type UnsupportedReason = typeof UnsupportedReason.Type;
 
+/** A refusal reason a newer media service gives, which this client's list lacks, kept as it came. */
+const NewerUnsupportedReason = Schema.String.pipe(Schema.brand("NewerUnsupportedReason"));
+
+/**
+ * A refusal reason as the wire carries it: one of `UnsupportedReason`'s codes, or a code a newer
+ * media service added, kept as it came, so a client still reads the refusal and shows it as it
+ * shows any other.
+ */
+export const UnsupportedReasonCode = Schema.Union([UnsupportedReason, NewerUnsupportedReason]);
+
+/** A refusal reason as the wire carries it. */
+export type UnsupportedReasonCode = typeof UnsupportedReasonCode.Type;
+
 /** The client cannot play this file in any mode the service offers. Do not retry. */
 export class UnsupportedPlayback extends Schema.TaggedError<
   UnsupportedPlayback,
   { readonly brand: unique symbol }
->()("UnsupportedPlayback", { reason: UnsupportedReason }, { httpApiStatus: 422 }) {
+>()("UnsupportedPlayback", { reason: UnsupportedReasonCode }, { httpApiStatus: 422 }) {
   override get message(): string {
     return `Unsupported playback: ${this.reason}`;
   }

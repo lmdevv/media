@@ -24,6 +24,7 @@ import {
   type ProbeOutcome,
 } from "./capability-inventory.ts";
 import { VideoPlan } from "./playback-decision.ts";
+import { kindOf } from "./source-colours.ts";
 import { Diagnosis } from "./transcode-recovery.ts";
 import { rowOf, type Step } from "./video-pipeline.ts";
 import { implOf, Op } from "./video-ops.ts";
@@ -102,14 +103,20 @@ const causeCode = (cause: string): string =>
   cause.replaceAll(/(?<=[a-z])(?=[A-Z])/gu, "-").toLowerCase();
 
 /**
- * The summary of generation `generation`, which runs `video`: its stages in order, moves included,
- * none for a copy, and the changes up to it, oldest first.
+ * The summary of generation `generation`, which runs `video` from `source`: the source's kind of
+ * colour, the stages in order, moves included, none for a copy, and the changes up to it, oldest
+ * first.
  */
 export const summaryOf = (
   video: VideoPlan,
   changes: ReadonlyArray<ChangeRecord>,
   generation: number,
+  source: VideoStream | undefined,
 ): TranscodeSummary => ({
+  ...Option.match(Option.fromUndefinedOr(source), {
+    onNone: () => ({}),
+    onSome: (stream) => ({ source: kindOf(stream) }),
+  }),
   stages: VideoPlan.$match(video, {
     Copy: () => [],
     Encode: ({ pipeline }) => pipeline.steps.map(stageOf),

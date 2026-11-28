@@ -75,8 +75,10 @@ ARG S6_OVERLAY_NOARCH_SHA256=42e038a9a00fc0fef70bf0bc42f625a9c14f8ecdfe77d4ad932
 ARG S6_OVERLAY_X86_64_SHA256=8bcbc2cada58426f976b159dcc4e06cbb1454d5f39252b3bb0c778ccf71c9435
 ARG S6_OVERLAY_AARCH64_SHA256=c8fd6b1f0380d399422fc986a1e6799f6a287e2cfa24813ad0b6a4fb4fa755cc
 # Debian's ffmpeg 7.1 is built with libvpl (oneVPL). On amd64 add Intel's iHD VA-API driver and the
-# oneVPL GPU runtime, which give Quick Sync on Gen12+ (Tiger Lake and newer) iGPUs, and Mesa's
-# VA-API drivers for AMD GPUs. xz-utils unpacks s6-overlay; curl is the health check. DejaVu
+# oneVPL GPU runtime, which give Quick Sync on Gen12+ (Tiger Lake and newer) iGPUs, Mesa's VA-API
+# drivers for AMD GPUs, and Mesa's Vulkan drivers, on which ffmpeg's libplacebo maps HDR and Dolby
+# Vision to SDR on Intel and AMD GPUs (without them it finds no device; it never uses the software
+# one they also carry). xz-utils unpacks s6-overlay; curl is the health check. DejaVu
 # (the Bitstream Vera licence, free to use and redistribute) is the font libass falls back to for
 # burned-in text subtitles, with its oblique and condensed faces (fonts-dejavu-extra, 6.7 MB) as
 # the NixOS module ships them, so an italic style draws in DejaVu Sans Oblique. Its cache is built
@@ -90,7 +92,7 @@ RUN set -eux; \
     apt-get update; \
     packages="ffmpeg ca-certificates curl xz-utils fontconfig fonts-dejavu-core fonts-dejavu-extra"; \
     if [ "${TARGETARCH:-amd64}" = amd64 ]; then \
-      packages="$packages intel-media-va-driver-non-free libmfx-gen1.2 libvpl2 mesa-va-drivers vainfo"; \
+      packages="$packages intel-media-va-driver-non-free libmfx-gen1.2 libvpl2 mesa-va-drivers mesa-vulkan-drivers vainfo"; \
     fi; \
     apt-get install -y --no-install-recommends $packages; \
     find /usr/share/fonts /usr/local/share/fonts -type d -exec touch -m -d "@$(date +%s)" {} +; \

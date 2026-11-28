@@ -196,6 +196,41 @@ export const FieldOrder = Schema.Literals(["progressive", "tff", "bff", "unknown
 /** How a video stream says its pictures are scanned. */
 export type FieldOrder = typeof FieldOrder.Type;
 
+/**
+ * A video stream's colour as ffprobe reads it from the container, the bitstream, and the first
+ * picture. `transfer`, `primaries`, and `matrix` are ffprobe's names (`smpte2084`, `bt2020`,
+ * `bt2020nc`), each absent when the stream states none. Mastering display luminances are in cd/m²;
+ * the content light levels are MaxCLL and MaxFALL in cd/m².
+ */
+export const VideoColour = Schema.Struct({
+  transfer: Schema.optionalKey(Schema.String),
+  primaries: Schema.optionalKey(Schema.String),
+  matrix: Schema.optionalKey(Schema.String),
+  range: Schema.optionalKey(Schema.Literals(["limited", "full"])),
+  chromaLocation: Schema.optionalKey(Schema.String),
+  mastering: Schema.optionalKey(
+    Schema.Struct({ minLuminance: Schema.Finite, maxLuminance: Schema.Finite }),
+  ),
+  contentLight: Schema.optionalKey(Schema.Struct({ maxCll: Schema.Int, maxFall: Schema.Int })),
+});
+
+/** A video stream's colour as ffprobe reads it. */
+export interface VideoColour extends Schema.Schema.Type<typeof VideoColour> {}
+
+/**
+ * A Dolby Vision stream's configuration record: its profile (5, 7, 8, ...), level, and the base
+ * layer's signal compatibility id, which says what a player without Dolby Vision gets from the base
+ * layer: 0 none (profile 5's IPT), 1 HDR10, 2 SDR, 4 HLG, 6 Blu-ray HDR10 (profile 7).
+ */
+export const DolbyVision = Schema.Struct({
+  profile: Schema.Int,
+  level: Schema.Int,
+  compatibility: Schema.Int,
+});
+
+/** A Dolby Vision stream's configuration record. */
+export interface DolbyVision extends Schema.Schema.Type<typeof DolbyVision> {}
+
 /** A video stream from ffprobe. */
 export const VideoStream = Schema.Struct({
   index: Schema.Int,
@@ -212,6 +247,10 @@ export const VideoStream = Schema.Struct({
   bitRate: Schema.NullOr(Schema.Int),
   /** Absent for a file last scanned before field orders were read. */
   fieldOrder: Schema.optionalKey(FieldOrder),
+  /** Absent for a file last scanned before colours were read. */
+  colour: Schema.optionalKey(VideoColour),
+  /** Present for a Dolby Vision stream scanned since its configuration was read. */
+  dolbyVision: Schema.optionalKey(DolbyVision),
 });
 
 /** A video stream. */

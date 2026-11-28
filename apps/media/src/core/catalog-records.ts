@@ -85,11 +85,20 @@ export const toCatalogProbe = (probe: MediaProbe): Probe => ({
             frameRate: probe.video.frameRate ?? null,
             bitDepth: probe.video.bitDepth,
             pixelFormat: probe.video.pixelFormat ?? null,
-            hdr: HDR_FORMATS[probe.video.dynamicRange],
+            hdr:
+              probe.video.hdr10Plus === true ? "hdr10plus" : HDR_FORMATS[probe.video.dynamicRange],
             bitRate: null,
             ...Option.match(present(probe.video.fieldOrder), {
               onNone: () => ({}),
               onSome: (fieldOrder) => ({ fieldOrder }),
+            }),
+            ...Option.match(present(probe.video.colour), {
+              onNone: () => ({}),
+              onSome: (colour) => ({ colour }),
+            }),
+            ...Option.match(present(probe.video.dolbyVision), {
+              onNone: () => ({}),
+              onSome: (dolbyVision) => ({ dolbyVision }),
             }),
           },
         ],
@@ -157,6 +166,9 @@ const toMediaProbe = (probe: Probe): MediaProbe => {
             frameRate: video.frameRate ?? undefined,
             dynamicRange: dynamicRangeOf(video.hdr),
             fieldOrder: video.fieldOrder,
+            colour: video.colour,
+            hdr10Plus: video.hdr === "hdr10plus" ? true : undefined,
+            dolbyVision: video.dolbyVision,
           },
     audio: probe.audio.map((track) => ({
       index: track.index,

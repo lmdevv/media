@@ -273,14 +273,14 @@ describe("output codec", () => {
     expect(everywhere(probe("mkv", hevc, [aac]), safari)).toStrictEqual(
       PlaybackPlan.Hls({
         mode: "remux",
-        video: VideoPlan.Copy(),
+        video: VideoPlan.Copy({ dolbyVision: "none" }),
         audio: AudioPlan.Copy({ index: 1 }),
       }),
     );
     expect(everywhere(probe("mkv", h264, [audio(1, "dts", 6, true)]), safari)).toStrictEqual(
       PlaybackPlan.Hls({
         mode: "audio-transcode",
-        video: VideoPlan.Copy(),
+        video: VideoPlan.Copy({ dolbyVision: "none" }),
         audio: AudioPlan.Aac({ index: 1 }),
       }),
     );
@@ -370,7 +370,7 @@ describe("decidePlayback", () => {
     expect(software(probe("mkv", h264, [aac]), chrome)).toStrictEqual(
       PlaybackPlan.Hls({
         mode: "remux",
-        video: VideoPlan.Copy(),
+        video: VideoPlan.Copy({ dolbyVision: "none" }),
         audio: AudioPlan.Copy({ index: 1 }),
       }),
     );
@@ -382,7 +382,7 @@ describe("decidePlayback", () => {
     expect(software(twoTracks, chrome, { audioIndex: 3 })).toStrictEqual(
       PlaybackPlan.Hls({
         mode: "remux",
-        video: VideoPlan.Copy(),
+        video: VideoPlan.Copy({ dolbyVision: "none" }),
         audio: AudioPlan.Copy({ index: 3 }),
       }),
     );
@@ -392,7 +392,7 @@ describe("decidePlayback", () => {
     expect(software(probe("mkv", h264, [eac3]), chrome)).toStrictEqual(
       PlaybackPlan.Hls({
         mode: "audio-transcode",
-        video: VideoPlan.Copy(),
+        video: VideoPlan.Copy({ dolbyVision: "none" }),
         audio: AudioPlan.Aac({ index: 2 }),
       }),
     );
@@ -407,14 +407,14 @@ describe("decidePlayback", () => {
     expect(everywhere(probe("mkv", interlaced, [aac]), chrome)).toStrictEqual(
       PlaybackPlan.Hls({
         mode: "remux",
-        video: VideoPlan.Copy(),
+        video: VideoPlan.Copy({ dolbyVision: "none" }),
         audio: AudioPlan.Copy({ index: 1 }),
       }),
     );
     expect(everywhere(probe("mkv", interlaced, [eac3]), chrome)).toStrictEqual(
       PlaybackPlan.Hls({
         mode: "audio-transcode",
-        video: VideoPlan.Copy(),
+        video: VideoPlan.Copy({ dolbyVision: "none" }),
         audio: AudioPlan.Aac({ index: 2 }),
       }),
     );
@@ -472,7 +472,7 @@ describe("decidePlayback", () => {
     expect(impls(plan)).toStrictEqual([
       "decode.qsv",
       "scale.qsv",
-      "tonemap.qsv",
+      "tonemap.qsv.placebo",
       "encode.qsv.h264",
     ]);
   });
@@ -538,7 +538,7 @@ describe("decidePlayback", () => {
       mode: "transcode-vaapi",
       video: { output: { width: 3840, height: 2160 } },
     });
-    expect(impls(onVaapi)).toContain("tonemap.vaapi");
+    expect(impls(onVaapi)).toContain("tonemap.vaapi.placebo");
 
     expect(cpuToneMap(probe("mkv", hevcHdr, [aac]), chrome)).toMatchObject({
       mode: "transcode-software",

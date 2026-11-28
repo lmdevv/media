@@ -33,6 +33,7 @@ import {
   sdrTarget,
   type SourceVideo,
 } from "./video-ops.ts";
+import { colourOf, DOLBY_VISION_IPT, HDR10, SDR_BT709 } from "../testing/colours.ts";
 
 const QSV: DomainBinding = { domain: "qsv", device: "/dev/dri/renderD128" };
 
@@ -42,7 +43,7 @@ const source = (overrides: Partial<SourceVideo> = {}): SourceVideo => ({
   codec: "h264",
   pixelFormat: "yuv420p",
   depth: 8,
-  colour: "sdr",
+  colour: SDR_BT709,
   scan: "progressive",
   width: 1920,
   height: 1080,
@@ -66,7 +67,7 @@ const subtitle = {
   frame: {
     memory: "cpu" as const,
     device: undefined,
-    colour: "sdr" as const,
+    colour: SDR_BT709,
     depth: 8,
     pixelFormat: "pal8",
     scan: "progressive" as const,
@@ -87,6 +88,10 @@ const everyKey = (
   intent: VideoIntent,
   domains: ReadonlyArray<DomainBinding>,
 ): ReadonlyArray<CapabilityKey> => [...candidateKeys(video, intent, snapshot(domains, [])).keys()];
+
+/** `keys` on a device whose Vulkan is not proven: without libplacebo's tone map. */
+const withoutPlacebo = (keys: ReadonlyArray<CapabilityKey>): ReadonlyArray<CapabilityKey> =>
+  keys.filter((key) => !implOf(key).endsWith(".placebo"));
 
 const row = (id: string): Row => {
   const found = rowOf(ImplId(id));
@@ -114,7 +119,7 @@ const planned = (
 const Source = Schema.Struct({
   codec: Schema.Literals(["h264", "hevc", "av1", "vp9", "mpeg2video", "mpeg4"]),
   layout: Schema.Literals(["yuv420p", "yuvj420p", "yuv420p10le", "yuv422p10le", "yuv420p12le"]),
-  colour: Schema.Literals(["sdr", "hdr10", "hlg", "dolby-vision"]),
+  colour: Schema.Literals(["sdr", "pq", "hlg", "dovi"]),
   scan: Schema.Literals(["progressive", "interlaced"]),
   width: Schema.Int.check(Schema.isBetween({ minimum: 64, maximum: 7680 })),
   height: Schema.Int.check(Schema.isBetween({ minimum: 64, maximum: 4320 })),
@@ -133,7 +138,7 @@ const sourceFrom = (generated: typeof Source.Type): SourceVideo =>
     codec: generated.codec,
     pixelFormat: generated.layout,
     depth: DEPTH_OF[generated.layout],
-    colour: generated.colour,
+    colour: colourOf(generated.colour),
     scan: generated.scan,
     width: generated.width,
     height: generated.height,
@@ -420,11 +425,11 @@ describe("planVideo", () => {
   });
 
   it("burns an image subtitle on the GPU after the tone map, the picture kept on the device", () => {
-    const video = source({ codec: "hevc", pixelFormat: "yuv420p10le", depth: 10, colour: "hdr10" });
+    const video = source({ codec: "hevc", pixelFormat: "yuv420p10le", depth: 10, colour: HDR10 });
     const intent = intentFor(video, { burn: Op.BurnImage({ subtitle }) });
 
     for (const domain of [QSV, VAAPI]) {
-      const keys = everyKey(video, intent, [domain]);
+      const keys = withoutPlacebo(everyKey(video, intent, [domain]));
       const on = domain.domain;
 
       assert.deepStrictEqual(impls(planned(video, intent, snapshot([domain], keys))), [
@@ -461,7 +466,7 @@ describe("planVideo", () => {
   });
 
   it("draws a text subtitle with libass on the CPU between GPU stages, after the tone map", () => {
-    const video = source({ codec: "hevc", pixelFormat: "yuv420p10le", depth: 10, colour: "hdr10" });
+    const video = source({ codec: "hevc", pixelFormat: "yuv420p10le", depth: 10, colour: HDR10 });
 
     const intent = intentFor(video, {
       burn: Op.BurnText({
@@ -470,7 +475,9 @@ describe("planVideo", () => {
     });
 
     assert.deepStrictEqual(
-      impls(planned(video, intent, snapshot([QSV], everyKey(video, intent, [QSV])))),
+      impls(
+        planned(video, intent, snapshot([QSV], withoutPlacebo(everyKey(video, intent, [QSV])))),
+      ),
       [
         "decode.qsv",
         "scale.qsv",
@@ -488,9 +495,9 @@ describe("planVideo", () => {
   });
 
   it("tone-maps on the CPU and keeps the encode on the GPU when the GPU tone map is out", () => {
-    const video = source({ codec: "hevc", pixelFormat: "yuv420p10le", depth: 10, colour: "hdr10" });
+    const video = source({ codec: "hevc", pixelFormat: "yuv420p10le", depth: 10, colour: HDR10 });
     const intent = intentFor(video);
-    const keys = everyKey(video, intent, [QSV]);
+    const keys = withoutPlacebo(everyKey(video, intent, [QSV]));
 
     assert.deepStrictEqual(
       impls(planned(video, intent, snapshot([QSV], keys, [ImplId("tonemap.qsv")]))),
@@ -498,8 +505,52 @@ describe("planVideo", () => {
     );
   });
 
+  it("prefers libplacebo's tone map on a GPU that proved it, the GPU's own and the CPU's after", () => {
+    const video = source({ codec: "hevc", pixelFormat: "yuv420p10le", depth: 10, colour: HDR10 });
+    const intent = intentFor(video);
+
+    for (const domain of [QSV, VAAPI]) {
+      const on = domain.domain;
+      const keys = everyKey(video, intent, [domain]);
+
+      const toneMap = (excluded: ReadonlyArray<string>) =>
+        impls(planned(video, intent, snapshot([domain], keys, excluded.map(ImplId)))).filter(
+          (impl) => impl.startsWith("tonemap."),
+        );
+
+      assert.deepStrictEqual(toneMap([]), [`tonemap.${on}.placebo`]);
+      assert.deepStrictEqual(toneMap([`tonemap.${on}.placebo`]), [`tonemap.${on}`]);
+      assert.deepStrictEqual(toneMap([`tonemap.${on}.placebo`, `tonemap.${on}`]), ["tonemap.cpu"]);
+    }
+  });
+
+  it("maps Dolby Vision's IPT only with libplacebo, which shares PQ's key", () => {
+    const video = source({
+      codec: "hevc",
+      pixelFormat: "yuv420p10le",
+      depth: 10,
+      colour: DOLBY_VISION_IPT,
+    });
+
+    const intent = intentFor(video);
+    const keys = everyKey(video, intent, [QSV]);
+    const steps = planned(video, intent, snapshot([QSV], keys)).steps;
+
+    assert.deepStrictEqual(
+      steps.filter((step) => Op.$is("ToneMap")(step.op)).map((step) => step.capability),
+      ["tonemap.qsv.placebo:pq"],
+    );
+    assert.isTrue(
+      Result.isFailure(planVideo(video, intent, snapshot([QSV], withoutPlacebo(keys)))),
+      "no other tone map takes IPT",
+    );
+    assert.isTrue(
+      Result.isFailure(planVideo(video, intent, snapshot([], everyKey(video, intent, [])))),
+    );
+  });
+
   it("tone-maps for an SDR target alone, so targets of different colour plan apart only there", () => {
-    const video = source({ codec: "hevc", pixelFormat: "yuv420p10le", depth: 10, colour: "hdr10" });
+    const video = source({ codec: "hevc", pixelFormat: "yuv420p10le", depth: 10, colour: HDR10 });
     const sdr = sdrTarget("hevc");
     const hdr: OutputTarget = { ...sdr, depth: 10, colour: "hdr10" };
     const keys = everyKey(video, intentFor(video, { targets: [sdr] }), []);
@@ -550,7 +601,7 @@ describe("planVideo", () => {
   });
 
   it("answers why when no chain is left", () => {
-    const video = source({ colour: "hdr10", depth: 10, pixelFormat: "yuv420p10le", codec: "hevc" });
+    const video = source({ colour: HDR10, depth: 10, pixelFormat: "yuv420p10le", codec: "hevc" });
     const intent = intentFor(video);
 
     const withoutToneMaps = everyKey(video, intent, []).filter(
@@ -973,7 +1024,7 @@ describe("probes", () => {
   });
 
   it("exist for every variant a chain on this table can need, except decoder layouts", () => {
-    const video = source({ codec: "hevc", pixelFormat: "yuv420p10le", depth: 10, colour: "hdr10" });
+    const video = source({ codec: "hevc", pixelFormat: "yuv420p10le", depth: 10, colour: HDR10 });
     const interlaced = source({ codec: "mpeg2video", scan: "interlaced" });
     const domains = [QSV, VAAPI];
 

@@ -93,7 +93,16 @@ interface Chain {
 const chainsOn = (domain: GpuDomain): ReadonlyArray<Chain> => [
   { name: `${domain}: H.264 on the GPU`, clip: "h264-8", domain },
   { name: `${domain}: HEVC Main 10 on the GPU`, clip: "hevc-10", domain },
-  { name: `${domain}: HDR10 tone-mapped on the GPU`, clip: "hevc-pq", domain },
+  // libplacebo where the build and the device prove it, which every verified row's run checks below.
+  { name: `${domain}: HDR10 tone-mapped`, clip: "hevc-pq", domain },
+  { name: `${domain}: HLG tone-mapped`, clip: "hevc-hlg", domain },
+  {
+    name: `${domain}: HDR10 tone-mapped by the GPU's own tone map`,
+    clip: "hevc-pq",
+    domain,
+    without: [`tonemap.${domain}.placebo`],
+    includes: [`tonemap.${domain}`],
+  },
   {
     name: `${domain}: 10-bit H.264 decoded on the CPU, scaled and encoded on the GPU`,
     clip: "h264-10",
@@ -105,7 +114,8 @@ const chainsOn = (domain: GpuDomain): ReadonlyArray<Chain> => [
     name: `${domain}: HDR10 tone-mapped on the CPU between GPU stages`,
     clip: "hevc-pq",
     domain,
-    without: [`tonemap.${domain}`],
+    without: [`tonemap.${domain}.placebo`, `tonemap.${domain}`],
+    includes: ["tonemap.cpu"],
   },
   {
     name: `${domain}: an image subtitle drawn on the GPU`,
@@ -420,6 +430,33 @@ describe.runIf(hasQsv || hasVaapi)("TranscodeCapabilities on this machine's GPU"
           ].map((key) => `${key} ${Inventory.capabilityOf(inventory, key).status}`);
 
           yield* Console.log(`subtitles: ${subtitles.join(", ")}`);
+
+          // Each tone map is a key per transfer. Dolby Vision 5 maps only with libplacebo, under
+          // its PQ key, so what this card and build do for it is that key's status, and the CPU
+          // refuses it.
+          const toneMaps = (["cpu", ...domains] as const).flatMap((domain) =>
+            [
+              ...(domain === "cpu" ? [] : [ImplId(`tonemap.${domain}.placebo`)]),
+              ImplId(`tonemap.${domain}`),
+            ].flatMap((impl) =>
+              ["pq", "hlg"].map((transfer) => {
+                const key = capabilityKey(impl, transfer);
+
+                return `${key} ${Inventory.capabilityOf(inventory, key).status}`;
+              }),
+            ),
+          );
+
+          yield* Console.log(`tone maps: ${toneMaps.join(", ")}`);
+
+          const dolbyVision5 = domains.map((domain) => {
+            const key = capabilityKey(ImplId(`tonemap.${domain}.placebo`), "pq");
+            const status = Inventory.capabilityOf(inventory, key).status;
+
+            return `${domain} ${status === "verified" ? "libplacebo" : `refused (${key} ${status})`}`;
+          });
+
+          yield* Console.log(`Dolby Vision 5: ${[...dolbyVision5, "cpu refused"].join(", ")}`);
         }),
       300_000,
     );

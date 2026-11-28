@@ -1,0 +1,757 @@
+{
+  "dolby-vision-5": {
+    "format": {
+      "format_name": "mov,mp4,m4a,3gp,3g2,mj2",
+      "duration": "108.389958",
+      "start_time": "10.000000",
+      "bit_rate": "3018020"
+    },
+    "streams": [
+      {
+        "index": 0,
+        "codec_type": "video",
+        "codec_name": "hevc",
+        "profile": "Main 10",
+        "level": 123,
+        "pix_fmt": "yuv420p10le",
+        "width": 1920,
+        "height": 1080,
+        "avg_frame_rate": "24000/1001",
+        "r_frame_rate": "24000/1001",
+        "color_range": "tv",
+        "chroma_location": "left",
+        "field_order": "progressive",
+        "side_data_list": [
+          {
+            "side_data_type": "DOVI configuration record",
+            "dv_profile": 5,
+            "dv_level": 3,
+            "dv_bl_signal_compatibility_id": 0,
+            "rpu_present_flag": 1,
+            "el_present_flag": 0,
+            "bl_present_flag": 1
+          }
+        ],
+        "disposition": {
+          "default": 1,
+          "forced": 0,
+          "hearing_impaired": 0,
+          "attached_pic": 0
+        },
+        "start_time": "10.000000",
+        "duration": "108.389958"
+      },
+      {
+        "index": 1,
+        "codec_type": "subtitle",
+        "codec_name": "eia_608",
+        "avg_frame_rate": "0/0",
+        "r_frame_rate": "0/0",
+        "disposition": {
+          "default": 1,
+          "forced": 0,
+          "hearing_impaired": 0,
+          "attached_pic": 0
+        },
+        "start_time": "10.000000",
+        "duration": "104.557000"
+      }
+    ],
+    "frames": [
+      {
+        "stream_index": 0,
+        "color_range": "tv",
+        "side_data_list": [
+          {
+            "side_data_type": "Dolby Vision RPU Data"
+          },
+          {
+            "side_data_type": "Dolby Vision Metadata"
+          }
+        ]
+      }
+    ]
+  },
+  "hdr10plus": {
+    "format": {
+      "format_name": "mov,mp4,m4a,3gp,3g2,mj2",
+      "duration": "108.473375",
+      "start_time": "10.000000",
+      "bit_rate": "2937368"
+    },
+    "streams": [
+      {
+        "index": 0,
+        "codec_type": "video",
+        "codec_name": "hevc",
+        "profile": "Main 10",
+        "level": 123,
+        "pix_fmt": "yuv420p10le",
+        "width": 1920,
+        "height": 1080,
+        "avg_frame_rate": "24000/1001",
+        "r_frame_rate": "24000/1001",
+        "color_range": "tv",
+        "color_space": "bt2020nc",
+        "color_transfer": "smpte2084",
+        "color_primaries": "bt2020",
+        "chroma_location": "topleft",
+        "disposition": {
+          "default": 1,
+          "forced": 0,
+          "hearing_impaired": 0,
+          "attached_pic": 0
+        },
+        "start_time": "10.041708",
+        "duration": "108.431667"
+      },
+      {
+        "index": 1,
+        "codec_type": "subtitle",
+        "codec_name": "eia_608",
+        "avg_frame_rate": "0/0",
+        "r_frame_rate": "0/0",
+        "disposition": {
+          "default": 1,
+          "forced": 0,
+          "hearing_impaired": 0,
+          "attached_pic": 0
+        },
+        "start_time": "10.000000",
+        "duration": "104.599000"
+      }
+    ],
+    "frames": [
+      {
+        "stream_index": 0,
+        "color_range": "tv",
+        "color_space": "bt2020nc",
+        "color_primaries": "bt2020",
+        "color_transfer": "smpte2084",
+        "side_data_list": [
+          {
+            "side_data_type": "Mastering display metadata",
+            "min_luminance": "50/10000",
+            "max_luminance": "10000000/10000"
+          },
+          {
+            "side_data_type": "Content light level metadata",
+            "max_content": 1375,
+            "max_average": 188
+          },
+          {
+            "side_data_type": "HDR Dynamic Metadata SMPTE2094-40 (HDR10+)"
+          }
+        ]
+      }
+    ]
+  },
+  "dolby-vision-8.4": {
+    "format": {
+      "format_name": "mov,mp4,m4a,3gp,3g2,mj2",
+      "duration": "3.333333",
+      "start_time": "0.000000",
+      "bit_rate": "8692181"
+    },
+    "streams": [
+      {
+        "index": 0,
+        "codec_type": "video",
+        "codec_name": "hevc",
+        "profile": "Main 10",
+        "level": 120,
+        "pix_fmt": "yuv420p10le",
+        "width": 1920,
+        "height": 1080,
+        "avg_frame_rate": "20000/667",
+        "r_frame_rate": "30000/1001",
+        "color_range": "tv",
+        "color_space": "bt2020nc",
+        "color_transfer": "arib-std-b67",
+        "color_primaries": "bt2020",
+        "chroma_location": "left",
+        "side_data_list": [
+          {
+            "side_data_type": "DOVI configuration record",
+            "dv_profile": 8,
+            "dv_level": 4,
+            "dv_bl_signal_compatibility_id": 4,
+            "rpu_present_flag": 1,
+            "el_present_flag": 0,
+            "bl_present_flag": 1
+          }
+        ],
+        "disposition": {
+          "default": 1,
+          "forced": 0,
+          "hearing_impaired": 0,
+          "attached_pic": 0
+        },
+        "start_time": "0.000000",
+        "duration": "3.333333"
+      },
+      {
+        "index": 1,
+        "codec_type": "audio",
+        "codec_name": "aac",
+        "profile": "LC",
+        "avg_frame_rate": "0/0",
+        "r_frame_rate": "0/0",
+        "disposition": {
+          "default": 1,
+          "forced": 0,
+          "hearing_impaired": 0,
+          "attached_pic": 0
+        },
+        "start_time": "0.000000",
+        "duration": "3.333333"
+      },
+      {
+        "index": 2,
+        "codec_type": "data",
+        "avg_frame_rate": "0/0",
+        "r_frame_rate": "0/0",
+        "disposition": {
+          "default": 1,
+          "forced": 0,
+          "hearing_impaired": 0,
+          "attached_pic": 0
+        },
+        "start_time": "0.000000",
+        "duration": "3.333333"
+      },
+      {
+        "index": 3,
+        "codec_type": "data",
+        "avg_frame_rate": "0/0",
+        "r_frame_rate": "0/0",
+        "disposition": {
+          "default": 1,
+          "forced": 0,
+          "hearing_impaired": 0,
+          "attached_pic": 0
+        },
+        "start_time": "0.000000",
+        "duration": "3.333333"
+      },
+      {
+        "index": 4,
+        "codec_type": "data",
+        "avg_frame_rate": "0/0",
+        "r_frame_rate": "0/0",
+        "disposition": {
+          "default": 1,
+          "forced": 0,
+          "hearing_impaired": 0,
+          "attached_pic": 0
+        },
+        "start_time": "0.000000",
+        "duration": "3.333333"
+      }
+    ],
+    "frames": [
+      {
+        "stream_index": 1
+      }
+    ]
+  },
+  "dolby-vision-8.1": {
+    "format": {
+      "format_name": "mov,mp4,m4a,3gp,3g2,mj2",
+      "duration": "0.416667",
+      "start_time": "0.000000",
+      "bit_rate": "75667"
+    },
+    "streams": [
+      {
+        "index": 0,
+        "codec_type": "video",
+        "codec_name": "hevc",
+        "profile": "Main 10",
+        "level": 120,
+        "pix_fmt": "yuv420p10le",
+        "width": 1920,
+        "height": 1080,
+        "avg_frame_rate": "24/1",
+        "r_frame_rate": "24/1",
+        "color_range": "tv",
+        "color_space": "bt2020nc",
+        "color_transfer": "smpte2084",
+        "color_primaries": "bt2020",
+        "chroma_location": "topleft",
+        "side_data_list": [
+          {
+            "side_data_type": "DOVI configuration record",
+            "dv_profile": 8,
+            "dv_level": 4,
+            "dv_bl_signal_compatibility_id": 1,
+            "rpu_present_flag": 1,
+            "el_present_flag": 0,
+            "bl_present_flag": 1
+          }
+        ],
+        "disposition": {
+          "default": 1,
+          "forced": 0,
+          "hearing_impaired": 0,
+          "attached_pic": 0
+        },
+        "start_time": "0.000000",
+        "duration": "0.416667"
+      }
+    ],
+    "frames": [
+      {
+        "stream_index": 0,
+        "color_range": "tv",
+        "color_space": "bt2020nc",
+        "color_primaries": "bt2020",
+        "color_transfer": "smpte2084",
+        "side_data_list": [
+          {
+            "side_data_type": "Mastering display metadata",
+            "min_luminance": "1/10000",
+            "max_luminance": "100000000/10000"
+          },
+          {
+            "side_data_type": "Content light level metadata",
+            "max_content": 1000,
+            "max_average": 400
+          },
+          {
+            "side_data_type": "Dolby Vision RPU Data"
+          },
+          {
+            "side_data_type": "Dolby Vision Metadata"
+          }
+        ]
+      }
+    ]
+  },
+  "dolby-vision-7": {
+    "format": {
+      "format_name": "mov,mp4,m4a,3gp,3g2,mj2",
+      "duration": "0.041000",
+      "start_time": "0.000000",
+      "bit_rate": "130366048"
+    },
+    "streams": [
+      {
+        "index": 0,
+        "codec_type": "video",
+        "codec_name": "hevc",
+        "profile": "Main 10",
+        "level": 153,
+        "pix_fmt": "yuv420p10le",
+        "width": 3840,
+        "height": 2160,
+        "avg_frame_rate": "1000/41",
+        "r_frame_rate": "1000/41",
+        "color_range": "tv",
+        "color_space": "bt2020nc",
+        "color_transfer": "smpte2084",
+        "color_primaries": "bt2020",
+        "chroma_location": "topleft",
+        "side_data_list": [
+          {
+            "side_data_type": "DOVI configuration record",
+            "dv_profile": 7,
+            "dv_level": 6,
+            "dv_bl_signal_compatibility_id": 6,
+            "rpu_present_flag": 1,
+            "el_present_flag": 1,
+            "bl_present_flag": 1
+          },
+          {
+            "side_data_type": "HEVC enhancement-layer decoder configuration"
+          }
+        ],
+        "disposition": {
+          "default": 1,
+          "forced": 0,
+          "hearing_impaired": 0,
+          "attached_pic": 0
+        },
+        "start_time": "0.000000",
+        "duration": "0.041000"
+      }
+    ],
+    "frames": [
+      {
+        "stream_index": 0,
+        "color_range": "tv",
+        "color_space": "bt2020nc",
+        "color_primaries": "bt2020",
+        "color_transfer": "smpte2084",
+        "side_data_list": [
+          {
+            "side_data_type": "Mastering display metadata",
+            "min_luminance": "1/10000",
+            "max_luminance": "10000000/10000"
+          },
+          {
+            "side_data_type": "Content light level metadata",
+            "max_content": 1000,
+            "max_average": 719
+          },
+          {
+            "side_data_type": "SMPTE 12-1 timecode"
+          },
+          {
+            "side_data_type": "Dolby Vision RPU Data"
+          },
+          {
+            "side_data_type": "Dolby Vision Metadata"
+          }
+        ]
+      }
+    ]
+  },
+  "hdr10": {
+    "format": {
+      "format_name": "matroska,webm",
+      "duration": "10.000000",
+      "start_time": "0.000000",
+      "bit_rate": "164328"
+    },
+    "streams": [
+      {
+        "index": 0,
+        "codec_type": "video",
+        "codec_name": "hevc",
+        "profile": "Main 10",
+        "level": 120,
+        "pix_fmt": "yuv420p10le",
+        "width": 1920,
+        "height": 1080,
+        "avg_frame_rate": "24/1",
+        "r_frame_rate": "24/1",
+        "color_range": "tv",
+        "color_space": "bt2020nc",
+        "color_transfer": "smpte2084",
+        "color_primaries": "bt2020",
+        "chroma_location": "left",
+        "field_order": "progressive",
+        "disposition": {
+          "default": 0,
+          "forced": 0,
+          "hearing_impaired": 0,
+          "attached_pic": 0
+        },
+        "start_time": "0.000000"
+      }
+    ],
+    "frames": [
+      {
+        "stream_index": 0,
+        "color_range": "tv",
+        "color_space": "bt2020nc",
+        "color_primaries": "bt2020",
+        "color_transfer": "smpte2084",
+        "side_data_list": [
+          {
+            "side_data_type": "H.26[45] User Data Unregistered SEI message"
+          },
+          {
+            "side_data_type": "H.26[45] User Data Unregistered SEI message"
+          },
+          {
+            "side_data_type": "Mastering display metadata",
+            "min_luminance": "50/10000",
+            "max_luminance": "10000000/10000"
+          },
+          {
+            "side_data_type": "Content light level metadata",
+            "max_content": 1000,
+            "max_average": 400
+          }
+        ]
+      }
+    ]
+  },
+  "hlg": {
+    "format": {
+      "format_name": "matroska,webm",
+      "duration": "10.000000",
+      "start_time": "0.000000",
+      "bit_rate": "251356"
+    },
+    "streams": [
+      {
+        "index": 0,
+        "codec_type": "video",
+        "codec_name": "hevc",
+        "profile": "Main 10",
+        "level": 120,
+        "pix_fmt": "yuv420p10le",
+        "width": 1920,
+        "height": 1080,
+        "avg_frame_rate": "24/1",
+        "r_frame_rate": "24/1",
+        "color_range": "tv",
+        "color_space": "bt2020nc",
+        "color_transfer": "arib-std-b67",
+        "color_primaries": "bt2020",
+        "chroma_location": "left",
+        "field_order": "progressive",
+        "disposition": {
+          "default": 0,
+          "forced": 0,
+          "hearing_impaired": 0,
+          "attached_pic": 0
+        },
+        "start_time": "0.000000"
+      }
+    ],
+    "frames": [
+      {
+        "stream_index": 0,
+        "color_range": "tv",
+        "color_space": "bt2020nc",
+        "color_primaries": "bt2020",
+        "color_transfer": "arib-std-b67",
+        "side_data_list": [
+          {
+            "side_data_type": "H.26[45] User Data Unregistered SEI message"
+          }
+        ]
+      }
+    ]
+  },
+  "sdr-bt601": {
+    "format": {
+      "format_name": "matroska,webm",
+      "duration": "10.000000",
+      "start_time": "0.000000",
+      "bit_rate": "10844212"
+    },
+    "streams": [
+      {
+        "index": 0,
+        "codec_type": "video",
+        "codec_name": "h264",
+        "profile": "Constrained Baseline",
+        "level": 40,
+        "pix_fmt": "yuv420p",
+        "bits_per_raw_sample": "8",
+        "width": 1920,
+        "height": 1080,
+        "avg_frame_rate": "24/1",
+        "r_frame_rate": "24/1",
+        "color_range": "tv",
+        "color_space": "smpte170m",
+        "color_transfer": "smpte170m",
+        "color_primaries": "smpte170m",
+        "chroma_location": "left",
+        "field_order": "progressive",
+        "disposition": {
+          "default": 0,
+          "forced": 0,
+          "hearing_impaired": 0,
+          "attached_pic": 0
+        },
+        "start_time": "0.000000"
+      }
+    ],
+    "frames": [
+      {
+        "stream_index": 0,
+        "color_range": "tv",
+        "color_space": "smpte170m",
+        "color_primaries": "smpte170m",
+        "color_transfer": "smpte170m",
+        "side_data_list": [
+          {
+            "side_data_type": "H.26[45] User Data Unregistered SEI message"
+          }
+        ]
+      }
+    ]
+  },
+  "sdr-bt2020": {
+    "format": {
+      "format_name": "matroska,webm",
+      "duration": "10.000000",
+      "start_time": "0.000000",
+      "bit_rate": "14737136"
+    },
+    "streams": [
+      {
+        "index": 0,
+        "codec_type": "video",
+        "codec_name": "hevc",
+        "profile": "Main 10",
+        "level": 120,
+        "pix_fmt": "yuv420p10le",
+        "width": 1920,
+        "height": 1080,
+        "avg_frame_rate": "24/1",
+        "r_frame_rate": "24/1",
+        "color_range": "tv",
+        "color_space": "bt2020nc",
+        "color_transfer": "bt2020-10",
+        "color_primaries": "bt2020",
+        "chroma_location": "left",
+        "field_order": "progressive",
+        "disposition": {
+          "default": 0,
+          "forced": 0,
+          "hearing_impaired": 0,
+          "attached_pic": 0
+        },
+        "start_time": "0.000000"
+      }
+    ],
+    "frames": [
+      {
+        "stream_index": 0,
+        "color_range": "tv",
+        "color_space": "bt2020nc",
+        "color_primaries": "bt2020",
+        "color_transfer": "bt2020-10",
+        "side_data_list": [
+          {
+            "side_data_type": "H.26[45] User Data Unregistered SEI message"
+          }
+        ]
+      }
+    ]
+  },
+  "sdr-full-range": {
+    "format": {
+      "format_name": "matroska,webm",
+      "duration": "10.000000",
+      "start_time": "0.000000",
+      "bit_rate": "11643776"
+    },
+    "streams": [
+      {
+        "index": 0,
+        "codec_type": "video",
+        "codec_name": "h264",
+        "profile": "Constrained Baseline",
+        "level": 40,
+        "pix_fmt": "yuvj420p",
+        "bits_per_raw_sample": "8",
+        "width": 1920,
+        "height": 1080,
+        "avg_frame_rate": "24/1",
+        "r_frame_rate": "24/1",
+        "color_range": "pc",
+        "color_space": "bt709",
+        "color_transfer": "bt709",
+        "color_primaries": "bt709",
+        "chroma_location": "left",
+        "field_order": "progressive",
+        "disposition": {
+          "default": 0,
+          "forced": 0,
+          "hearing_impaired": 0,
+          "attached_pic": 0
+        },
+        "start_time": "0.000000"
+      }
+    ],
+    "frames": [
+      {
+        "stream_index": 0,
+        "color_range": "pc",
+        "color_space": "bt709",
+        "color_primaries": "bt709",
+        "color_transfer": "bt709",
+        "side_data_list": [
+          {
+            "side_data_type": "H.26[45] User Data Unregistered SEI message"
+          }
+        ]
+      }
+    ]
+  },
+  "hdr10-matroska": {
+    "format": {
+      "format_name": "matroska,webm",
+      "duration": "0.400000",
+      "start_time": "0.000000",
+      "bit_rate": "356360"
+    },
+    "streams": [
+      {
+        "index": 0,
+        "codec_type": "video",
+        "codec_name": "hevc",
+        "profile": "Main 10",
+        "level": 93,
+        "pix_fmt": "yuv420p10le",
+        "width": 560,
+        "height": 320,
+        "avg_frame_rate": "25/1",
+        "r_frame_rate": "25/1",
+        "color_range": "tv",
+        "color_space": "bt2020nc",
+        "color_transfer": "smpte2084",
+        "color_primaries": "bt2020",
+        "chroma_location": "left",
+        "side_data_list": [
+          {
+            "side_data_type": "Content light level metadata",
+            "max_content": 1000,
+            "max_average": 300
+          },
+          {
+            "side_data_type": "Mastering display metadata",
+            "min_luminance": "5368709/536870912",
+            "max_luminance": "1000/1"
+          }
+        ],
+        "disposition": {
+          "default": 1,
+          "forced": 0,
+          "hearing_impaired": 0,
+          "attached_pic": 0
+        },
+        "start_time": "0.000000"
+      },
+      {
+        "index": 1,
+        "codec_type": "attachment",
+        "avg_frame_rate": "0/0",
+        "r_frame_rate": "0/0",
+        "disposition": {
+          "default": 0,
+          "forced": 0,
+          "hearing_impaired": 0,
+          "attached_pic": 0
+        },
+        "start_time": "0.000000",
+        "duration": "0.400000"
+      }
+    ],
+    "frames": [
+      {
+        "stream_index": 0,
+        "color_range": "tv",
+        "color_space": "bt2020nc",
+        "color_primaries": "bt2020",
+        "color_transfer": "smpte2084",
+        "side_data_list": [
+          {
+            "side_data_type": "3x3 displaymatrix"
+          },
+          {
+            "side_data_type": "H.26[45] User Data Unregistered SEI message"
+          },
+          {
+            "side_data_type": "Content light level metadata",
+            "max_content": 1000,
+            "max_average": 300
+          },
+          {
+            "side_data_type": "Mastering display metadata",
+            "min_luminance": "10/10000",
+            "max_luminance": "10000000/10000"
+          }
+        ]
+      }
+    ]
+  }
+}

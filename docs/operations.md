@@ -293,9 +293,12 @@ the internet. It speaks plain HTTP, and every browser and CLI that uses Lar must
 The media service runs each video stage (decode, deinterlace, scale, tone map, encode) on Intel
 Quick Sync (QSV) when the device proves it can, then on VA-API (Intel and AMD), and otherwise on the
 CPU. Quick Sync deinterlaces, scales, tone-maps, and encodes through ffmpeg's libvpl; it decodes through VA-API on
-the same device, and maps the decoded surfaces into Quick Sync's without a copy. It probes each
-stage at start, in the background, and replaces a stage that fails during a stream, first on the
-GPU without it and then in software.
+the same device, and maps the decoded surfaces into Quick Sync's without a copy. HDR and Dolby
+Vision are mapped to SDR with libplacebo on a Vulkan device of the same GPU where it works (Mesa's
+Vulkan driver: the image carries it; on NixOS `hardware.graphics` provides it), else with the GPU's
+own tone map, darker in the shadows; the CPU maps with zscale and refuses Dolby Vision 5, which only
+libplacebo reads. It probes each stage at start, in the background, and replaces a stage that fails
+during a stream, first on the GPU without it and then in software.
 
 - Compose: add `-f compose.qsv.yaml` (or `-f compose.vaapi.yaml` for VA-API) to pass `/dev/dri`
   through. The image carries Debian's ffmpeg 7.1 (built with libvpl), Intel's iHD VA-API driver,

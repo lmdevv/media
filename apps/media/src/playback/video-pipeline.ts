@@ -13,6 +13,7 @@ import { Data, Result } from "effect";
 import type { VideoStream } from "../media/media-probe.ts";
 import { fitLevel, statedLevel } from "./output-levels.ts";
 import { PROBE_CLIPS } from "./probe-clips.ts";
+import { sourceColour } from "./source-colours.ts";
 import { CPU_ROWS } from "./video-ops-cpu.ts";
 import { INTEL_ROWS, QSV, VAAPI } from "./video-ops-intel.ts";
 import {
@@ -24,6 +25,7 @@ import {
   type ClipName,
   type Domain,
   type DomainSpec,
+  dynamicRangeOf,
   type Frame,
   type GpuDomain,
   ImplId,
@@ -226,12 +228,15 @@ const scanOf = (video: VideoStream): Scan => {
     : "progressive";
 };
 
-/** The source of `video` as rows see it; the one mapping from ffprobe. */
+/**
+ * The source of `video` as rows see it; the one mapping from ffprobe. Its colour is what the table
+ * of source colours decides its decoded frames carry (`source-colours.ts`).
+ */
 export const sourceOf = (video: VideoStream): SourceVideo => ({
   codec: video.codec,
   pixelFormat: video.pixelFormat ?? (video.bitDepth > 8 ? "yuv420p10le" : "yuv420p"),
   depth: video.bitDepth,
-  colour: video.dynamicRange,
+  colour: sourceColour(video),
   scan: scanOf(video),
   width: video.width,
   height: video.height,
@@ -624,7 +629,7 @@ export const planVideo = (
       width: last.output.width,
       height: last.output.height,
       bitrate: last.op.bitrate,
-      dynamicRange: last.output.colour,
+      dynamicRange: dynamicRangeOf(last.output.colour),
     },
   });
 };
@@ -845,7 +850,7 @@ const COMMON_OUTPUT: OutputCodec = "h264";
 const common = (step: Step): boolean =>
   step.input.depth === 8 &&
   step.output.depth === 8 &&
-  step.output.colour === "sdr" &&
+  step.output.colour.signal === "sdr" &&
   Op.$match(step.op, {
     Decode: ({ codec }) => COMMON_CODECS.has(codec),
     Deinterlace: () => false,

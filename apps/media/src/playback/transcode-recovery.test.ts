@@ -21,12 +21,13 @@ import {
 } from "./video-pipeline.ts";
 import { ImplId, Op, type Row, sdrTarget, type SourceVideo } from "./video-ops.ts";
 import { renderVideo } from "./video-render.ts";
+import { HDR10, SDR_BT709 } from "../testing/colours.ts";
 
 const HDR: SourceVideo = {
   codec: "hevc",
   pixelFormat: "yuv420p10le",
   depth: 10,
-  colour: "hdr10",
+  colour: HDR10,
   scan: "progressive",
   width: 1920,
   height: 1080,
@@ -135,7 +136,7 @@ const VAAPI_H264_CHAIN = chain(
       "encode.vaapi.h264",
     ],
   ],
-  { ...HDR, codec: "h264", pixelFormat: "yuv420p", depth: 8, colour: "sdr" },
+  { ...HDR, codec: "h264", pixelFormat: "yuv420p", depth: 8, colour: SDR_BT709 },
 );
 
 /**
@@ -152,7 +153,7 @@ const UPLOAD_CHAIN = chain(
       "encode.vaapi.h264",
     ],
   ],
-  { ...HDR, colour: "sdr" },
+  { ...HDR, colour: SDR_BT709 },
 );
 
 const UPLOAD_OWNERS = ownersOf(UPLOAD_CHAIN);
@@ -274,7 +275,7 @@ describe("attribute", () => {
           "encode.qsv.h264",
         ],
       ],
-      { ...HDR, colour: "sdr" },
+      { ...HDR, colour: SDR_BT709 },
     );
 
     assert.deepStrictEqual(

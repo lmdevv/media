@@ -2281,7 +2281,12 @@ const make = Effect.gen(function* () {
       generation: generation.number,
       mode,
       video,
-      transcode: summaryOf(video, yield* Ref.get(session.changes), generation.number),
+      transcode: summaryOf(
+        video,
+        yield* Ref.get(session.changes),
+        generation.number,
+        file.probe.video,
+      ),
       segmentIndex,
     } satisfies StartedStream;
   });
@@ -2465,7 +2470,12 @@ const make = Effect.gen(function* () {
           plan: session.plan,
           mode: modeOf(covering.video, session.audio),
           video: deliveredVideo(covering.video, source),
-          transcode: summaryOf(covering.video, yield* Ref.get(session.changes), covering.number),
+          transcode: summaryOf(
+            covering.video,
+            yield* Ref.get(session.changes),
+            covering.number,
+            source,
+          ),
         } satisfies MovedStream;
       }),
     );

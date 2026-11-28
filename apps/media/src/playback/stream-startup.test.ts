@@ -268,7 +268,7 @@ describe.skipIf(!hasFfmpeg)("stream startup", () => {
               from: 0,
               videoIndex: 0,
               videoCodec: "h264",
-              video: VideoPlan.Copy(),
+              video: VideoPlan.Copy({ dolbyVision: "none" }),
               audio: AudioPlan.None(),
               audioCodec: "",
               copiedAudioEnd: undefined,

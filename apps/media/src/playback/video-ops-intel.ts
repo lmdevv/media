@@ -1,9 +1,10 @@
 /**
  * The rows of Intel's two GPU APIs, written for any Intel GPU and for AMD's VA-API: Quick Sync
  * (`qsv`, oneVPL derived from a VA-API device) and VA-API (`vaapi`). Each decodes, deinterlaces,
- * scales, tone-maps, draws an image subtitle, and encodes H.264, HEVC, and AV1 (a row per codec)
- * on the device, and moves frames to and from CPU memory in NV12 or P010. Which of these a device
- * does is evidence, never assumed: a row only says what it may try.
+ * scales, tone-maps (with libplacebo on Vulkan, or the GPU's own tone map), draws an image
+ * subtitle, and encodes H.264, HEVC, and AV1 (a row per codec) on the device, and moves frames to
+ * and from CPU memory in NV12 or P010. Which of these a device does is evidence, never assumed: a
+ * row only says what it may try.
  */
 import { type Level, levelOf } from "./output-levels.ts";
 import { DECODE_CLIPS, PROBE_CLIPS } from "./probe-clips.ts";
@@ -16,12 +17,13 @@ import {
   type Domain,
   type DomainSpec,
   encodeProbes,
+  type FilterCall,
+  type Frame,
   encodeRowId,
   encodesTarget,
   filter,
   fusing,
   type GpuDomain,
-  HDR_COLOURS,
   ImplId,
   NOTHING,
   Op,
@@ -32,14 +34,87 @@ import {
   type Rendering,
   row,
   type Row,
+  SDR_BT709,
+  STRIP_HDR_METADATA,
   surfaceDepth,
   surfaceFormat,
-  transferOf,
   visibleCanvas,
   type Size,
   statedCanvas,
   drawnCanvas,
+  TAG_SDR_BT709,
+  toneMapTransfer,
 } from "./video-ops.ts";
+
+/**
+ * libplacebo's tone map to SDR BT.709 in limited range, NV12, as the reference the table of source
+ * colours is judged against (`colour-patches.mjs` in verify-media): ITU-R BT.2390's EETF, with no
+ * peak detection or contrast recovery, so a picture maps the same in every segment and after every
+ * seek, and with libplacebo's perceptual gamut mapping. It applies a Dolby Vision RPU the frames
+ * carry (`apply_dolbyvision`, on by default), which is the only way either ffmpeg build reads
+ * profile 5's IPT-PQ-c2.
+ */
+const PLACEBO_SDR = filter(
+  "libplacebo",
+  ["format", "nv12"],
+  ["colorspace", "bt709"],
+  ["color_primaries", "bt709"],
+  ["color_trc", "bt709"],
+  ["range", "tv"],
+  ["tonemapping", "bt.2390"],
+  ["peak_detect", "0"],
+  ["contrast_recovery", "0"],
+);
+
+/**
+ * The transfer libplacebo maps from, what changes whether it works: PQ for HDR10's kin and for
+ * Dolby Vision's IPT-PQ-c2, whose RPU's reshaping is libplacebo's shader arithmetic, the same on
+ * every device, so the PQ probe proves it; HLG; none for SDR.
+ */
+const placeboTransfer = (frame: Frame): "pq" | "hlg" | undefined =>
+  frame.colour.signal === "dovi" ? "pq" : toneMapTransfer(frame);
+
+/**
+ * libplacebo's tone map (`PLACEBO_SDR`) for `domain`'s P010 PQ, HLG, and Dolby Vision surfaces: the
+ * frames are downloaded, libplacebo uploads them to a Vulkan device of its own, maps them, and
+ * hands them back, and they are uploaded to the domain's device as NV12 with `upload`, tagged SDR
+ * BT.709 (`TAG_SDR_BT709`) and without the source's HDR metadata (`STRIP_HDR_METADATA`). libplacebo
+ * takes no device from the run, whose filter device is the domain's, and makes its own on the
+ * first hardware Vulkan device it finds, never a software one; on the Arc A380, a Vulkan device
+ * derived from VA-API's could not import its surfaces (VK_ERROR_OUT_OF_DEVICE_MEMORY with a 256 MiB
+ * BAR), where this way mapped 10 s of 1080p Dolby Vision 5 in 2 s with under a core, on ffmpeg 7.1
+ * and 9. It comes before the GPU's own tone map in the table, so a chain that costs the same takes
+ * it while it is verified: Intel's tone map, Quick Sync's and VA-API's alike, maps the HDR10
+ * patches 100 cd/m² to luma 130 and 0.5 cd/m² to 3 where BT.2390 gives 174 and 16 (CIEDE2000 up to
+ * 18 in the mid-tones), the near-black the GPU paths crushed.
+ */
+const placeboOn = (domain: GpuDomain, upload: ReadonlyArray<FilterCall>): OpImpl<"ToneMap"> => ({
+  id: ImplId(`tonemap.${domain}.placebo`),
+  op: "ToneMap",
+  on: domain,
+  takes: domain,
+  needs: () => [
+    "filter:hwdownload",
+    "filter:libplacebo",
+    "filter:setparams",
+    "filter:sidedata",
+    "filter:hwupload",
+  ],
+  variant: (_, frame) => (frame.pixelFormat === "p010le" ? placeboTransfer(frame) : undefined),
+  output: (_, frame) => ({ ...frame, colour: SDR_BT709, depth: 8, pixelFormat: "nv12" }),
+  render: () => ({
+    ...NOTHING,
+    filters: [
+      filter("hwdownload"),
+      filter("format", "p010le"),
+      PLACEBO_SDR,
+      TAG_SDR_BT709,
+      ...STRIP_HDR_METADATA,
+      ...upload,
+    ],
+  }),
+  probes: toneMapProbes,
+});
 
 /** Codecs Intel media engines may decode; each codec and layout is still proven per device. */
 const DECODED_CODECS: ReadonlySet<string> = new Set(["h264", "hevc", "av1", "vp9", "mpeg2video"]);
@@ -264,10 +339,11 @@ const scaleQsv: OpImpl<"Scale"> = {
 };
 
 /**
- * `vpp_qsv`'s tone map from P010 HDR surfaces to BT.709 SDR in NV12. `vpp_qsv` leaves the source's
- * colour on the frames under Debian's ffmpeg 7.1 and its mastering display and content light
- * levels under 7.1 and 9, which every encoder then writes into the stream, so an SDR stream would
- * say PQ and BT.2020: the row tags its frames BT.709 (`setparams`) and drops that metadata.
+ * `vpp_qsv`'s tone map from P010 PQ and HLG surfaces to BT.709 SDR in NV12. `vpp_qsv` leaves the
+ * source's colour on the frames under Debian's ffmpeg 7.1 and its HDR metadata under 7.1 and 9,
+ * which encoders then write into the stream, so an SDR stream would say PQ and BT.2020: the row
+ * tags its frames SDR BT.709 in limited range (`TAG_SDR_BT709`) and drops that metadata
+ * (`STRIP_HDR_METADATA`).
  */
 const toneMapQsv: OpImpl<"ToneMap"> = {
   id: ImplId("tonemap.qsv"),
@@ -275,11 +351,8 @@ const toneMapQsv: OpImpl<"ToneMap"> = {
   on: "qsv",
   takes: "qsv",
   needs: () => ["filter:vpp_qsv", "filter:setparams", "filter:sidedata"],
-  variant: (_, frame) =>
-    HDR_COLOURS.has(frame.colour) && frame.pixelFormat === "p010le"
-      ? transferOf(frame.colour)
-      : undefined,
-  output: (_, frame) => ({ ...frame, colour: "sdr", depth: 8, pixelFormat: "nv12" }),
+  variant: (_, frame) => (frame.pixelFormat === "p010le" ? toneMapTransfer(frame) : undefined),
+  output: (_, frame) => ({ ...frame, colour: SDR_BT709, depth: 8, pixelFormat: "nv12" }),
   render: () => ({
     ...NOTHING,
     filters: [
@@ -291,14 +364,8 @@ const toneMapQsv: OpImpl<"ToneMap"> = {
         ["out_color_primaries", "bt709"],
         ["out_color_transfer", "bt709"],
       ),
-      filter(
-        "setparams",
-        ["color_primaries", "bt709"],
-        ["color_trc", "bt709"],
-        ["colorspace", "bt709"],
-      ),
-      filter("sidedata", ["mode", "delete"], ["type", "MASTERING_DISPLAY_METADATA"]),
-      filter("sidedata", ["mode", "delete"], ["type", "CONTENT_LIGHT_LEVEL"]),
+      TAG_SDR_BT709,
+      ...STRIP_HDR_METADATA,
     ],
   }),
   probes: toneMapProbes,
@@ -413,7 +480,9 @@ const burnImageOn = (
       ? [`filter:${overlay}`, "filter:hwupload", "filter:setparams"]
       : [`filter:${overlay}`, "filter:hwupload"],
   variant: (op, frame) =>
-    frame.colour === "sdr" && frame.pixelFormat === "nv12" && op.subtitle.frame.memory === "cpu"
+    frame.colour.signal === "sdr" &&
+    frame.pixelFormat === "nv12" &&
+    op.subtitle.frame.memory === "cpu"
       ? "bitmap/nv12"
       : undefined,
   output: (_, frame) => frame,
@@ -471,7 +540,7 @@ const encodeOn = (
   needs: () => [`encoder:${encoder.name}`],
   variant: (op, frame) =>
     encodesTarget(codec, op.target) &&
-    frame.colour === "sdr" &&
+    frame.colour.signal === "sdr" &&
     frame.scan === "progressive" &&
     frame.pixelFormat === "nv12"
       ? `${String(op.target.depth)}/cbr`
@@ -596,33 +665,27 @@ const scaleVaapi: OpImpl<"Scale"> = {
 };
 
 /**
- * `tonemap_vaapi` from P010 HDR surfaces to BT.709 SDR in NV12; it needs the stream's mastering
- * display metadata. The row tags the frames BT.709 limited range (`setparams`), which they already
- * say: without it, under Debian's ffmpeg 7.1, libass after the download drew ASS orange at Y 148
- * and red at 74, BT.601's values, where the CPU and Quick Sync paths draw BT.709's 141 and 63.
+ * `tonemap_vaapi` from P010 PQ and HLG surfaces to BT.709 SDR in NV12; it needs the stream's
+ * mastering display metadata. The row tags the frames BT.709 limited range (`TAG_SDR_BT709`), which
+ * they already say: without it, under Debian's ffmpeg 7.1, libass after the download drew ASS
+ * orange at Y 148 and red at 74, BT.601's values, where the CPU and Quick Sync paths draw BT.709's
+ * 141 and 63. It keeps the source's HDR metadata on its frames, which encoders write into the
+ * stream: the row drops it (`STRIP_HDR_METADATA`).
  */
 const toneMapVaapi: OpImpl<"ToneMap"> = {
   id: ImplId("tonemap.vaapi"),
   op: "ToneMap",
   on: "vaapi",
   takes: "vaapi",
-  needs: () => ["filter:tonemap_vaapi", "filter:setparams"],
-  variant: (_, frame) =>
-    HDR_COLOURS.has(frame.colour) && frame.pixelFormat === "p010le"
-      ? transferOf(frame.colour)
-      : undefined,
-  output: (_, frame) => ({ ...frame, colour: "sdr", depth: 8, pixelFormat: "nv12" }),
+  needs: () => ["filter:tonemap_vaapi", "filter:setparams", "filter:sidedata"],
+  variant: (_, frame) => (frame.pixelFormat === "p010le" ? toneMapTransfer(frame) : undefined),
+  output: (_, frame) => ({ ...frame, colour: SDR_BT709, depth: 8, pixelFormat: "nv12" }),
   render: () => ({
     ...NOTHING,
     filters: [
       filter("tonemap_vaapi", ["format", "nv12"], ["p", "bt709"], ["t", "bt709"], ["m", "bt709"]),
-      filter(
-        "setparams",
-        ["color_primaries", "bt709"],
-        ["color_trc", "bt709"],
-        ["colorspace", "bt709"],
-        ["range", "tv"],
-      ),
+      TAG_SDR_BT709,
+      ...STRIP_HDR_METADATA,
     ],
   }),
   probes: toneMapProbes,
@@ -653,6 +716,7 @@ export const INTEL_ROWS: ReadonlyArray<Row> = [
   row(decodeQsv),
   row(deinterlaceQsv),
   row(scaleQsv),
+  row(placeboOn("qsv", [filter("hwupload", ["extra_hw_frames", "64"]), filter("format", "qsv")])),
   row(toneMapQsv),
   row(burnImageOn("qsv", "overlay_qsv")),
   ...encodeQsv,
@@ -661,6 +725,7 @@ export const INTEL_ROWS: ReadonlyArray<Row> = [
   row(decodeVaapi),
   row(deinterlaceVaapi),
   row(scaleVaapi),
+  row(placeboOn("vaapi", [filter("hwupload")])),
   row(toneMapVaapi),
   row(burnImageOn("vaapi", "overlay_vaapi")),
   ...encodeVaapi,

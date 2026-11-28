@@ -40,6 +40,7 @@ import * as MediaTestServer from "../testing/media-test-server.ts";
 import { signTestToken } from "../testing/test-tokens.ts";
 import { RELEASE } from "../release.ts";
 import { capabilityOf } from "./capability-inventory.ts";
+import { SOURCE_KINDS } from "./source-colours.ts";
 import * as TranscodeCapabilities from "./transcode-capabilities.ts";
 import { VIDEO_OPS } from "./video-pipeline.ts";
 import { capabilityKey, ImplId } from "./video-ops.ts";
@@ -166,6 +167,7 @@ const among =
 
 /** The text a field of a summary, a failure, or a report may hold, by its path in the answer. */
 const FIELDS = new Map<string, (text: string) => boolean>([
+  ["transcode.source", among(SOURCE_KINDS)],
   ["transcode.stages.op", among(OPS)],
   ["transcode.stages.domain", among(DOMAIN_NAMES)],
   ["transcode.stages.impl", among(IMPLS)],

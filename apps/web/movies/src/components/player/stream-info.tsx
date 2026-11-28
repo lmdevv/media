@@ -10,7 +10,7 @@ import type { LiveValue } from "@media/ui/lib/live-value";
 import { cn } from "@media/ui/lib/utils";
 import { XIcon } from "lucide-react";
 
-const { channelLabel, codecLabel } = MediaLabels;
+const { channelLabel, codecLabel, dolbyVisionProfile } = MediaLabels;
 
 const { reasonLabel, stageLabel } = TranscodeLabels;
 
@@ -111,7 +111,9 @@ const streamInfoRows = (
       : [
           `${codecLabel(source.codec)}${(source.bitDepth ?? 8) > 8 ? ` ${String(source.bitDepth)}-bit` : ""}`,
           sizeLabel(source.width, source.height),
-          HDR_LABELS[source.hdr],
+          source.dolbyVision === undefined
+            ? HDR_LABELS[source.hdr]
+            : `Dolby Vision ${dolbyVisionProfile(source.dolbyVision)}`,
         ].join(" · ");
 
   const outputVideo = [

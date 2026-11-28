@@ -96,13 +96,7 @@ Old movies' Convex project, its SDK client, and its command registry were delete
   proven ones: a 10-bit H.264 source the Arc A380 cannot decode decodes on the CPU and still scales
   and encodes on the GPU. A run that fails is diagnosed: a stage whose probe fails again is set
   aside for a while (15 minutes, then 2 hours, then until a restart), and the stream replans without
-  it, then in software, then answers `TranscodeFailed`. HDR is tone-mapped to SDR on the GPU
-  (`vpp_qsv`, `tonemap_vaapi`) or in software with `zscale` and `tonemap` when the ffmpeg build has
-  them; without either, HDR that the client cannot display is refused. `vpp_qsv` leaves the
-  source's PQ and BT.2020 on its frames under Debian's ffmpeg 7.1, and its mastering display and
-  content light levels under 7.1 and 9, so Quick Sync's tone map tags its frames BT.709
-  (`setparams`) and drops that metadata (`sidedata`): every encoder would write it, and Apple's
-  players would read the SDR stream as HDR. Quick Sync's filters (`vpp_qsv`, and `deinterlace_qsv`
+  it, then in software, then answers `TranscodeFailed`. Quick Sync's filters (`vpp_qsv`, and `deinterlace_qsv`
   and `overlay_qsv` on the same `qsvvpp` code) hand on each frame's duration in the input's time
   base under ffmpeg 7.1.x (FFmpeg 578ac59887; 7.0.x and 8.0 do not), and ffmpeg's constant-rate
   output repeats a frame for every tick of it: a 24 fps MP4 holds its first picture 21 s, a
@@ -111,6 +105,29 @@ Old movies' Convex project, its SDK client, and its command registry were delete
   (`fps=source_fps`, the rate reaching it), which every such step then needs from the build. It
   runs on every build: on ffmpeg 9 a constant-rate source's encode is byte for byte the same with
   it, and a variable-rate file ends at its last frame's end, as on the CPU, not a frame short.
+- HDR and Dolby Vision (ADS-391): the probe reads each video stream's colour, as data: transfer,
+  primaries, matrix, range, chroma siting, HDR10's mastering display and content light levels
+  (from the container and the first picture, where HEVC in MP4 keeps them), HDR10+, and a Dolby
+  Vision configuration (profile, level, and the base layer's compatibility id). `DynamicRange`
+  stays the summary the wire and clients use. One table (`source-colours.ts`, printed by its test)
+  decides per kind: SDR BT.709, BT.601, BT.2020, and full range are carried as they are; HDR10 and
+  HDR10+ are PQ; HLG is HLG; Dolby Vision 7 and 8.1 are their HDR10 base layer, 8.4 its HLG one,
+  8.2 its SDR one; Dolby Vision 5, and any profile whose base layer is no other format, is IPT-PQ
+  that only the RPU makes colour, so only libplacebo maps it, and without a proven libplacebo it
+  is refused (`dolby-vision-not-convertible`, decoded leniently, as every refusal reason now is).
+  Copies follow the shared direct-play check (`playableAs`): a client that declares Dolby Vision
+  gets profiles 5 and 8 with their configuration kept (`-strict unofficial`; `dvh1` for profile 5),
+  which ffmpeg's MP4 muxer otherwise drops, so profile 5 reached iPhones as plain BT.709 HEVC;
+  profile 7 is copied as its HDR10 base layer alone, since AVFoundation cannot decode it with its
+  configuration; one that declares what a base layer is gets that. Every tone map's frames leave
+  SDR BT.709 in limited range without HDR metadata (mastering display, content light levels,
+  HDR10+, Dolby Vision RPU), which encoders would otherwise write. Judged against libplacebo's
+  BT.2390 on colour patches, the CPU's `zscale` and Hable lie within 6.5 (CIEDE2000), and Intel's
+  own tone map, Quick Sync's and VA-API's alike, crushes shadows and mid-tones (0.5 cd/m² at luma 3
+  where 16 is right, 100 cd/m² at 130 where 174 is) and cannot be set otherwise; so Quick Sync's
+  and VA-API's paths map with libplacebo, on a Vulkan device of the same GPU (the frames
+  downloaded and uploaded around it), where it is proven, and with their own tone map otherwise.
+  The image carries Mesa's Vulkan drivers for it; libplacebo never uses their software device.
 - Output codec: direct play, remuxes, and audio-only conversions come first, as always; only
   video that must be encoded gets a codec. The decision lists what the client plays, most wanted
   first: HEVC; AV1 when the client reports decoding it power-efficiently (in hardware) or plays

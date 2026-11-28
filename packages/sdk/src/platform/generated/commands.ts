@@ -3722,6 +3722,30 @@ const movies_play_start = mutation({
                 Schema.Literal("unknown"),
               ]),
             ),
+            colour: Schema.optionalKey(
+              Schema.Struct({
+                transfer: Schema.optionalKey(Schema.String),
+                primaries: Schema.optionalKey(Schema.String),
+                matrix: Schema.optionalKey(Schema.String),
+                range: Schema.optionalKey(
+                  Schema.Union([Schema.Literal("limited"), Schema.Literal("full")]),
+                ),
+                chromaLocation: Schema.optionalKey(Schema.String),
+                mastering: Schema.optionalKey(
+                  Schema.Struct({ minLuminance: Schema.Finite, maxLuminance: Schema.Finite }),
+                ),
+                contentLight: Schema.optionalKey(
+                  Schema.Struct({ maxCll: Schema.Finite, maxFall: Schema.Finite }),
+                ),
+              }),
+            ),
+            dolbyVision: Schema.optionalKey(
+              Schema.Struct({
+                profile: Schema.Finite,
+                level: Schema.Finite,
+                compatibility: Schema.Finite,
+              }),
+            ),
           }),
         ),
         audio: Schema.Array(
@@ -4227,6 +4251,30 @@ const movies_titles_get = query({
                   Schema.Literal("bff"),
                   Schema.Literal("unknown"),
                 ]),
+              ),
+              colour: Schema.optionalKey(
+                Schema.Struct({
+                  transfer: Schema.optionalKey(Schema.String),
+                  primaries: Schema.optionalKey(Schema.String),
+                  matrix: Schema.optionalKey(Schema.String),
+                  range: Schema.optionalKey(
+                    Schema.Union([Schema.Literal("limited"), Schema.Literal("full")]),
+                  ),
+                  chromaLocation: Schema.optionalKey(Schema.String),
+                  mastering: Schema.optionalKey(
+                    Schema.Struct({ minLuminance: Schema.Finite, maxLuminance: Schema.Finite }),
+                  ),
+                  contentLight: Schema.optionalKey(
+                    Schema.Struct({ maxCll: Schema.Finite, maxFall: Schema.Finite }),
+                  ),
+                }),
+              ),
+              dolbyVision: Schema.optionalKey(
+                Schema.Struct({
+                  profile: Schema.Finite,
+                  level: Schema.Finite,
+                  compatibility: Schema.Finite,
+                }),
               ),
             }),
           ),
