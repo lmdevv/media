@@ -452,6 +452,20 @@ describe("lyricsQuestions", () => {
     ]);
   });
 
+  it("leaves out a song resting after a pending or failed lookup", () => {
+    const resting = TrackId.make("resting");
+    const due = TrackId.make("due");
+
+    expect(
+      lyricsQuestions(
+        desiredOf([album], [manifest(album, [entry(resting, "r1"), entry(due, "r1")])]),
+        vaultOf([], [], [storedLyrics(resting, PENDING_LYRICS)]),
+        listedAt([resting, due], "s1"),
+        new Set([resting]),
+      ).map((question) => question.held),
+    ).toEqual([[{ trackId: due, rev: "s1" }]]);
+  });
+
   it("asks nothing at launch when every kept song's lyrics are current, however many", () => {
     const ids = songs(500);
 

@@ -323,20 +323,20 @@ const decodeLyrics = Schema.decodeUnknownOption(OfflineLyrics);
 /** Lyrics lookups a watcher sends at once. */
 const LYRICS_BATCH = 50;
 
-/** How soon a song whose lookup failed or is still pending on the server is asked again. */
-const LYRICS_RETRY_MS = 60_000;
-
 interface LyricsAnswer {
+  readonly song: HeldLyrics;
   readonly change: LyricsChange | null;
   /** Whether the answer is final: not a failure, and not a lookup the server still runs. */
   readonly settled: boolean;
 }
 
 /**
- * Brings the lyrics of the kept songs in `held` up to the server's revision, which each answer is
- * kept at: one asked at a revision the server has since left stays behind it, so it is asked
- * again. Lyrics from a lookup still pending are kept at `PENDING_LYRICS`. A song whose lookup
- * failed or is pending is asked again a minute later, not each time its batch changes.
+ * Asks the server for the lyrics of the kept songs in `held`, which the sync hands out only while
+ * the transfer gate lets its own work run (`DownloadsSnapshot.lyricsQuestions`), and offers the
+ * answers back. Each answer is kept at the revision it was asked at: one asked at a revision the
+ * server has since left stays behind it, so it is asked again. Lyrics from a lookup still pending
+ * are kept at `PENDING_LYRICS`; the sync asks again about a song whose lookup was pending or
+ * failed a minute later.
  */
 function LyricsWatcher({
   sync,
@@ -346,31 +346,26 @@ function LyricsWatcher({
   readonly held: ReadonlyArray<HeldLyrics>;
 }) {
   const platform = usePlatform();
-  const asked = useRef(new Map<TrackId, LyricsRevision>());
-  const [round, setRound] = useState(0);
 
   useEffect(() => {
-    const due = held.filter((song) => asked.current.get(song.trackId) !== song.rev);
-
-    if (due.length === 0) return undefined;
     const stop = new AbortController();
-    let timer: ReturnType<typeof setTimeout> | undefined;
 
-    const lookUp = async ({ trackId, rev }: HeldLyrics): Promise<LyricsAnswer> => {
+    const lookUp = async (song: HeldLyrics): Promise<LyricsAnswer> => {
       try {
-        const lyrics = await platform.music.lyrics.get({ trackId });
+        const lyrics = await platform.music.lyrics.get({ trackId: song.trackId });
         const settled = lyrics.status !== "pending";
 
         return {
+          song,
           change: LyricsChange.cases.Changed.make({
-            trackId,
-            rev: settled ? rev : PENDING_LYRICS,
+            trackId: song.trackId,
+            rev: settled ? song.rev : PENDING_LYRICS,
             lyrics: offlineLyricsOf(lyrics),
           }),
           settled,
         };
       } catch {
-        return { change: null, settled: false };
+        return { song, change: null, settled: false };
       }
     };
 
@@ -385,31 +380,21 @@ function LyricsWatcher({
     };
 
     const look = async (): Promise<void> => {
-      const answers = await lookAll(due, []);
+      const answers = await lookAll(held, []);
 
       if (stop.signal.aborted) return;
-      const unsettled = due.filter((_, index) => answers[index]?.settled !== true);
-
-      for (const song of due) asked.current.set(song.trackId, song.rev);
       sync.offerLyrics(
         answers.flatMap((answer) => (answer.change === null ? [] : [answer.change])),
+        answers.flatMap((answer) => (answer.settled ? [] : [answer.song])),
       );
-
-      if (unsettled.length > 0) {
-        timer = setTimeout(() => {
-          for (const song of unsettled) asked.current.delete(song.trackId);
-          setRound((count) => count + 1);
-        }, LYRICS_RETRY_MS);
-      }
     };
 
     void look();
 
     return () => {
       stop.abort();
-      clearTimeout(timer);
     };
-  }, [platform, sync, held, round]);
+  }, [platform, sync, held]);
 
   return null;
 }

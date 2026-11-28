@@ -27,6 +27,7 @@ import {
 } from "./plan";
 import type {
   Desired,
+  HeldLyrics,
   ListedLyrics,
   LyricsQuestion,
   NewLyrics,
@@ -53,6 +54,9 @@ const MAX_RETRY_MS = 10 * 60_000;
 const VAULT_RETRY_MS = 30_000;
 
 const LYRICS_CACHE_SIZE = 4;
+
+/** How soon a song whose lyrics lookup was pending on the server, or failed, is asked again. */
+export const LYRICS_RETRY_MS = 60_000;
 
 /** A song this device can play from its own storage. */
 export interface LocalCopy {
@@ -109,8 +113,11 @@ export interface DownloadsSnapshot {
   readonly usage: DownloadUsage;
   /**
    * The kept songs whose lyrics here are behind the server's, one batch per question; hand the
-   * lyrics found to `offerLyrics`. Recomputed once a plan has applied what it could, and the same
-   * array until a question changes.
+   * lyrics found to `offerLyrics`. A lyrics lookup is work the sync starts on its own, so there are
+   * none while the server is out of reach or `transferGate` holds the sync's work (Wi-Fi only on a
+   * metered network, Low Power Mode), and none for a song whose lookup was pending or failed less
+   * than `LYRICS_RETRY_MS` ago at the same revision. Recomputed once a plan has applied what it
+   * could, and the same array, of the same question objects, until a question changes.
    */
   readonly lyricsQuestions: ReadonlyArray<LyricsQuestion>;
 }
@@ -255,6 +262,15 @@ export class DownloadSync {
   readonly #releasing = new Set<TrackId>();
   readonly #manifests = new Map<DownloadPinId, DownloadManifest>();
   readonly #lyrics = new Map<TrackId, LyricsChange>();
+  /**
+   * Songs whose lyrics lookup was pending or failed: the revision it asked at, and when to ask
+   * again. One the server has moved to another revision since is asked at once.
+   */
+  readonly #lyricsRetries = new Map<
+    TrackId,
+    { readonly rev: LyricsRevision; readonly at: number }
+  >();
+  #lyricsWake: ReturnType<typeof setTimeout> | null = null;
   #questions: ReadonlyArray<LyricsQuestion> = [];
   readonly #readLyrics = new Map<
     TrackId,
@@ -348,8 +364,18 @@ export class DownloadSync {
     this.#plan();
   }
 
-  offerLyrics(changes: ReadonlyArray<LyricsChange>): void {
-    if (changes.length === 0) return;
+  /**
+   * Lyrics found for `lyricsQuestions`, and the songs asked whose lookup was pending or failed,
+   * which are asked again `LYRICS_RETRY_MS` later unless their revision moves first.
+   */
+  offerLyrics(
+    changes: ReadonlyArray<LyricsChange>,
+    unsettled: ReadonlyArray<HeldLyrics> = [],
+  ): void {
+    if (changes.length === 0 && unsettled.length === 0) return;
+    const at = this.#options.now() + LYRICS_RETRY_MS;
+
+    for (const { trackId, rev } of unsettled) this.#lyricsRetries.set(trackId, { rev, at });
 
     for (const change of changes) this.#lyrics.set(change.trackId, change);
     this.#plan();
@@ -639,6 +665,9 @@ export class DownloadSync {
 
     if (this.#wake !== null) clearTimeout(this.#wake);
     this.#wake = null;
+
+    if (this.#lyricsWake !== null) clearTimeout(this.#lyricsWake);
+    this.#lyricsWake = null;
   }
 
   #plan(): void {
@@ -730,11 +759,26 @@ export class DownloadSync {
   }
 
   #askAgain(): void {
-    const questions = lyricsQuestions(
-      this.#desired(),
-      this.#view,
-      Option.getOrElse(this.#listed, (): ListedLyrics => new Map()),
-    );
+    const listed = Option.getOrElse(this.#listed, (): ListedLyrics => new Map());
+    const now = this.#options.now();
+    const resting = new Set<TrackId>();
+    let next: number | null = null;
+
+    for (const [trackId, retry] of this.#lyricsRetries) {
+      if (listed.get(trackId) !== retry.rev || retry.at <= now) {
+        this.#lyricsRetries.delete(trackId);
+        continue;
+      }
+
+      resting.add(trackId);
+      next = Math.min(next ?? retry.at, retry.at);
+    }
+
+    this.#wakeForLyrics(next === null ? null : next - now);
+
+    const asking = this.#online && transferGate(this.#conditions, "sync") === "run";
+
+    const questions = asking ? lyricsQuestions(this.#desired(), this.#view, listed, resting) : [];
 
     if (Equal.equals(questions, this.#questions)) return;
 
@@ -747,6 +791,18 @@ export class DownloadSync {
 
       return same !== undefined && Equal.equals(same, question) ? same : question;
     });
+  }
+
+  #wakeForLyrics(ms: number | null): void {
+    if (this.#lyricsWake !== null) clearTimeout(this.#lyricsWake);
+    this.#lyricsWake = null;
+
+    if (ms === null || this.#stopped) return;
+
+    this.#lyricsWake = setTimeout(() => {
+      this.#lyricsWake = null;
+      this.#plan();
+    }, ms);
   }
 
   #desired(): Desired {

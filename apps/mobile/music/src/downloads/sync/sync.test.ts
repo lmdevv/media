@@ -9,9 +9,9 @@ import { FakeMedia } from "./fake-media";
 import { AlbumId, ArtistId, LyricsChange, LyricsRevision, TrackId } from "./models";
 import type { DownloadManifest, OfflineTrack } from "./models";
 import { nodeTransfer } from "./node-transfer";
-import { pinIdOf, UNKNOWN_REVISION } from "./plan";
+import { PENDING_LYRICS as PENDING, pinIdOf, UNKNOWN_REVISION } from "./plan";
 import { downloadStatus } from "./status";
-import { DownloadSync } from "./sync";
+import { DownloadSync, LYRICS_RETRY_MS } from "./sync";
 import type { DownloadsCore, DownloadsSnapshot } from "./sync";
 import { applyChange, emptyVault, VaultChange } from "./vault";
 import type { KeptLyrics, VaultRows, VaultStore } from "./vault";
@@ -384,6 +384,19 @@ const asked = (snapshot: DownloadsSnapshot) =>
 
 const at = (rev: string) => LyricsRevision.make(rev);
 
+/** The album holding `tracks` as songs the core hasn't said it keeps: kept here, nothing fetched. */
+const heldManifest = (tracks: ReadonlyArray<OfflineTrack>): DownloadManifest => ({
+  pin: {
+    id: pinIdOf(ALBUM),
+    target: ALBUM,
+    createdAt: 1,
+    available: true,
+    ...DETAILS,
+    artHash: null,
+  },
+  entries: tracks.map((track) => ({ track, rev: UNKNOWN_REVISION, artHash: null, state: "held" })),
+});
+
 describe("DownloadSync's lyrics questions", () => {
   it("asks only about songs the server's lyrics revision moved past, and keeps a late answer behind", async () => {
     const one = song("t1", "Safe from Harm");
@@ -434,10 +447,9 @@ describe("DownloadSync's lyrics question objects", () => {
   it("keeps every other bucket's question the same object while one bucket's answers land", async () => {
     const tracks = Array.from({ length: 150 }, (_, index) => song(`t${String(index)}`, "Bulk"));
 
-    sync.setOnline(false);
     await settled((snapshot) => snapshot.ready);
     await sync.request(ALBUM, DETAILS);
-    sync.offerManifest(pinIdOf(ALBUM), manifestOf(tracks));
+    sync.offerManifest(pinIdOf(ALBUM), heldManifest(tracks));
     sync.offerKept(new Map(tracks.map((track) => [track.id, at("s1")])));
     const before = await settled((snapshot) => asked(snapshot).length === tracks.length);
     const [first, ...others] = before.lyricsQuestions;
@@ -452,6 +464,133 @@ describe("DownloadSync's lyrics question objects", () => {
     const after = await settled((snapshot) => snapshot.lyricsQuestions.length === others.length);
 
     expect(after.lyricsQuestions.every((question, index) => question === others[index])).toBe(true);
+  });
+});
+
+const none = (snapshot: DownloadsSnapshot) => snapshot.lyricsQuestions.length === 0;
+
+describe("DownloadSync's lyrics questions and the transfer gate", () => {
+  it("asks nothing while the gate holds the sync's own work, and asks once it opens", async () => {
+    const one = song("t1", "Safe from Harm");
+    const behind = (snapshot: DownloadsSnapshot) => asked(snapshot).length === 1;
+
+    await settled((snapshot) => snapshot.ready);
+    await sync.request(ALBUM, DETAILS);
+    sync.offerManifest(pinIdOf(ALBUM), heldManifest([one]));
+    sync.offerKept(new Map([[one.id, at("s1")]]));
+    await settled(behind);
+
+    sync.setWifiOnly(true);
+    sync.setMetered(true);
+    await settled(none);
+    sync.setMetered(false);
+    await settled(behind);
+
+    sync.setLowPower(true);
+    await settled(none);
+    sync.setLowPower(false);
+    await settled(behind);
+
+    sync.setOnline(false);
+    await settled(none);
+    sync.setOnline(true);
+
+    expect(asked(await settled(behind))).toEqual([{ trackId: one.id, rev: "s1" }]);
+  });
+});
+
+describe("DownloadSync's lyrics retries", () => {
+  it("asks a pending song again a minute later, though a settled song of its batch was saved", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+
+    try {
+      let clock = 1_000;
+
+      const retrying = new DownloadSync({
+        core,
+        vault: new DirectoryVault(dir),
+        transfer: nodeTransfer,
+        policy: () => ({ profileFor: () => "aac-320" }),
+        now: () => clock,
+        sleep: () => Promise.resolve(),
+      });
+
+      const pending = song("t1", "Safe from Harm");
+      const done = song("t2", "One Love");
+
+      const settledOn = (check: (snapshot: DownloadsSnapshot) => boolean) =>
+        new Promise<DownloadsSnapshot>((resolve) => {
+          const look = () => {
+            if (!check(retrying.getSnapshot())) return;
+
+            stop();
+            resolve(retrying.getSnapshot());
+          };
+
+          const stop = retrying.subscribe(look);
+
+          look();
+        });
+
+      retrying.start();
+      retrying.setOnline(true);
+      await settledOn((snapshot) => snapshot.ready);
+      await retrying.request(ALBUM, DETAILS);
+      retrying.offerManifest(pinIdOf(ALBUM), heldManifest([pending, done]));
+      retrying.offerKept(
+        new Map([
+          [pending.id, at("s1")],
+          [done.id, at("s1")],
+        ]),
+      );
+      await settledOn((snapshot) => asked(snapshot).length === 2);
+
+      // Both revisions move together, as one change on the server does.
+      retrying.offerKept(
+        new Map([
+          [pending.id, at("s2")],
+          [done.id, at("s2")],
+        ]),
+      );
+      const both = await settledOn((snapshot) => asked(snapshot).every(({ rev }) => rev === "s2"));
+
+      expect(asked(both)).toEqual([
+        { trackId: pending.id, rev: "s2" },
+        { trackId: done.id, rev: "s2" },
+      ]);
+
+      retrying.offerLyrics(
+        [
+          LyricsChange.cases.Changed.make({ trackId: pending.id, rev: PENDING, lyrics: WORDS }),
+          LyricsChange.cases.Changed.make({ trackId: done.id, rev: at("s2"), lyrics: WORDS }),
+        ],
+        [{ trackId: pending.id, rev: at("s2") }],
+      );
+      await settledOn((snapshot) => snapshot.lyricsQuestions.length === 0);
+
+      // Nothing else asks it before the minute is up, however often the sync plans.
+      retrying.offerKept(
+        new Map([
+          [pending.id, at("s2")],
+          [done.id, at("s2")],
+        ]),
+      );
+      clock += LYRICS_RETRY_MS - 1;
+      await vi.advanceTimersByTimeAsync(LYRICS_RETRY_MS - 1);
+
+      expect(retrying.getSnapshot().lyricsQuestions).toEqual([]);
+
+      clock += 1;
+      await vi.advanceTimersByTimeAsync(1);
+
+      expect(asked(await settledOn((snapshot) => asked(snapshot).length === 1))).toEqual([
+        { trackId: pending.id, rev: "s2" },
+      ]);
+
+      await retrying.stop();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 
