@@ -14,6 +14,7 @@ import {
   fitGenreRow,
   fitMediaFile,
   fitPerson,
+  fitProbeBeside,
   fitSeason,
   fitTitle,
 } from "../../convex/movies/fit";
@@ -559,6 +560,44 @@ describe("the movies fitters reach their targets", () => {
       expect(fittedTitle.recommendations).toEqual(["550"]);
     },
   );
+});
+
+/** Forty-one chapters, the last titled `last`. */
+const chaptersEndingIn = (last: string) => [
+  ...Array.from({ length: 40 }, (_, n) => ({
+    startMs: n,
+    endMs: n + 1,
+    title: `Chapter ${String(n)}`,
+  })),
+  { startMs: 40, endMs: 41, title: last },
+];
+
+describe("a probe read again", () => {
+  it("fits beside the revision that read it, which an older file does not hold yet", () => {
+    const { mediaFiles } = floor(1);
+
+    const sized = (last: string) => ({
+      ...mediaFiles,
+      probe: { ...mediaFiles.probe, chapters: chaptersEndingIn(last) },
+    });
+
+    // A file read before revisions were kept, exactly at the bound: one more field passes it.
+    const older = sized("x".repeat(DOCUMENT_BYTES.mediaFiles - getDocumentSize(sized(""))));
+
+    expect(getDocumentSize(older)).toBe(DOCUMENT_BYTES.mediaFiles);
+    expect(getDocumentSize({ ...older, probeRevision: 2 })).toBeGreaterThan(
+      DOCUMENT_BYTES.mediaFiles,
+    );
+
+    const probe = fitProbeBeside(older, older.probe, 2);
+
+    if (probe === undefined) throw new Error("The probe fits once its longest title is shortened");
+
+    expect(getDocumentSize({ ...older, probe, probeRevision: 2 })).toBeLessThanOrEqual(
+      DOCUMENT_BYTES.mediaFiles,
+    );
+    expect(probe.chapters).toHaveLength(41);
+  });
 });
 
 describe("long keys stay unique", () => {

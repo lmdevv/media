@@ -637,11 +637,16 @@ export const fitMediaFile = <Fields extends FileFields>(fields: Fields): Fields 
  * probe alone as `fitMediaFile` shrinks a probe: its chapter titles, track names, languages, codec
  * names, and container names with the most to give first, then its longest list of chapters,
  * subtitle tracks, or audio tracks. Its video tracks, which hold the field order, are never
- * dropped: none when the probe cannot fit without that. The rest of `file` is measured as stored.
+ * dropped: none when the probe cannot fit without that. The rest of `file` is measured as stored,
+ * with `probeRevision` beside it, which a file read before revisions were kept does not hold yet.
  */
-export const fitProbeBeside = (file: FileFields, probe: Probe): Probe | undefined => {
+export const fitProbeBeside = (
+  file: FileFields,
+  probe: Probe,
+  probeRevision: number,
+): Probe | undefined => {
   const fitted = fitWith(
-    withProbe(file, probe),
+    withProbe({ ...file, probeRevision }, probe),
     DOCUMENT_BYTES.mediaFiles,
     [chapterTitles(), audioTexts(), subtitleTexts(), videoTexts(), containerTexts()],
     [chapterList(), subtitleList(), audioList()],

@@ -213,7 +213,7 @@ export const patchMediaFileProbe = async (
   probe: Fields<"mediaFiles">["probe"],
   probeRevision: number,
 ): Promise<boolean> => {
-  const fitted = fitProbeBeside(existing, probe);
+  const fitted = fitProbeBeside(existing, probe, probeRevision);
 
   if (fitted === undefined) return false;
 
