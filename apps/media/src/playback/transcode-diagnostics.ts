@@ -58,23 +58,33 @@ const opName = (op: Op): string =>
     Scale: () => "scale",
     ToneMap: () => "tonemap",
     BurnImage: () => "burn-image",
+    BurnText: () => "burn-text",
     Encode: () => "encode",
     Move: () => "move",
   });
 
 type Stage = TranscodeSummary["stages"][number];
 
+/**
+ * Where a step's frames came from and went: a move's memories; for an overlay on a GPU, the CPU
+ * memory its image subtitle was decoded and scaled in and the device it was drawn on, while the
+ * picture stayed there; none for any other step.
+ */
+const movedBy = (step: Step): Stage["move"] => {
+  if (Op.$is("Move")(step.op)) return { from: step.input.memory, to: step.output.memory };
+
+  if (Op.$is("BurnImage")(step.op) && step.op.subtitle.frame.memory !== step.on) {
+    return { from: step.op.subtitle.frame.memory, to: step.on };
+  }
+
+  return undefined;
+};
+
 const stageOf = (step: Step): Stage => {
-  const op = opName(step.op);
+  const stage = { op: opName(step.op), domain: step.on, impl: step.impl };
+  const move = movedBy(step);
 
-  if (!Op.$is("Move")(step.op)) return { op, domain: step.on, impl: step.impl };
-
-  return {
-    op,
-    domain: step.on,
-    impl: step.impl,
-    move: { from: step.input.memory, to: step.output.memory },
-  };
+  return move === undefined ? stage : { ...stage, move };
 };
 
 /** A change of a stream's chain as the stream keeps it. */

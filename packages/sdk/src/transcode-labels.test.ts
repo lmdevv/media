@@ -36,6 +36,17 @@ describe("TranscodeLabels", () => {
     expect(stageLabel({ op: "burn-image", domain: "cpu", impl: "burn-image.cpu" })).toBe(
       "Subtitle · CPU",
     );
+    expect(
+      stageLabel({
+        op: "burn-image",
+        domain: "qsv",
+        impl: "burn-image.qsv",
+        move: { from: "cpu", to: "qsv" },
+      }),
+    ).toBe("Subtitle · CPU → QSV");
+    expect(stageLabel({ op: "burn-text", domain: "cpu", impl: "burn-text.cpu" })).toBe(
+      "Subtitle · CPU",
+    );
     expect(stageLabel({ op: "deinterlace", domain: "qsv", impl: "deinterlace.qsv" })).toBe(
       "Deinterlace · QSV",
     );

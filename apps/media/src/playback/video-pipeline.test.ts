@@ -55,7 +55,7 @@ const intentFor = (video: SourceVideo, overrides: Partial<VideoIntent> = {}): Vi
   bounds: { width: 3840, height: 2160 },
   cpuEncodeBounds: { width: 1920, height: 1080 },
   maxBitrate: undefined,
-  burnImage: undefined,
+  burn: undefined,
   ...overrides,
 });
 
@@ -165,7 +165,7 @@ describe("planVideo", () => {
     },
     ({ generated, domains, verifiedMask, excludedMask, burn }) => {
       const video = sourceFrom(generated);
-      const intent = intentFor(video, { burnImage: burn ? subtitle : undefined });
+      const intent = intentFor(video, { burn: burn ? Op.BurnImage({ subtitle }) : undefined });
       const bindings = DOMAIN_CHOICES[domains];
       const keys = everyKey(video, intent, bindings);
 
@@ -233,7 +233,7 @@ describe("planVideo", () => {
     },
     ({ generated, layout, depth, domains, burn }) => {
       const video = { ...sourceFrom({ ...generated, colour: "sdr" }), pixelFormat: layout, depth };
-      const intent = intentFor(video, { burnImage: burn ? subtitle : undefined });
+      const intent = intentFor(video, { burn: burn ? Op.BurnImage({ subtitle }) : undefined });
       const bindings = DOMAIN_CHOICES[domains];
       const cpu = everyKey(video, intent, bindings).filter((key) => row(implOf(key)).on === "cpu");
       const result = planVideo(video, intent, snapshot(bindings, cpu));
@@ -252,7 +252,7 @@ describe("planVideo", () => {
     { generated: Source, domains: Domains, burn: Schema.Boolean },
     ({ generated, domains, burn }) => {
       const video = sourceFrom(generated);
-      const intent = intentFor(video, { burnImage: burn ? subtitle : undefined });
+      const intent = intentFor(video, { burn: burn ? Op.BurnImage({ subtitle }) : undefined });
       const bindings = DOMAIN_CHOICES[domains];
       const known = snapshot(bindings, everyKey(video, intent, bindings));
       const result = planVideo(video, intent, known);
@@ -294,6 +294,7 @@ describe("planVideo", () => {
         stream: 0,
         trimPicture: undefined,
         trimSubtitle: undefined,
+        files: {},
       });
 
       assert.strictEqual(
@@ -418,9 +419,55 @@ describe("planVideo", () => {
     );
   });
 
-  it("burns an image subtitle on the CPU between a download and an upload", () => {
+  it("burns an image subtitle on the GPU after the tone map, the picture kept on the device", () => {
     const video = source({ codec: "hevc", pixelFormat: "yuv420p10le", depth: 10, colour: "hdr10" });
-    const intent = intentFor(video, { burnImage: subtitle });
+    const intent = intentFor(video, { burn: Op.BurnImage({ subtitle }) });
+
+    for (const domain of [QSV, VAAPI]) {
+      const keys = everyKey(video, intent, [domain]);
+      const on = domain.domain;
+
+      assert.deepStrictEqual(impls(planned(video, intent, snapshot([domain], keys))), [
+        `decode.${on}`,
+        `scale.${on}`,
+        `tonemap.${on}`,
+        `burn-image.${on}`,
+        `encode.${on}.h264`,
+      ]);
+      // A device or build without the GPU overlay loses only that key: the subtitle is drawn on the
+      // CPU between a download and an upload, as before.
+      assert.deepStrictEqual(
+        impls(
+          planned(
+            video,
+            intent,
+            snapshot(
+              [domain],
+              keys.filter((key) => implOf(key) !== `burn-image.${on}`),
+            ),
+          ),
+        ),
+        [
+          `decode.${on}`,
+          `scale.${on}`,
+          `tonemap.${on}`,
+          `move.${on}>cpu`,
+          "burn-image.cpu",
+          `move.cpu>${on}`,
+          `encode.${on}.h264`,
+        ],
+      );
+    }
+  });
+
+  it("draws a text subtitle with libass on the CPU between GPU stages, after the tone map", () => {
+    const video = source({ codec: "hevc", pixelFormat: "yuv420p10le", depth: 10, colour: "hdr10" });
+
+    const intent = intentFor(video, {
+      burn: Op.BurnText({
+        subtitle: { codec: "ass", style: "styled", storage: { width: 1920, height: 1080 } },
+      }),
+    });
 
     assert.deepStrictEqual(
       impls(planned(video, intent, snapshot([QSV], everyKey(video, intent, [QSV])))),
@@ -429,10 +476,14 @@ describe("planVideo", () => {
         "scale.qsv",
         "tonemap.qsv",
         "move.qsv>cpu",
-        "burn-image.cpu",
+        "burn-text.cpu",
         "move.cpu>qsv",
         "encode.qsv.h264",
       ],
+    );
+    assert.deepStrictEqual(
+      impls(planned(video, intent, snapshot([], everyKey(video, intent, [])))),
+      ["decode.cpu", "scale.cpu", "tonemap.cpu", "burn-text.cpu", "encode.cpu.h264"],
     );
   });
 
@@ -513,7 +564,10 @@ describe("planVideo", () => {
 });
 
 const everything = (video: SourceVideo, domains: ReadonlyArray<DomainBinding>) =>
-  snapshot(domains, everyKey(video, intentFor(video, { burnImage: subtitle }), domains));
+  snapshot(
+    domains,
+    everyKey(video, intentFor(video, { burn: Op.BurnImage({ subtitle }) }), domains),
+  );
 
 /** An SD 8-bit SDR stream of `codec` whose probe read `fieldOrder`. */
 const streamOf = (codec: string, fieldOrder: VideoStream["fieldOrder"]): VideoStream => ({
@@ -695,7 +749,13 @@ describe("assemble", () => {
 });
 
 describe("the seal", () => {
-  const OPTIONS = { input: 0, stream: 0, trimPicture: undefined, trimSubtitle: undefined };
+  const OPTIONS = {
+    input: 0,
+    stream: 0,
+    trimPicture: undefined,
+    trimSubtitle: undefined,
+    files: {},
+  };
 
   it("refuses a chain to run that does not decode first and encode last, but not a probe's", () => {
     const video = source();
@@ -830,6 +890,7 @@ describe("probes", () => {
       stream: 0,
       trimPicture: undefined,
       trimSubtitle: undefined,
+      files: {},
     });
 
     assert.deepStrictEqual(rendered.input, [
@@ -917,8 +978,8 @@ describe("probes", () => {
     const domains = [QSV, VAAPI];
 
     const keys = [
-      ...everyKey(video, intentFor(video, { burnImage: subtitle }), domains),
-      ...everyKey(source(), intentFor(source(), { burnImage: subtitle }), domains),
+      ...everyKey(video, intentFor(video, { burn: Op.BurnImage({ subtitle }) }), domains),
+      ...everyKey(source(), intentFor(source(), { burn: Op.BurnImage({ subtitle }) }), domains),
       ...everyKey(interlaced, intentFor(interlaced), domains),
       ...everyKey({ ...video, scan: "interlaced" }, intentFor(video), domains),
     ];

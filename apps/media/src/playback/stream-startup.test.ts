@@ -273,6 +273,7 @@ describe.skipIf(!hasFfmpeg)("stream startup", () => {
               audioCodec: "",
               copiedAudioEnd: undefined,
               segmentStarts: [0, 4, 8, 12, 16, 20],
+              files: {},
               previousStart: undefined,
               outputDirectory: output,
             }).args,

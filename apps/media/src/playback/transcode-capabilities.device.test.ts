@@ -1,6 +1,6 @@
 import { NodeServices } from "@effect/platform-node";
 import { assert, describe, layer } from "@effect/vitest";
-import { Clock, Console, Duration, Effect, Layer, Path, Result } from "effect";
+import { Clock, Console, Duration, Effect, FileSystem, Layer, Path, Result } from "effect";
 
 import { MediaFileId } from "@media/contracts/ids";
 
@@ -9,7 +9,7 @@ import { qsvUsable, vaapiUsable } from "../testing/fixture-library.ts";
 import * as FixtureWorkspace from "../testing/fixture-workspace.ts";
 import { testConfigLayer } from "../testing/test-config.ts";
 import * as Inventory from "./capability-inventory.ts";
-import { PROBE_CLIPS } from "./probe-clips.ts";
+import { PROBE_CLIPS, PROBE_SCRIPT } from "./probe-clips.ts";
 import * as TranscodeCapabilities from "./transcode-capabilities.ts";
 import {
   type CapabilitySnapshot,
@@ -26,10 +26,11 @@ import {
   type GpuDomain,
   ImplId,
   implOf,
+  Op,
   OUTPUT_CODECS,
   type OutputCodec,
+  PROBE_IMAGE_SUBTITLE,
   sdrTarget,
-  type SubtitleInput,
 } from "./video-ops.ts";
 
 const hasQsv = await qsvUsable();
@@ -64,28 +65,20 @@ const onDevice = Layer.unwrap(
   }),
 ).pipe(Layer.provideMerge(FixtureWorkspace.layer), Layer.provideMerge(NodeServices.layer));
 
-/** A translucent picture the overlay reads as its subtitle, as probes of an overlay do. */
-const SUBTITLE: SubtitleInput = {
-  input: 1,
-  stream: 0,
-  codec: "rawvideo",
-  frame: {
-    memory: "cpu",
-    device: undefined,
-    colour: "sdr",
-    depth: 8,
-    pixelFormat: "yuva420p",
-    scan: "progressive",
-    width: 320,
-    height: 240,
-  },
-};
+/** The text subtitle a chain draws: the probes' own script, from the source's size. */
+const TEXT = Op.BurnText({
+  subtitle: { codec: "ass", style: "styled", storage: { width: 320, height: 240 } },
+});
+
+/** The subtitle a chain draws in, by kind. */
+const BURNS = { image: Op.BurnImage({ subtitle: PROBE_IMAGE_SUBTITLE }), text: TEXT } as const;
 
 interface Chain {
   readonly name: string;
   readonly clip: ClipName;
   readonly domain: GpuDomain | "cpu";
-  readonly burn?: true;
+  /** A subtitle drawn in: the probes' image canvas, or their text script. */
+  readonly burn?: "image" | "text";
   /** Rows kept out, to make the planner use another. */
   readonly without?: ReadonlyArray<string>;
   /** The stages the chain must plan, when they are part of what it proves. */
@@ -114,7 +107,28 @@ const chainsOn = (domain: GpuDomain): ReadonlyArray<Chain> => [
     domain,
     without: [`tonemap.${domain}`],
   },
-  { name: `${domain}: an image subtitle burned in on the CPU`, clip: "h264-8", domain, burn: true },
+  {
+    name: `${domain}: an image subtitle drawn on the GPU`,
+    clip: "h264-8",
+    domain,
+    burn: "image",
+    includes: [`burn-image.${domain}`, `encode.${domain}.h264`],
+  },
+  {
+    name: `${domain}: an image subtitle drawn on the CPU between GPU stages`,
+    clip: "h264-8",
+    domain,
+    burn: "image",
+    without: [`burn-image.${domain}`],
+    includes: [`move.${domain}>cpu`, "burn-image.cpu", `move.cpu>${domain}`],
+  },
+  {
+    name: `${domain}: a text subtitle drawn with libass between GPU stages`,
+    clip: "h264-8",
+    domain,
+    burn: "text",
+    includes: [`move.${domain}>cpu`, "burn-text.cpu", `move.cpu>${domain}`],
+  },
   { name: `${domain}: MPEG-2`, clip: "mpeg2-8", domain },
   { name: `${domain}: AV1`, clip: "av1-8", domain },
   { name: `${domain}: VP9`, clip: "vp9-10", domain },
@@ -150,7 +164,8 @@ const chainsOn = (domain: GpuDomain): ReadonlyArray<Chain> => [
 
 const CPU_CHAINS: ReadonlyArray<Chain> = [
   { name: "cpu: HDR10 tone-mapped", clip: "hevc-pq", domain: "cpu" },
-  { name: "cpu: an image subtitle burned in", clip: "h264-8", domain: "cpu", burn: true },
+  { name: "cpu: an image subtitle burned in", clip: "h264-8", domain: "cpu", burn: "image" },
+  { name: "cpu: a text subtitle drawn with libass", clip: "h264-8", domain: "cpu", burn: "text" },
   { name: "cpu: H.264 encoded to HEVC", clip: "h264-8", domain: "cpu", output: "hevc" },
   { name: "cpu: H.264 encoded to AV1", clip: "h264-8", domain: "cpu", output: "av1" },
   { name: "cpu: interlaced MPEG-2 deinterlaced", clip: "mpeg2-8-interlaced", domain: "cpu" },
@@ -169,7 +184,7 @@ const intentOf = (chain: Chain): VideoIntent => ({
   bounds: { width: 320, height: 180 },
   cpuEncodeBounds: { width: 1920, height: 1080 },
   maxBitrate: 1_000_000,
-  burnImage: chain.burn === true ? SUBTITLE : undefined,
+  burn: chain.burn === undefined ? undefined : BURNS[chain.burn],
 });
 
 const requestOf = (chain: Chain): TranscodeCapabilities.Request => ({
@@ -233,6 +248,7 @@ describe.runIf(hasQsv || hasVaapi)("TranscodeCapabilities on this machine's GPU"
           const capabilities = yield* TranscodeCapabilities.Service;
           const tools = yield* MediaTools.Service;
           const path = yield* Path.Path;
+          const fs = yield* FileSystem.FileSystem;
           const workspace = yield* FixtureWorkspace.Service;
 
           const domains = [
@@ -303,11 +319,16 @@ describe.runIf(hasQsv || hasVaapi)("TranscodeCapabilities on this machine's GPU"
                 `${chain.clip}.mkv`,
               );
 
+              const script = path.join(workspace.root, "probe-script.ass");
+
+              yield* fs.writeFileString(script, PROBE_SCRIPT);
+
               const args = probeCommandArgs(
                 pipeline,
                 ProbeInput.Clip({ clip: chain.clip }),
                 clip,
                 0,
+                { files: { subtitle: script }, readback: undefined },
               );
 
               const run = tools.ffmpeg(args, { timeout: Duration.seconds(30) }).pipe(Effect.result);
@@ -387,6 +408,18 @@ describe.runIf(hasQsv || hasVaapi)("TranscodeCapabilities on this machine's GPU"
           );
 
           yield* Console.log(`deinterlacers: ${deinterlacers.join(", ")}`);
+
+          // Each subtitle row is a key of its own, so a device or build without a GPU overlay, or
+          // without libass or a font, loses only that key; every one verified ran above.
+          const subtitles = [
+            capabilityKey(ImplId("burn-image.cpu"), "bitmap"),
+            ...domains.map((domain) =>
+              capabilityKey(ImplId(`burn-image.${domain}`), "bitmap/nv12"),
+            ),
+            capabilityKey(ImplId("burn-text.cpu"), "ass"),
+          ].map((key) => `${key} ${Inventory.capabilityOf(inventory, key).status}`);
+
+          yield* Console.log(`subtitles: ${subtitles.join(", ")}`);
         }),
       300_000,
     );

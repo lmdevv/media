@@ -145,7 +145,8 @@ export interface SubtitleTrack extends Schema.Schema.Type<typeof SubtitleTrack> 
 
 /**
  * A subtitle track with its WebVTT URL. Bitmap tracks (PGS, VobSub) have none: the client shows
- * one by negotiating again with `burnInSubtitle`, and the service draws it into the video.
+ * one by negotiating again with `burnInSubtitle`, and the service draws it into the video. A text
+ * track can be drawn in the same way, ASS and SSA with their own styles and fonts.
  */
 const NegotiatedSubtitle = Schema.Struct({
   ...SubtitleTrack.fields,
@@ -178,7 +179,11 @@ export const NegotiateRequest = Schema.Struct({
   startSeconds: Schema.optional(Schema.Finite.check(Schema.isGreaterThanOrEqualTo(0))),
   /** A quality cap; the best the client can play when absent. */
   quality: Schema.optional(PlaybackQuality),
-  /** ID of a bitmap subtitle track to draw into the video, which then always transcodes. */
+  /**
+   * ID of a subtitle track to draw into the video, which then always transcodes: a bitmap track,
+   * or a text track (embedded or a sidecar file), ASS and SSA keeping their styles, positions,
+   * and fonts, plain text in the service's default style.
+   */
   burnInSubtitle: Schema.optional(Schema.String),
 });
 
@@ -203,15 +208,19 @@ export interface DeliveredVideo extends Schema.Schema.Type<typeof DeliveredVideo
 export const TranscodeStage = Schema.Struct({
   /**
    * What it does: `decode`, `deinterlace`, `scale`, `tonemap` (HDR to SDR), `burn-image` (a
-   * picture subtitle drawn in), `encode`, or `move`, a copy of the frames between CPU and GPU
-   * memory.
+   * picture subtitle drawn in), `burn-text` (a text subtitle drawn in), `encode`, or `move`, a
+   * copy of the frames between CPU and GPU memory.
    */
   op: Schema.String,
   /** Where it runs: `cpu`, or a GPU API such as `qsv` or `vaapi`. A move runs in its GPU's. */
   domain: Schema.String,
   /** The implementation, such as `decode.qsv`, `tonemap.cpu`, or `move.qsv>cpu`. */
   impl: Schema.String,
-  /** A move's memories: where the frames were, and where they go. */
+  /**
+   * What the stage moved between memories: a move's frames, where they were and where they go;
+   * for a subtitle drawn on a GPU, the subtitle, prepared in CPU memory and drawn on the device
+   * while the picture stayed there.
+   */
   move: Schema.optionalKey(Schema.Struct({ from: Schema.String, to: Schema.String })),
 });
 
@@ -322,7 +331,10 @@ export const NegotiateResponse = Schema.Struct({
     Schema.Struct({ streamIndex: Schema.Int, codec: Schema.String, channels: Schema.Int }),
   ),
   subtitles: Schema.Array(NegotiatedSubtitle),
-  /** The bitmap subtitle track drawn into the video, when one was asked for. */
+  /**
+   * The subtitle track drawn into the video, bitmap or text, when one was asked for; a player
+   * does not draw it itself.
+   */
   burnedInSubtitle: Schema.optional(Schema.String),
   /** Token expiry in milliseconds since the epoch; renew the token and renegotiate before it. */
   expiresAt: Schema.Finite,

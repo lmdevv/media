@@ -76,15 +76,25 @@ ARG S6_OVERLAY_X86_64_SHA256=8bcbc2cada58426f976b159dcc4e06cbb1454d5f39252b3bb0c
 ARG S6_OVERLAY_AARCH64_SHA256=c8fd6b1f0380d399422fc986a1e6799f6a287e2cfa24813ad0b6a4fb4fa755cc
 # Debian's ffmpeg 7.1 is built with libvpl (oneVPL). On amd64 add Intel's iHD VA-API driver and the
 # oneVPL GPU runtime, which give Quick Sync on Gen12+ (Tiger Lake and newer) iGPUs, and Mesa's
-# VA-API drivers for AMD GPUs. xz-utils unpacks s6-overlay; curl is the health check.
+# VA-API drivers for AMD GPUs. xz-utils unpacks s6-overlay; curl is the health check. DejaVu
+# (the Bitstream Vera licence, free to use and redistribute) is the font libass falls back to for
+# burned-in text subtitles, with its oblique and condensed faces (fonts-dejavu-extra, 6.7 MB) as
+# the NixOS module ships them, so an italic style draws in DejaVu Sans Oblique. Its cache is built
+# here, as ffmpeg's user can write none and fontconfig otherwise logs an error for every run that
+# draws text. Fontconfig keeps a folder's cache only while the folder's modification time matches
+# the cache to the nanosecond, and an image's layers keep whole seconds (BuildKit's export and
+# registries drop the rest), so the font folders get whole-second times before the cache records
+# them.
 RUN set -eux; \
     sed -i 's/^Components: main$/Components: main non-free non-free-firmware/' /etc/apt/sources.list.d/debian.sources; \
     apt-get update; \
-    packages="ffmpeg ca-certificates curl xz-utils"; \
+    packages="ffmpeg ca-certificates curl xz-utils fontconfig fonts-dejavu-core fonts-dejavu-extra"; \
     if [ "${TARGETARCH:-amd64}" = amd64 ]; then \
       packages="$packages intel-media-va-driver-non-free libmfx-gen1.2 libvpl2 mesa-va-drivers vainfo"; \
     fi; \
     apt-get install -y --no-install-recommends $packages; \
+    find /usr/share/fonts /usr/local/share/fonts -type d -exec touch -m -d "@$(date +%s)" {} +; \
+    fc-cache -s; \
     rm -rf /var/lib/apt/lists/*
 RUN set -eux; \
     case "${TARGETARCH:-amd64}" in \

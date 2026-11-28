@@ -91,7 +91,7 @@ const encodeArgs = Effect.fn("FragmentPublishing.encodeArgs")(function* (
       bounds: { width: video.width, height: video.height },
       cpuEncodeBounds: { width: 1920, height: 1080 },
       maxBitrate: 1_000_000,
-      burnImage: undefined,
+      burn: undefined,
     },
     verifiedFor(probe),
   );
@@ -109,6 +109,7 @@ const encodeArgs = Effect.fn("FragmentPublishing.encodeArgs")(function* (
     audioCodec: audio.codec,
     copiedAudioEnd: undefined,
     segmentStarts: Array.from({ length: SECONDS / 4 }, (_, index) => index * 4),
+    files: {},
     previousStart: undefined,
     outputDirectory,
   }).args;

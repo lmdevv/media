@@ -49,6 +49,11 @@ export interface FakeFfmpegBehavior {
   readonly withoutCpuToneMap?: true;
   /** Runs these rules pick fail, hang, or start late, as a broken or slow stage would. */
   readonly rules?: ReadonlyArray<RunRule>;
+  /**
+   * Probes whose arguments hold this text read back a black picture, as an overlay that ignores
+   * the subtitle's transparency draws one.
+   */
+  readonly blankReadback?: string;
   /** Each run appends its arguments, one JSON array per line, to `invocationsOf` the stand-in. */
   readonly logInvocations?: true;
 }
@@ -117,6 +122,7 @@ import { spawnSync } from "node:child_process";
 import {
   appendFileSync,
   existsSync,
+  fstatSync,
   mkdtempSync,
   readFileSync,
   renameSync,
@@ -134,7 +140,7 @@ const here = dirname(process.argv[1] ?? "");
 const asked = process.argv.slice(2);
 let args = asked;
 const hls = args.includes("hls");
-const probe = args.includes("-progress") && args.includes("null");
+const probe = args.includes("-progress") && (args.includes("null") || args.includes("rawvideo"));
 
 if (behavior.logInvocations === true) {
   appendFileSync(join(here, "invocations.jsonl"), JSON.stringify(asked) + "\\n");
@@ -170,8 +176,9 @@ for (const [index, rule] of (behavior.rules ?? []).entries()) {
 }
 
 // The stand-in plays any Quick Sync or VA-API device in software, so the service's probes and
-// runs work without one: GPU options go, GPU filters become their software equivalents, and GPU
-// encoders of H.264 and HEVC become libx264 and libx265.
+// runs work without one: GPU options go, GPU filters become their software equivalents (an overlay
+// scaling and placing its top input as the GPU overlay's options say), and GPU encoders of H.264
+// and HEVC become libx264 and libx265.
 const SOFTWARE_DEINTERLACE = "bwdif=mode=send_frame:deint=interlaced";
 const optionsOf = (text) =>
   Object.fromEntries(text.split(":").map((pair) => [pair.split("=")[0], pair.split("=")[1]]));
@@ -183,12 +190,32 @@ const inSoftware = (options) => {
 
   return parts.length === 0 ? "null" : parts.join(",");
 };
+const overlayInSoftware = (main, top, text) => {
+  const options = optionsOf(text);
+  const place = options.x === undefined ? "" : "x=" + options.x + ":y=" + options.y + ":";
+
+  if (options.w === "main_w" && options.h === "main_h") {
+    return "[" + top + "][" + main + "]scale2ref=w=rw:h=rh[played_top][played_main];" +
+      "[played_main][played_top]overlay=eof_action=pass:repeatlast=0";
+  }
+  if (options.w !== undefined && options.h !== undefined) {
+    return "[" + top + "]scale=" + options.w + ":" + options.h + "[played_top];" +
+      "[" + main + "][played_top]overlay=" + place + "eof_action=pass:repeatlast=0";
+  }
+
+  return "[" + main + "][" + top + "]overlay=" + place + "eof_action=pass:repeatlast=0";
+};
 const graphInSoftware = (text) =>
   text
+    .replace(
+      /\\[([^\\]]+)\\]\\[([^\\]]+)\\]overlay_(?:qsv|vaapi)=((?:\\\\.|[^,;\\[\\\\])*)/g,
+      (_, main, top, options) => overlayInSoftware(main, top, options),
+    )
     .replace(/vpp_qsv=([^,;\\[]*)/g, (_, options) => inSoftware(optionsOf(options)))
     .replace(/scale_vaapi=([^,;\\[]*)/g, (_, options) => inSoftware(optionsOf(options)))
     .replace(/tonemap_vaapi=[^,;\\[]*/g, "format=nv12")
     .replace(/deinterlace_vaapi=[^,;\\[]*/g, SOFTWARE_DEINTERLACE)
+    .replace(/overlay_(?:qsv|vaapi)=(?:\\\\.|[^,;\\[\\\\])*/g, "overlay=eof_action=pass:repeatlast=0")
     .replace(/hwupload(=[^,;\\[]*)?/g, "null")
     .replace(/hwmap(=[^,;\\[]*)?/g, "null")
     .replace(/hwdownload/g, "null")
@@ -229,6 +256,8 @@ const emulated = {
     " .. scale_vaapi       V->V       played in software",
     " .. tonemap_vaapi     V->V       played in software",
     " .. deinterlace_vaapi V->V       played in software",
+    " .. overlay_qsv       VV->V      played in software",
+    " .. overlay_vaapi     VV->V      played in software",
     " .. hwupload          V->V       played in software",
     " .. hwdownload        V->V       played in software",
     " .. hwmap             V->V       played in software",
@@ -334,7 +363,28 @@ if (stalls || failsAfterFirst || failsPartway !== undefined) {
     if (behavior.hlsStallsUntilCue === true && existsSync(cue)) process.exit(1);
   }, behavior.hlsStallsUntilCue === true ? 50 : 60_000);
 } else {
-  const result = run(args, { stdio: "inherit" });
+  // A run the service reads from file descriptor 3 (\`pipe:3\`) hands it on to the real tool.
+  const piped = (() => {
+    try {
+      fstatSync(3);
+
+      return true;
+    } catch {
+      return false;
+    }
+  })();
+  const result = run(args, { stdio: piped ? ["inherit", "inherit", "inherit", 3] : "inherit" });
+  const readback = args.at(-1) ?? "";
+
+  if (
+    probe &&
+    behavior.blankReadback !== undefined &&
+    asked.join(" ").includes(behavior.blankReadback) &&
+    args.includes("rawvideo") &&
+    existsSync(readback)
+  ) {
+    writeFileSync(readback, new Uint8Array(readFileSync(readback).length));
+  }
 
   process.exit(failsLater ? 1 : (result.status ?? 1));
 }

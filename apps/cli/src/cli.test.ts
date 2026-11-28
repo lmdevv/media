@@ -135,20 +135,22 @@ describe("the media command", () => {
     expect(run.stdout).toContain("Command movies.myList.add");
   });
 
-  it("refuses a blank --version or a wild --max-height offline", async () => {
+  it("refuses a blank --version or --burn-subtitle, or a wild --max-height, offline", async () => {
     const runs = await Promise.all([
       media("movies", "stream", "Alien", "--version", ""),
       media("movies", "stream", "Alien", "--version", "   "),
       media("movies", "stream", "Alien", "--max-height", "9000"),
       media("movies", "stream"),
+      media("movies", "stream", "Alien", "--burn-subtitle", " "),
     ]);
 
-    const [blank, , height, missing] = runs;
+    const [blank, , height, missing, subtitle] = runs;
 
     for (const run of runs) expect(run.code, run.stderr).toBe(ExitCode.usage);
     expect(blank.stderr).toContain("--version expects a version name or its number");
     expect(height.stderr).toContain("--max-height expects lines");
     expect(missing.stderr).toContain("needs a title name or ID");
+    expect(subtitle.stderr).toContain("--burn-subtitle expects a subtitle track's ID");
   });
 
   it("asks to sign in with media auth login before calling the server", async () => {

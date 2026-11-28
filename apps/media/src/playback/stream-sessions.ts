@@ -46,6 +46,7 @@ import { StreamId } from "@media/contracts/media-playback";
 import { LogEvent } from "../diagnostics/log-events.ts";
 import * as MediaConfig from "../media-config.ts";
 import * as MediaTools from "../media/media-tools.ts";
+import * as BurnedText from "../subtitles/burned-text.ts";
 import { watchRenames } from "../platform/node-directories.ts";
 import type { ResolvedMediaFile } from "./file-resolver.ts";
 import {
@@ -76,6 +77,7 @@ import * as TranscodeSpace from "./transcode-space.ts";
 import { sourceScope, type SourceScope } from "./capability-inventory.ts";
 import * as TranscodeCapabilities from "./transcode-capabilities.ts";
 import { hlsCommand } from "./transcode-command.ts";
+import type { RunFiles } from "./video-render.ts";
 import { deliveredVideo, reasonOf, summaryOf } from "./transcode-diagnostics.ts";
 import {
   advance,
@@ -94,14 +96,16 @@ import {
 } from "./video-pipeline.ts";
 import type { ImplId } from "./video-ops.ts";
 
-interface StartRequest {
+/** What a negotiation starts a stream with. */
+export interface StartRequest {
   readonly file: ResolvedMediaFile;
   readonly plan: Extract<PlaybackPlan, { readonly _tag: "Hls" }>;
   readonly client: ClientCapabilities;
   readonly audioIndex: number | undefined;
   readonly startSeconds: number;
   readonly quality: PlaybackQuality | undefined;
-  readonly burnSubtitle: number | undefined;
+  /** A text track to burn in, whose files the stream writes under its folder before it runs. */
+  readonly burnText: Omit<BurnedText.BurnSource, "file"> | undefined;
   readonly keyframes: ReadonlyArray<number> | undefined;
 }
 
@@ -391,7 +395,8 @@ interface Session extends Lifecycle {
   readonly client: ClientCapabilities;
   readonly audioIndex: number | undefined;
   readonly quality: PlaybackQuality | undefined;
-  readonly burnSubtitle: number | undefined;
+  /** The files a burned-in text subtitle is drawn from, under the stream's folder; none without. */
+  readonly files: RunFiles;
   readonly plan: SegmentPlan;
   /** What new runs do with the video; a replacement after a failure changes it. */
   readonly video: Ref.Ref<VideoPlan>;
@@ -596,6 +601,7 @@ const make = Effect.gen(function* () {
   const path = yield* Path.Path;
   const crypto = yield* Crypto.Crypto;
   const tools = yield* MediaTools.Service;
+  const burned = yield* BurnedText.Service;
   const keyframes = yield* KeyframeIndex.Service;
   const capabilities = yield* TranscodeCapabilities.Service;
   const reporter = yield* PlaybackReporter.Service;
@@ -974,6 +980,7 @@ const make = Effect.gen(function* () {
           session.file.probe.audio.find((track) => track.index === index)?.endSeconds,
       }),
       segmentStarts: session.plan.starts.slice(startSegment),
+      files: session.files,
       previousStart: session.plan.starts[startSegment - 1],
       outputDirectory: directory,
     });
@@ -2063,6 +2070,44 @@ const make = Effect.gen(function* () {
     );
   });
 
+  /**
+   * Writes the files a burned-in text subtitle is drawn from under the stream's folder, which the
+   * stream deletes as it ends; none for a stream that burns no text. A track that cannot be read
+   * ends the start as a failed input.
+   */
+  const prepareBurn = (
+    stream: Lifecycle,
+    request: StartRequest,
+    plan: StartRequest["plan"],
+  ): Effect.Effect<RunFiles, TranscodeFailed> =>
+    request.burnText === undefined
+      ? Effect.succeed({})
+      : burned
+          .prepare(
+            {
+              ...request.burnText,
+              file: {
+                fileId: request.file.fileId,
+                path: request.file.path,
+                sizeBytes: request.file.sizeBytes,
+                modifiedAtMs: request.file.modifiedAtMs,
+                startSeconds: request.file.probe.startSeconds,
+              },
+            },
+            path.join(stream.directory, "subtitle"),
+          )
+          .pipe(
+            Effect.tapError((error) => Effect.logWarning("StreamSessions.burn_text_failed", error)),
+            Effect.mapError(
+              () =>
+                new TranscodeFailed({
+                  streamId: stream.streamId,
+                  mode: modeOf(plan.video, plan.audio),
+                  reason: "input",
+                }),
+            ),
+          );
+
   const startIn = Effect.fnUntraced(function* (
     stream: Lifecycle,
     registered: Ref.Ref<Option.Option<Session>>,
@@ -2088,6 +2133,8 @@ const make = Effect.gen(function* () {
           file.probe.durationSeconds,
           { quickStart },
         );
+
+    const files = yield* prepareBurn(stream, request, plan);
 
     const run = yield* claimRun(
       stream,
@@ -2135,7 +2182,7 @@ const make = Effect.gen(function* () {
       client: request.client,
       audioIndex: request.audioIndex,
       quality: request.quality,
-      burnSubtitle: request.burnSubtitle,
+      files,
       plan: segmentPlan,
       video: yield* Ref.make(plan.video),
       audio: plan.audio,
@@ -2540,6 +2587,7 @@ export const layer: Layer.Layer<
   | Path.Path
   | Crypto.Crypto
   | MediaTools.Service
+  | BurnedText.Service
   | KeyframeIndex.Service
   | TranscodeCapabilities.Service
   | PlaybackReporter.Service

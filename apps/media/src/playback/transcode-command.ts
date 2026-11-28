@@ -16,8 +16,8 @@
 import { AudioPlan, VideoPlan } from "./playback-decision.ts";
 import type { LogOwners } from "./transcode-recovery.ts";
 import { type VideoPipeline } from "./video-pipeline.ts";
-import { graphArgs, type RenderedVideo, renderVideo } from "./video-render.ts";
-import { Op } from "./video-ops.ts";
+import { graphArgs, type RenderedVideo, renderVideo, type RunFiles } from "./video-render.ts";
+import { Op, type Size, statedCanvas } from "./video-ops.ts";
 
 /** Everything one ffmpeg run needs; built only from server-side state. */
 export interface HlsCommand {
@@ -37,6 +37,8 @@ export interface HlsCommand {
   readonly copiedAudioEnd: number | undefined;
   /** Planned segment starts at or after `from`; transcodes force keyframes there. */
   readonly segmentStarts: ReadonlyArray<number>;
+  /** The files a burned-in text subtitle is drawn from, written under the stream's folder. */
+  readonly files: RunFiles;
   /**
    * The planned segment start before `from`, a keyframe when video is copied; none at the first.
    */
@@ -86,7 +88,9 @@ const burnedSubtitle = (pipeline: VideoPipeline) => {
  * the graph, so trimming them comes first and they skip the rest of the work. ffmpeg appears to
  * repeat the subtitle's current image as it reads packets, so a caption that started earlier
  * survives trimming the subtitle's own frames to shortly before `from`. Untrimmed, memory peaked
- * near 4 GB at 1080p, apparently scaled frames waiting on the overlay.
+ * near 4 GB at 1080p, apparently scaled frames waiting on the overlay. A text subtitle is drawn
+ * from the ASS file and fonts the stream wrote (`files`) on the source's timeline: libass holds
+ * the whole script, so a cue that began before a seek shows at once, and the run reads once.
  */
 const rendered = (command: EncodeSource, video: Encode): RenderedVideo => {
   const seeked = subtitleReading(command).seeked;
@@ -96,6 +100,7 @@ const rendered = (command: EncodeSource, video: Encode): RenderedVideo => {
     stream: command.videoIndex,
     trimPicture: seeked ? command.from : undefined,
     trimSubtitle: seeked ? command.from - SUBTITLE_MARGIN : undefined,
+    files: command.files,
   });
 };
 
@@ -278,8 +283,9 @@ const SUBTITLE_LEAD = 30;
  */
 const SUBTITLE_MARGIN = 1;
 
-/** DVD subtitles carry no canvas size; without one ffmpeg sizes them to the video and crops. */
-const DVD_CANVAS = "720x576";
+/** `-canvas_size` for a canvas the service states (`statedCanvas`); other inputs stay as filed. */
+const canvasArgs = (canvas: Size | undefined): ReadonlyArray<string> =>
+  canvas === undefined ? [] : ["-canvas_size", `${String(canvas.width)}x${String(canvas.height)}`];
 
 const seekArgs = (seek: number | undefined): ReadonlyArray<string> =>
   seek === undefined ? [] : ["-ss", seconds(seek)];
@@ -291,7 +297,7 @@ const subtitleReading = (command: EncodeSource) => {
   const offset = command.from - command.sourceStart;
 
   return {
-    canvas: subtitle?.codec === "dvd_subtitle" ? ["-canvas_size", DVD_CANVAS] : [],
+    canvas: canvasArgs(subtitle === undefined ? undefined : statedCanvas(subtitle.codec)),
     seeked: burning && offset > 0.001,
     lead: offset - SUBTITLE_LEAD > 0.001 ? offset - SUBTITLE_LEAD : undefined,
   };
@@ -378,6 +384,7 @@ export const mp4CommandArgs = (command: Mp4Command): ReadonlyArray<string> => {
     audioCodec: command.audioCodec,
     copiedAudioEnd: undefined,
     segmentStarts: [],
+    files: {},
     previousStart: undefined,
   };
 

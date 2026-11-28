@@ -19,14 +19,18 @@ const OPS: ReadonlyMap<string, string> = new Map([
   ["scale", "Scale"],
   ["tonemap", "Tone map"],
   ["burn-image", "Subtitle"],
+  ["burn-text", "Subtitle"],
   ["encode", "Encode"],
   ["move", "Move"],
 ]);
 
-/** `Decode`, `Tone map`, `Subtitle` for a burned-in picture subtitle, or a later operation as named. */
+/** `Decode`, `Tone map`, `Subtitle` for a burned-in subtitle, or a later operation as named. */
 export const opLabel = (op: string): string => OPS.get(op) ?? op;
 
-/** One stage in a few words: `Decode · QSV`, or a move: `Move · QSV → CPU`. */
+/**
+ * One stage in a few words: `Decode · QSV`, or a move: `Move · QSV → CPU`, and a subtitle prepared
+ * on the CPU and drawn on the GPU: `Subtitle · CPU → QSV`.
+ */
 export const stageLabel = (stage: TranscodeStage): string =>
   stage.move === undefined
     ? `${opLabel(stage.op)} · ${domainLabel(stage.domain)}`

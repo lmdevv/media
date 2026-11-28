@@ -140,7 +140,7 @@ const viewer = (audience: PlaybackToken.PlaybackGrant["audience"], gpu?: "qsv") 
         audioIndex: undefined,
         startSeconds: 0,
         quality: undefined,
-        burnSubtitle: undefined,
+        burnText: undefined,
         keyframes: undefined,
       },
     };

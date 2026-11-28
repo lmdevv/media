@@ -8,6 +8,9 @@
 // (such as a CPU decode feeding a GPU encode) is a new entry in these tables, never new control
 // flow.
 
+import { blockFont } from "./block-font.mjs";
+import { pgsStream } from "./pgs.mjs";
+
 /** The stages of the video pipeline, in the grid's order. */
 export const STAGES = [
   "decode",
@@ -59,10 +62,37 @@ export const FIXTURE_ROOT = "/media/verify-fixtures";
 export const FIXTURE_LIBRARY = "Verify fixtures";
 
 /**
+ * The styled subtitle the text row burns in, on a 1920x1080 script: "LAR SUBTITLE" in the attached
+ * block font (`block-font.mjs`), orange, 80 lines tall, its top left at (120, 860), so it draws two
+ * solid rectangles across x 120 to 696 and y 860 to 940; a caption in DejaVu Sans with a border and
+ * a shadow at the top, and a rotated word, for the eye. Every cue runs from 0.5 s to 29.5 s.
+ */
+export const STYLED_SCRIPT = [
+  "[Script Info]",
+  "ScriptType: v4.00+",
+  "PlayResX: 1920",
+  "PlayResY: 1080",
+  "ScaledBorderAndShadow: yes",
+  "",
+  "[V4+ Styles]",
+  "Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding",
+  "Style: Blocks,Lar Blocks,80,&H000080FF,&H000000FF,&H00000000,&H00000000,0,0,0,0,100,100,0,0,1,0,0,7,0,0,0,1",
+  "Style: Caption,DejaVu Sans,64,&H00FFFFFF,&H000000FF,&H00000000,&H80000000,-1,0,0,0,100,100,0,0,1,3,2,8,0,0,40,1",
+  "",
+  "[Events]",
+  "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text",
+  "Dialogue: 0,0:00:00.50,0:00:29.50,Blocks,,0,0,0,,{\\pos(120,860)}LAR SUBTITLE",
+  "Dialogue: 0,0:00:00.50,0:00:29.50,Caption,,0,0,0,,Styled text, burned in by libass",
+  "Dialogue: 0,0:00:00.50,0:00:29.50,Caption,,0,0,0,,{\\an5\\pos(1440,560)\\frz15\\1c&H00FFFF&}Positioned",
+  "",
+].join("\n");
+
+/**
  * What the cells play. A `library` fixture is a version of a demo library title; a `generate`
  * fixture is made at run time with the side's own ffmpeg into the side's state, mounted at
  * FIXTURE_ROOT, from `args` (the inputs and encode, without the output file), in Matroska unless
- * `format` names another container.
+ * `format` names another container. `files` are written beside it first, by name, from text or
+ * bytes, and the args read them at `/out/<name>`.
  */
 export const FIXTURES = {
   "sdr-h264": {
@@ -129,6 +159,43 @@ export const FIXTURES = {
         ["-c:v", "libx265", "-preset", "ultrafast", "-pix_fmt", "yuv420p10le"],
         ["-x265-params", "keyint=48:min-keyint=48:scenecut=0:log-level=error"],
         ["-color_primaries", "bt2020", "-color_trc", "arib-std-b67", "-colorspace", "bt2020nc", "-c:a", "aac", "-b:a", "128k"],
+      ].flat(),
+    },
+  },
+  "styled-subtitles": {
+    about: "H.264 High 8-bit SDR, 1920x1080 at 24 fps, 30 s of testsrc2 with a tone and a styled ASS track (e2) whose block font is attached, generated",
+    generate: {
+      title: "Verify Fixture Styled Subtitles",
+      year: 2026,
+      file: "Verify Fixture Styled Subtitles (2026).mkv",
+      files: { "styled.ass": () => STYLED_SCRIPT, "lar-blocks.ttf": () => blockFont() },
+      args: [
+        ["-f", "lavfi", "-i", "testsrc2=size=1920x1080:rate=24:duration=30"],
+        ["-f", "lavfi", "-i", "sine=frequency=440:sample_rate=48000:duration=30"],
+        ["-i", "/out/styled.ass"],
+        ["-map", "0:v", "-map", "1:a", "-map", "2:s", "-c:v", "libx264", "-preset", "ultrafast"],
+        ["-g", "48", "-keyint_min", "48", "-sc_threshold", "0", "-pix_fmt", "yuv420p"],
+        ["-color_primaries", "bt709", "-color_trc", "bt709", "-colorspace", "bt709", "-c:a", "aac", "-b:a", "128k", "-c:s", "copy"],
+        ["-attach", "/out/lar-blocks.ttf", "-metadata:s:t:0", "mimetype=application/x-truetype-font"],
+        ["-metadata:s:t:0", "filename=Lar Blocks.ttf"],
+      ].flat(),
+    },
+  },
+  "pgs-subtitles": {
+    about: "H.264 1920x800 (2.39:1) at 24 fps, 30 s of testsrc2 with a tone and a PGS track (e2) on a 1920x1080 canvas, a bar from 2 s to 22 s, generated",
+    generate: {
+      title: "Verify Fixture PGS Subtitles",
+      year: 2026,
+      file: "Verify Fixture PGS Subtitles (2026).mkv",
+      files: { "pgs.sup": () => pgsStream() },
+      args: [
+        ["-f", "lavfi", "-i", "testsrc2=size=1920x800:rate=24:duration=30"],
+        ["-f", "lavfi", "-i", "sine=frequency=440:sample_rate=48000:duration=30"],
+        // ffmpeg starts each input at its own first packet; the offset keeps the bar at 2 s.
+        ["-itsoffset", "2", "-i", "/out/pgs.sup"],
+        ["-map", "0:v", "-map", "1:a", "-map", "2:s", "-c:v", "libx264", "-preset", "ultrafast"],
+        ["-g", "48", "-keyint_min", "48", "-sc_threshold", "0", "-pix_fmt", "yuv420p"],
+        ["-color_primaries", "bt709", "-color_trc", "bt709", "-colorspace", "bt709", "-c:a", "aac", "-b:a", "128k", "-c:s", "copy"],
       ].flat(),
     },
   },
@@ -239,6 +306,11 @@ export const WORK = {
     cpu: { uses: [/(^|[\s,;\]])overlay=/], avoids: [GPU_OVERLAY], engine: "none" },
     qsv: { uses: [/overlay_qsv/], avoids: [], engine: "any" },
     vaapi: { uses: [/overlay_vaapi/], avoids: [], engine: "any" },
+  },
+  // libass draws text on the CPU on every path: beside a GPU path's stages it is judged by the
+  // run's arguments alone.
+  text: {
+    cpu: { uses: [/(^|[\s,;\]])subtitles=/], avoids: [], engine: "none" },
   },
   "encode-h264": {
     cpu: { uses: [/-c:v libx264\b/], avoids: [], engine: "none", bytes: "x264" },
@@ -392,6 +464,51 @@ export const ROWS = [
     notBuilt: ["subtitle-not-burnable"],
     checks: [
       { check: "burned-in", shownAt: 108, hiddenAt: 105, band: 0.7, minBand: 0.01, maxElsewhere: 0.002 },
+      { check: "codec", codec: "h264", stage: false },
+      { check: "dimensions", expect: "source" },
+      { check: "frame-rate", expect: ["source"] },
+    ],
+  },
+  {
+    id: "subtitle-burn-in-pgs",
+    stage: "subtitle-burn-in",
+    paths: ALL_PATHS,
+    fixture: "pgs-subtitles",
+    profile: "h264-sdr",
+    request: { burnInSubtitle: "e2" },
+    start: 0,
+    seek: 20,
+    span: 4,
+    work: { overlay: "path" },
+    notBuilt: ["subtitle-not-burnable"],
+    checks: [
+      { check: "burned-in", shownAt: 21, hiddenAt: 23, band: 0.7, minBand: 0.01, maxElsewhere: 0.002 },
+      { check: "codec", codec: "h264", stage: false },
+      { check: "dimensions", expect: "source" },
+      { check: "frame-rate", expect: ["source"] },
+    ],
+  },
+  {
+    id: "subtitle-burn-in-text",
+    stage: "subtitle-burn-in",
+    paths: ALL_PATHS,
+    fixture: "styled-subtitles",
+    profile: "h264-sdr",
+    request: { burnInSubtitle: "e2" },
+    start: 0,
+    seek: 20,
+    span: 4,
+    work: { text: "cpu", "encode-h264": "path" },
+    notBuilt: ["subtitle-not-burnable"],
+    checks: [
+      {
+        check: "burned-text",
+        region: { x: 100, y: 840, width: 620, height: 120 },
+        place: 2,
+        colour: 12,
+        edge: 16,
+        minFill: 0.9,
+      },
       { check: "codec", codec: "h264", stage: false },
       { check: "dimensions", expect: "source" },
       { check: "frame-rate", expect: ["source"] },
@@ -892,9 +1009,13 @@ export const parseWatch = (text) => {
   });
 };
 
-/** The runs that wrote this stream's segments: their output sits under `/transcode/<streamId>/`. */
+/**
+ * The runs that wrote this stream's segments: HLS runs whose output sits under
+ * `/transcode/<streamId>/`. A burned-in text subtitle's preparation writes there too, as ASS and
+ * fonts, and is no encode.
+ */
 export const streamRuns = (runs, streamId) =>
-  runs.filter((run) => run.args.some((arg) => arg.includes(`/${streamId}/`)));
+  runs.filter((run) => run.args.includes("hls") && run.args.some((arg) => arg.includes(`/${streamId}/`)));
 
 /**
  * The media service's JSON log records for one playback session, and the hardware records that
@@ -940,8 +1061,9 @@ const graphOf = (args) => {
   return graphs.join(";");
 };
 
+// A comma or semicolon escaped with a backslash is part of an option's value, not a separator.
 const filterNames = (graph) =>
-  [...new Set(graph.split(/[,;]/).map((part) => part.replace(/\[[^\]]*\]/g, "").split("=")[0].trim()))].filter(
+  [...new Set(graph.split(/(?<!\\)[,;]/).map((part) => part.replace(/\[[^\]]*\]/g, "").split("=")[0].trim()))].filter(
     (name) => name !== "",
   );
 
@@ -1339,6 +1461,10 @@ export const CHECKS = {
       return ok(summary);
     },
   },
+  "burned-text": {
+    class: "stage",
+    run: (obs, params) => judgeText(obs.analysis?.text, params),
+  },
   work: {
     class: "path",
     run: (obs, params, cell) => {
@@ -1385,6 +1511,98 @@ const encodeOperation = (row) => Object.keys(row.work).find((operation) => opera
 export const where = (cell, operation) => {
   const location = cell.row.work[operation] ?? "path";
   return location === "path" ? cell.path : location;
+};
+
+/**
+ * What `region` of a frame shows, from three RGB pictures of one size: the served frame, the
+ * source frame at its time, and the reference libass render of that frame. The subtitle is where
+ * the reference differs from the source by more than 40 levels in a channel (`drawn`), and what the
+ * served frame drew is where it differs from the source (`served`). Returns each one's bounding
+ * box, the drawn pixels' share of their box (a block font fills it), the served frame's and the
+ * reference's mean colour over the drawn pixels, and the mean difference to the reference in a
+ * ring three pixels wide around the box, where a doubled or haloed edge shows.
+ */
+export const measureText = (output, source, reference, width, region) => {
+  const at = (x, y) => (y * width + x) * 3;
+  const differs = (a, b, offset) =>
+    Math.max(Math.abs(a[offset] - b[offset]), Math.abs(a[offset + 1] - b[offset + 1]), Math.abs(a[offset + 2] - b[offset + 2])) > 40;
+  const boxOf = (picture) => {
+    let box;
+    let count = 0;
+    for (let y = region.y; y < region.y + region.height; y += 1) {
+      for (let x = region.x; x < region.x + region.width; x += 1) {
+        if (!differs(picture, source, at(x, y))) continue;
+        count += 1;
+        box = box === undefined
+          ? { left: x, top: y, right: x, bottom: y }
+          : { left: Math.min(box.left, x), top: Math.min(box.top, y), right: Math.max(box.right, x), bottom: Math.max(box.bottom, y) };
+      }
+    }
+    return box === undefined ? undefined : { ...box, count };
+  };
+  const drawn = boxOf(reference);
+  const served = boxOf(output);
+  if (drawn === undefined) return { drawn, served };
+  const sums = { output: [0, 0, 0], reference: [0, 0, 0] };
+  let ring = 0;
+  let ringCount = 0;
+  for (let y = drawn.top - 3; y <= drawn.bottom + 3; y += 1) {
+    for (let x = drawn.left - 3; x <= drawn.right + 3; x += 1) {
+      const offset = at(x, y);
+      const inside = x >= drawn.left && x <= drawn.right && y >= drawn.top && y <= drawn.bottom;
+      if (inside && differs(reference, source, offset)) {
+        for (let channel = 0; channel < 3; channel += 1) {
+          sums.output[channel] += output[offset + channel];
+          sums.reference[channel] += reference[offset + channel];
+        }
+      } else if (!inside) {
+        for (let channel = 0; channel < 3; channel += 1) ring += Math.abs(output[offset + channel] - reference[offset + channel]);
+        ringCount += 3;
+      }
+    }
+  }
+  const mean = (values) => values.map((value) => value / drawn.count);
+  const area = (box) => (box.right - box.left + 1) * (box.bottom - box.top + 1);
+  return {
+    drawn,
+    served,
+    fill: drawn.count / area(drawn),
+    colour: { output: mean(sums.output), reference: mean(sums.reference) },
+    ring: ringCount === 0 ? 0 : ring / ringCount,
+  };
+};
+
+/**
+ * Judges the text a fetch's frame shows against the reference render of the same source frame:
+ * the served subtitle's box within `place` pixels of the reference's on every edge, its mean colour
+ * within `colour` levels in each channel, the reference's drawn pixels filling `minFill` of its
+ * box (the block font drew it, not a fallback), and the ring around it within `edge` levels. A
+ * frame with nothing drawn fails as a missing stage; one that could not be measured fails, never
+ * passes.
+ */
+export const judgeText = (text, params) => {
+  if (text === undefined || Object.keys(text).length === 0) return { ok: false, class: "output", evidence: "could not measure: no frames to compare" };
+  const lines = [];
+  for (const [name, frame] of Object.entries(text)) {
+    if (frame.error !== undefined) return { ok: false, class: "output", evidence: `could not measure the ${name} frame: ${frame.error}` };
+    const { drawn, served } = frame;
+    if (drawn === undefined) return { ok: false, class: "output", evidence: `could not measure the ${name} frame: the reference drew nothing in the region` };
+    if (served === undefined) return no(`no subtitle drawn in the ${name} frame at ${frame.at} s`);
+    const off = Math.max(
+      Math.abs(served.left - drawn.left),
+      Math.abs(served.top - drawn.top),
+      Math.abs(served.right - drawn.right),
+      Math.abs(served.bottom - drawn.bottom),
+    );
+    const colour = frame.colour.output.map((value, channel) => Math.abs(value - frame.colour.reference[channel]));
+    const facts = `${name} at ${frame.at} s: box ${served.left},${served.top}-${served.right},${served.bottom} (reference ${drawn.left},${drawn.top}-${drawn.right},${drawn.bottom}), colour ${frame.colour.output.map((value) => fmt(value, 0)).join("/")} (${frame.colour.reference.map((value) => fmt(value, 0)).join("/")}), fill ${fmt(frame.fill * 100, 1)}%, edge ${fmt(frame.ring, 1)}`;
+    if (frame.fill < params.minFill) return { ok: false, class: "output", evidence: `not drawn in its own font: ${facts}` };
+    if (off > params.place) return { ok: false, class: "output", evidence: `misplaced by ${off} px: ${facts}` };
+    if (Math.max(...colour) > params.colour) return { ok: false, class: "output", evidence: `off colour by ${fmt(Math.max(...colour), 0)}: ${facts}` };
+    if (frame.ring > params.edge) return { ok: false, class: "output", evidence: `edges differ: ${facts}` };
+    lines.push(facts);
+  }
+  return ok(lines.join("; "));
 };
 
 /**

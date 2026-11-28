@@ -129,10 +129,10 @@ const pathsIn = (args: ReadonlyArray<string>): ReadonlyArray<string> =>
   args.filter((arg) => arg.startsWith("/") && arg.length > 1);
 
 /**
- * Variables ffmpeg and ffprobe may see: where programs live, time and locale, and where VA-API
- * drivers and the oneVPL runtime are (Quick Sync). Everything else stays out, above all the
- * Convex admin key and the service's credentials, so a crafted file that exploits a decoder finds
- * nothing to steal.
+ * Variables ffmpeg and ffprobe may see: where programs live, time and locale, where VA-API
+ * drivers and the oneVPL runtime are (Quick Sync), and the fonts libass finds (`FONTCONFIG_FILE`,
+ * which the NixOS module sets). Everything else stays out, above all the Convex admin key and the
+ * service's credentials, so a crafted file that exploits a decoder finds nothing to steal.
  */
 const TOOL_ENVIRONMENT = [
   "PATH",
@@ -143,6 +143,7 @@ const TOOL_ENVIRONMENT = [
   "LIBVA_DRIVERS_PATH",
   "LIBVA_DRIVER_NAME",
   "ONEVPL_SEARCH_PATH",
+  "FONTCONFIG_FILE",
 ] as const;
 
 /** The environment the tools run with, picked from the service's own. */

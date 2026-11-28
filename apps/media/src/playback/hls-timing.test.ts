@@ -44,7 +44,7 @@ const encodedOn = (probe: MediaProbe, domain: "software" | "qsv" | "vaapi"): Vid
       bounds: { width: 320, height: 180 },
       cpuEncodeBounds: { width: 1920, height: 1080 },
       maxBitrate: 1_000_000,
-      burnImage: undefined,
+      burn: undefined,
     },
     verifiedFor(probe, domain === "software" ? [] : [domain]),
   );
@@ -575,6 +575,7 @@ const runFrom = Effect.fn("HlsTiming.runFrom")(function* (
       audioCodec: probe.audio[0]?.codec ?? "",
       copiedAudioEnd: testCase.audio === "copy" ? probe.audio[0]?.endSeconds : undefined,
       segmentStarts: plan.starts.slice(startSegment),
+      files: {},
       previousStart: plan.starts[startSegment - 1],
       outputDirectory,
     }).args,

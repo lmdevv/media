@@ -13,6 +13,7 @@ import type { PlaybackMode } from "@media/contracts/models/playback";
 import { Data, Result } from "effect";
 
 import type { AudioTrack, MediaProbe, VideoStream } from "../media/media-probe.ts";
+import { burnableText } from "../subtitles/burned-text.ts";
 import {
   type CapabilitySnapshot,
   encodeDomain,
@@ -23,9 +24,11 @@ import {
   type VideoPipeline,
 } from "./video-pipeline.ts";
 import {
+  type Burn,
+  Op,
   type OutputCodec,
   type OutputTarget,
-  type SubtitleInput,
+  type TextSubtitle,
   toneMapsTo,
 } from "./video-ops.ts";
 
@@ -68,12 +71,25 @@ export type PlaybackPlan = Data.TaggedEnum<{
 /** Constructors and matchers for `PlaybackPlan`. */
 export const PlaybackPlan = Data.taggedEnum<PlaybackPlan>();
 
-/** What an encode is asked to fit: the viewer's cap and an image subtitle to burn in. */
+/** A subtitle track a viewer asked to have drawn into the picture. */
+export type BurnRequest = Data.TaggedEnum<{
+  /** An embedded image subtitle, by its ffmpeg stream index. */
+  Image: { readonly stream: number };
+  /** A text track, embedded or a sidecar, that libass draws. */
+  Text: { readonly subtitle: Omit<TextSubtitle, "storage"> };
+  /** A track the file does not have, or one that cannot be drawn in. */
+  Refused: {};
+}>;
+
+/** Constructors and matchers for `BurnRequest`. */
+export const BurnRequest = Data.taggedEnum<BurnRequest>();
+
+/** What an encode is asked to fit: the viewer's cap and a subtitle to burn in. */
 export interface EncodeRequest {
   /** The viewer's quality cap; none plays the best the client takes. */
   readonly quality?: PlaybackQuality | undefined;
-  /** ffmpeg stream index of an embedded image subtitle to burn into the picture. */
-  readonly burnSubtitle?: number | undefined;
+  /** A subtitle track to draw into the picture. */
+  readonly burnSubtitle?: BurnRequest | undefined;
 }
 
 /** Inputs besides the probe and the client. */
@@ -182,6 +198,19 @@ const exceeds = (probe: MediaProbe, video: VideoStream, quality: PlaybackQuality
       probe.bitRate > quality.maxBitrate));
 
 /**
+ * Whether `request` names a subtitle this file can have drawn in: one of its image tracks, or a
+ * text track the caller found among its embedded tracks or its sidecars, in a codec ffmpeg can
+ * write as ASS.
+ */
+const burnable = (probe: MediaProbe, request: BurnRequest): boolean =>
+  BurnRequest.$match(request, {
+    Image: ({ stream }) =>
+      probe.subtitles.some((track) => track.index === stream && track.kind === "bitmap"),
+    Text: ({ subtitle }) => burnableText(subtitle.codec),
+    Refused: () => false,
+  });
+
+/**
  * Chooses how to deliver `probe` to `client`. A quality cap that would need an encode this host
  * cannot do (HDR without tone mapping, a client that plays nothing it encodes to) is dropped, so
  * the viewer still gets the source rather than nothing; a subtitle to burn in is not, as nothing
@@ -217,10 +246,7 @@ export const decideWithin = (
 
   const burnSubtitle = options.burnSubtitle;
 
-  if (
-    burnSubtitle !== undefined &&
-    !probe.subtitles.some((track) => track.index === burnSubtitle && track.kind === "bitmap")
-  ) {
+  if (burnSubtitle !== undefined && !burnable(probe, burnSubtitle)) {
     return PlaybackPlan.Unsupported({ reason: "subtitle-not-burnable" });
   }
 
@@ -291,26 +317,6 @@ export const encodeIntent = (
   const targets = outputTargets(client);
 
   if (targets.length === 0) return undefined;
-  const subtitle = probe.subtitles.find((track) => track.index === request.burnSubtitle);
-
-  const burnImage: SubtitleInput | undefined =
-    subtitle === undefined
-      ? undefined
-      : {
-          input: 0,
-          stream: subtitle.index,
-          codec: subtitle.codec,
-          frame: {
-            memory: "cpu",
-            device: undefined,
-            colour: "sdr",
-            depth: 8,
-            pixelFormat: "pal8",
-            scan: "progressive",
-            width: video.width,
-            height: video.height,
-          },
-        };
 
   return {
     targets,
@@ -321,9 +327,46 @@ export const encodeIntent = (
     },
     cpuEncodeBounds: SOFTWARE_MAX,
     maxBitrate: request.quality?.maxBitrate,
-    burnImage,
+    burn:
+      request.burnSubtitle === undefined ? undefined : burnOf(probe, video, request.burnSubtitle),
   };
 };
+
+/**
+ * The operation that draws `request` into `video`'s picture: an image track read from the file as
+ * frames of its own, or a text track libass draws at the source's size; none for a refused one.
+ */
+const burnOf = (probe: MediaProbe, video: VideoStream, request: BurnRequest): Burn | undefined =>
+  BurnRequest.$match(request, {
+    Image: ({ stream }): Burn | undefined => {
+      const subtitle = probe.subtitles.find((track) => track.index === stream);
+
+      return subtitle === undefined
+        ? undefined
+        : Op.BurnImage({
+            subtitle: {
+              input: 0,
+              stream: subtitle.index,
+              codec: subtitle.codec,
+              frame: {
+                memory: "cpu",
+                device: undefined,
+                colour: "sdr",
+                depth: 8,
+                pixelFormat: "pal8",
+                scan: "progressive",
+                width: video.width,
+                height: video.height,
+              },
+            },
+          });
+    },
+    Text: ({ subtitle }): Burn =>
+      Op.BurnText({
+        subtitle: { ...subtitle, storage: { width: video.width, height: video.height } },
+      }),
+    Refused: (): Burn | undefined => undefined,
+  });
 
 /**
  * Plans `intent` for `video` again from `capabilities`, as a replacement after a failure does: the
@@ -339,11 +382,25 @@ export const replan = (
       Result.succeed(VideoPlan.Encode({ intent, output, pipeline })),
     onFailure: () =>
       Result.fail(
-        intent.targets.some((target) => toneMapsTo(video.dynamicRange, target))
-          ? "hdr-tone-mapping-requires-hardware"
-          : "no-transcode-target",
+        drawsNoSubtitle(video, intent, capabilities)
+          ? "subtitle-not-burnable"
+          : intent.targets.some((target) => toneMapsTo(video.dynamicRange, target))
+            ? "hdr-tone-mapping-requires-hardware"
+            : "no-transcode-target",
       ),
   });
+
+/**
+ * Whether the subtitle alone keeps `intent` from planning: the same encode without it plans. No
+ * row this build proved draws it then, as on a build without libass (`subtitles`).
+ */
+const drawsNoSubtitle = (
+  video: VideoStream,
+  intent: VideoIntent,
+  capabilities: CapabilitySnapshot,
+): boolean =>
+  intent.burn !== undefined &&
+  Result.isSuccess(planVideo(sourceOf(video), { ...intent, burn: undefined }, capabilities));
 
 /**
  * How a plan delivers the file, the one place the mode comes from: copied video is a remux, or an

@@ -4,9 +4,11 @@
  * one (`vpp_qsv` scaling and tone mapping). After the last filter of a domain whose filters leave
  * durations untrusted (Quick Sync's), the graph restates the frame rate once. An image subtitle
  * splits the graph in three chains: the picture up to the overlay, the subtitle, and the overlay
- * with what follows it. ffmpeg names each filter `Parsed_<filter>_<n>`, counting through the
- * graph's text, and the rendering records which steps own each name, so a failed run's log reads
- * back to steps.
+ * with what follows it. A text subtitle is one filter of the picture's chain, reading the files the
+ * run names. Every value is escaped by `filterValue` as it is written, so a path or style may hold
+ * any character. ffmpeg names each filter `Parsed_<filter>_<n>`, counting through the graph's
+ * text, and the rendering records which steps own each name, so a failed run's log reads back to
+ * steps.
  */
 import { Predicate } from "effect";
 
@@ -20,7 +22,18 @@ import {
   type Step,
   type VideoPipeline,
 } from "./video-pipeline.ts";
-import { type FilterCall, filter, type GpuDomain, Op } from "./video-ops.ts";
+import { PROBE_CANVAS } from "./probe-clips.ts";
+import {
+  type FilterCall,
+  filter,
+  type GpuDomain,
+  Op,
+  type OptionValue,
+  type RunFile,
+} from "./video-ops.ts";
+
+/** The paths of the files a run names for its filters; one it does not name is left out. */
+export type RunFiles = Readonly<Partial<Record<RunFile, string>>>;
 
 /** A filter graph: one chain for `-vf`, or several for `-filter_complex`. */
 interface FilterGraph {
@@ -46,6 +59,8 @@ export interface RenderOptions {
   readonly trimPicture: number | undefined;
   /** Subtitle frames before this time are dropped. */
   readonly trimSubtitle: number | undefined;
+  /** The files this run's filters read: a text subtitle's ASS file and its fonts. */
+  readonly files: RunFiles;
 }
 
 interface Owned {
@@ -55,12 +70,39 @@ interface Owned {
 
 const seconds = (value: number): string => value.toFixed(6);
 
-const textOf = (call: FilterCall): string =>
-  call.args.length === 0
-    ? call.name
-    : `${call.name}=${call.args
-        .map((arg) => (Predicate.isString(arg) ? arg : `${arg[0]}=${arg[1]}`))
-        .join(":")}`;
+/** Backslash-escapes each character of `value` that is in `special`. */
+const escaped = (value: string, special: RegExp): string =>
+  value.replaceAll(special, (character) => `\\${character}`);
+
+/** What separates options (`:`) or quotes them, and whitespace, which ffmpeg trims at the ends. */
+const OPTION_SPECIAL = /[\\':\s]/gu;
+
+/** What separates filters, chains, and link labels in a graph, besides quotes and whitespace. */
+const GRAPH_SPECIAL = /[\\'[\],;\s]/gu;
+
+/**
+ * `value` as one option value inside a filter graph: escaped once for the filter's option parser
+ * and once more for the graph's, as ffmpeg reads both, so quotes, colons, commas, brackets,
+ * semicolons, backslashes, spaces, and newlines in a path or a style reach the filter as they are.
+ * Plain values, digits and words, come out unchanged.
+ */
+export const filterValue = (value: string): string =>
+  escaped(escaped(value, OPTION_SPECIAL), GRAPH_SPECIAL);
+
+/** A named option as `key=value`, or nothing when its value is a file the run does not name. */
+const optionText = (key: string, value: OptionValue, files: RunFiles): ReadonlyArray<string> => {
+  const text = Predicate.isString(value) ? value : files[value.file];
+
+  return text === undefined ? [] : [`${key}=${filterValue(text)}`];
+};
+
+const textOf = (call: FilterCall, files: RunFiles): string => {
+  const args = call.args.flatMap((arg) =>
+    Predicate.isString(arg) ? [filterValue(arg)] : optionText(arg[0], arg[1], files),
+  );
+
+  return args.length === 0 ? call.name : `${call.name}=${args.join(":")}`;
+};
 
 /** Merges `next` into `last` when both are fusing calls of one filter. */
 const fused = (last: Owned | undefined, next: Owned): Owned | undefined => {
@@ -168,6 +210,11 @@ const deviceArgs = (pipeline: VideoPipeline): ReadonlyArray<string> => {
 export const renderVideo = (pipeline: VideoPipeline, options: RenderOptions): RenderedVideo => {
   if (!isAssembled(pipeline)) throw new Error("Only a pipeline assemble returned can be rendered");
   const { steps } = pipeline;
+
+  if (options.files.subtitle === undefined && steps.some((step) => Op.$is("BurnText")(step.op))) {
+    throw new Error("A text subtitle is drawn only from the ASS file its run names");
+  }
+
   const burn = steps.findIndex((step) => Op.$is("BurnImage")(step.op));
   const burnStep = steps[burn];
   const filters = new Map<string, ReadonlyArray<number>>();
@@ -179,7 +226,7 @@ export const renderVideo = (pipeline: VideoPipeline, options: RenderOptions): Re
         filters.set(`Parsed_${call.name}_${String(parsed)}`, owners);
         parsed += 1;
 
-        return textOf(call);
+        return textOf(call, options.files);
       })
       .join(",");
 
@@ -192,7 +239,12 @@ export const renderVideo = (pipeline: VideoPipeline, options: RenderOptions): Re
   } else {
     const { side } = burnStep.rendering;
     const drawn = callsOf(steps.slice(burn), burn);
-    const shown = [...trim(options.trimPicture), ...callsOf(steps.slice(0, burn), 0)];
+
+    const shown = [
+      ...trim(options.trimPicture),
+      ...callsOf(steps.slice(0, burn), 0),
+      ...(side.picture ?? []).map((call): Owned => ({ call, steps: [burn] })),
+    ];
 
     // The rate is restated once, in the overlay's chain when a filter there needs it.
     const [picture, overlay] =
@@ -252,25 +304,34 @@ export const graphArgs = (
     : ["-filter_complex", rendered.graph.text, "-map", "[video]"];
 };
 
-/** A translucent white picture a probe of an overlay reads as its subtitle. */
-const PROBE_SUBTITLE = "color=c=white@0.5:s=320x240:d=1,format=yuva420p";
+/** What a probe reads besides its clip, and where it writes the picture it reads back. */
+export interface ProbeExtras {
+  /** The files its filters read, such as the probe's own ASS script. */
+  readonly files: RunFiles;
+  /** Where its first output picture goes, in 8-bit gray, for a probe that reads one back. */
+  readonly readback: string | undefined;
+}
 
 /**
  * The ffmpeg arguments that run `pipeline` reading `path`: the whole of a generated clip, or a real
  * source's first second of stream `stream`, into ffmpeg's null output, with progress on standard
- * output so the run's frame count can be read. Probes run this way.
+ * output so the run's frame count can be read; a probe that reads its picture back writes its
+ * first frame to `extras.readback` instead. An overlay reads `PROBE_CANVAS` as its subtitle.
+ * Probes run this way.
  */
 export const probeCommandArgs = (
   pipeline: VideoPipeline,
   input: ProbeInput,
   path: string,
   stream: number,
+  extras: ProbeExtras = { files: {}, readback: undefined },
 ): ReadonlyArray<string> => {
   const options: RenderOptions = {
     input: 0,
     stream,
     trimPicture: undefined,
     trimSubtitle: undefined,
+    files: extras.files,
   };
 
   const rendered = renderVideo(pipeline, options);
@@ -291,15 +352,15 @@ export const probeCommandArgs = (
     ...ProbeInput.$match(input, { Clip: () => [], Source: () => ["-t", "1"] }),
     "-i",
     path,
-    ...(overlaid ? ["-f", "lavfi", "-i", PROBE_SUBTITLE] : []),
+    ...(overlaid ? ["-f", "lavfi", "-i", PROBE_CANVAS] : []),
     ...graphArgs(rendered, options),
     ...rendered.output,
     "-an",
     "-sn",
     "-dn",
-    "-f",
-    "null",
-    "-",
+    ...(extras.readback === undefined
+      ? ["-f", "null", "-"]
+      : ["-frames:v", "1", "-pix_fmt", "gray", "-f", "rawvideo", "-y", extras.readback]),
   ];
 };
 

@@ -24,7 +24,15 @@ import * as Inventory from "./capability-inventory.ts";
 import * as TranscodeCapabilities from "./transcode-capabilities.ts";
 import { Diagnosis } from "./transcode-recovery.ts";
 import { planVideo, samePipeline, type VideoIntent, type VideoPipeline } from "./video-pipeline.ts";
-import { capabilityKey, ImplId, sdrTarget, type SourceVideo } from "./video-ops.ts";
+import {
+  type Burn,
+  capabilityKey,
+  ImplId,
+  Op,
+  PROBE_IMAGE_SUBTITLE,
+  sdrTarget,
+  type SourceVideo,
+} from "./video-ops.ts";
 import { renderVideo } from "./video-render.ts";
 
 const hasFfmpeg = await ffmpegAvailable();
@@ -63,7 +71,7 @@ const INTENT: VideoIntent = {
   bounds: { width: 1920, height: 1080 },
   cpuEncodeBounds: { width: 1920, height: 1080 },
   maxBitrate: undefined,
-  burnImage: undefined,
+  burn: undefined,
 };
 
 const request = (
@@ -171,8 +179,13 @@ const pipelineOf = (
 
 /** Which step owns each name in a log of `pipeline`'s runs, as the renderer lays a run out. */
 const ownersOf = (pipeline: VideoPipeline) =>
-  renderVideo(pipeline, { input: 0, stream: 0, trimPicture: undefined, trimSubtitle: undefined })
-    .owners;
+  renderVideo(pipeline, {
+    input: 0,
+    stream: 0,
+    trimPicture: undefined,
+    trimSubtitle: undefined,
+    files: {},
+  }).owners;
 
 /** A run of the full Quick Sync chain whose fused `vpp_qsv` failed, as ffmpeg reports it. */
 const vppFailed = (pipeline: VideoPipeline): TranscodeCapabilities.FailedRun => ({
@@ -406,6 +419,23 @@ const clipless = await standIn({
       stderr: "Unknown encoder 'libvpx-vp9'",
     },
   ],
+});
+
+/** Quick Sync's overlay runs but reads back a black picture, as one that ignores alpha draws. */
+const blankOverlay = await standIn({ blankReadback: "overlay_qsv" });
+
+const SDR: SourceVideo = { ...JPEG_RANGE, pixelFormat: "yuv420p" };
+
+/** A request for `SDR` with `burn` drawn in. */
+const burning = (burn: Burn): TranscodeCapabilities.Request => ({
+  ...request(SDR, "burning"),
+  intent: { ...INTENT, burn },
+});
+
+const IMAGE = Op.BurnImage({ subtitle: PROBE_IMAGE_SUBTITLE });
+
+const TEXT = Op.BurnText({
+  subtitle: { codec: "ass", style: "styled", storage: { width: 320, height: 240 } },
 });
 
 const live = { excludeTestServices: true, timeout: "60 seconds" } as const;
@@ -1270,5 +1300,79 @@ describe.skipIf(!hasFfmpeg)("TranscodeCapabilities", () => {
         }),
       60_000,
     );
+  });
+
+  describe("subtitle rows", () => {
+    layer(
+      plain.services,
+      live,
+    )((it) => {
+      it.effect(
+        "verifies an overlay and libass by the pictures their probes read back",
+        () =>
+          Effect.gen(function* () {
+            const capabilities = yield* TranscodeCapabilities.Service;
+            const image = yield* capabilities.resolve(burning(IMAGE));
+
+            assert.strictEqual(
+              yield* statusOf(capabilityKey(ImplId("burn-image.qsv"), "bitmap/nv12")),
+              "verified",
+            );
+            assert.deepStrictEqual(
+              Result.map(planVideo(SDR, burning(IMAGE).intent, image), ({ pipeline }) =>
+                pipeline.steps.map((step): string => step.impl),
+              ),
+              Result.succeed(["decode.qsv", "scale.qsv", "burn-image.qsv", "encode.qsv.h264"]),
+            );
+
+            yield* capabilities.resolve(burning(TEXT));
+
+            assert.strictEqual(
+              yield* statusOf(capabilityKey(ImplId("burn-text.cpu"), "ass")),
+              "verified",
+            );
+          }),
+        60_000,
+      );
+    });
+
+    layer(
+      blankOverlay.services,
+      live,
+    )((it) => {
+      it.effect(
+        "refuses an overlay whose picture shows no subtitle drawn as it must be, and plans around it",
+        () =>
+          Effect.gen(function* () {
+            const capabilities = yield* TranscodeCapabilities.Service;
+            const snapshot = yield* capabilities.resolve(burning(IMAGE));
+            const key = capabilityKey(ImplId("burn-image.qsv"), "bitmap/nv12");
+            const known = Inventory.capabilityOf(yield* capabilities.inventory, key);
+            const [evidence] = known.evidence;
+
+            assert.strictEqual(known.status, "unsupported");
+            assert.isTrue(
+              evidence !== undefined &&
+                Inventory.Evidence.$is("Probe")(evidence) &&
+                evidence.outcome === "rejected" &&
+                evidence.detail.startsWith("the picture read back shows no subtitle"),
+            );
+            assert.deepStrictEqual(
+              Result.map(planVideo(SDR, burning(IMAGE).intent, snapshot), ({ pipeline }) =>
+                pipeline.steps.map((step): string => step.impl),
+              ),
+              Result.succeed([
+                "decode.qsv",
+                "scale.qsv",
+                "move.qsv>cpu",
+                "burn-image.cpu",
+                "move.cpu>qsv",
+                "encode.qsv.h264",
+              ]),
+            );
+          }),
+        60_000,
+      );
+    });
   });
 });

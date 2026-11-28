@@ -17,6 +17,7 @@ import { CPU_ROWS } from "./video-ops-cpu.ts";
 import { INTEL_ROWS, QSV, VAAPI } from "./video-ops-intel.ts";
 import {
   BITRATE_SHARE,
+  type Burn,
   type BuildFeature,
   type CapabilityKey,
   capabilityKey,
@@ -31,11 +32,11 @@ import {
   type OpName,
   type OutputCodec,
   type OutputTarget,
+  type Readback,
   type Rendering,
   type Row,
   type Scan,
   type SourceVideo,
-  type SubtitleInput,
   toneMapsTo,
 } from "./video-ops.ts";
 
@@ -176,8 +177,8 @@ export interface VideoIntent {
   /** The largest picture the CPU encodes. */
   readonly cpuEncodeBounds: Size;
   readonly maxBitrate: number | undefined;
-  /** An image subtitle drawn onto the picture. */
-  readonly burnImage: SubtitleInput | undefined;
+  /** A subtitle drawn into the picture: an image subtitle, or a text track libass draws. */
+  readonly burn: Burn | undefined;
 }
 
 /** What an encode produces. */
@@ -438,8 +439,8 @@ interface Candidate {
  * (the CPU within its bounds) and the bitrate within the target's level at the source's frame
  * rate, skipping a target whose level holds that rate at no size; an interlaced source is
  * deinterlaced right after it is decoded, at its own frame rate; the scale leaves frames at the
- * source's depth or at 8 bits, whichever the rows after it take, and a tone map runs where the
- * target asks for SDR from HDR.
+ * source's depth or at 8 bits, whichever the rows after it take, a tone map runs where the
+ * target asks for SDR from HDR, and a subtitle is drawn last, on the SDR picture.
  */
 const candidates = (
   source: SourceVideo,
@@ -498,7 +499,7 @@ const candidates = (
           ...(source.scan === "interlaced" ? [Op.Deinterlace()] : []),
           Op.Scale({ ...size, depth }),
           ...(toneMapsTo(source.colour, target) ? [Op.ToneMap()] : []),
-          ...(intent.burnImage === undefined ? [] : [Op.BurnImage({ subtitle: intent.burnImage })]),
+          ...(intent.burn === undefined ? [] : [intent.burn]),
         ];
 
         return product(ops.map(usable)).map((rows): Candidate => ({
@@ -688,6 +689,8 @@ export interface ProbePlan {
   readonly pipeline: VideoPipeline;
   readonly input: ProbeInput;
   readonly runs: number;
+  /** What its first output picture must show, for a subtitle row; none for any other. */
+  readonly readback: Readback | undefined;
 }
 
 const decodeCpu = rowById.get(ImplId("decode.cpu"));
@@ -695,8 +698,9 @@ const decodeCpu = rowById.get(ImplId("decode.cpu"));
 /**
  * The choices that feed `entry` doing `op` on `source` and drain it: decoders read their input
  * and, on a GPU, download, so a decoder that fell back to software fails; uploads stop on the
- * device; downloads first upload; other rows read CPU-decoded frames, moved in as they need.
- * ffmpeg's null output takes frames in any memory.
+ * device; downloads first upload; subtitle rows on a GPU download after drawing, as their probes
+ * read the picture back; other rows read CPU-decoded frames, moved in as they need. ffmpeg's null
+ * output takes frames in any memory.
  */
 const probeChoices = (
   entry: Row,
@@ -723,6 +727,14 @@ const probeChoices = (
     return upload === undefined
       ? undefined
       : [decoded, [Op.Move({ to: entry.takes }), upload], [op, entry]];
+  }
+
+  if ((entry.op === "BurnImage" || entry.op === "BurnText") && entry.on !== "cpu") {
+    const download = moveRow(entry.on, "cpu");
+
+    return download === undefined
+      ? undefined
+      : [decoded, [op, entry], [Op.Move({ to: "cpu" }), download]];
   }
 
   return [decoded, [op, entry]];
@@ -774,6 +786,7 @@ export const probeFor = (
         pipeline: built.success,
         input: ProbeInput.Clip({ clip: probe.clip }),
         runs: probe.runs,
+        readback: probe.readback,
       });
     }
 
@@ -799,7 +812,13 @@ export const sourceProbeFor = (
 
   return built === undefined
     ? undefined
-    : Result.map(built, (pipeline) => ({ key, pipeline, input: ProbeInput.Source(), runs: 1 }));
+    : Result.map(built, (pipeline) => ({
+        key,
+        pipeline,
+        input: ProbeInput.Source(),
+        runs: 1,
+        readback: undefined,
+      }));
 };
 
 const WARMUP_ORDER: ReadonlyArray<OpName> = [
@@ -810,6 +829,7 @@ const WARMUP_ORDER: ReadonlyArray<OpName> = [
   "ToneMap",
   "Deinterlace",
   "BurnImage",
+  "BurnText",
 ];
 
 /** The codecs most sources are, whose 8-bit decoders warmup proves first. */
@@ -832,6 +852,7 @@ const common = (step: Step): boolean =>
     Scale: () => true,
     ToneMap: () => true,
     BurnImage: () => false,
+    BurnText: () => false,
     Encode: ({ target }) => target.codec === COMMON_OUTPUT,
     Move: () => true,
   });
@@ -840,7 +861,7 @@ const common = (step: Step): boolean =>
  * The steps generated clips prove for the rows of `domain`, one per key: first those of the chain
  * most files play through (8-bit moves, the H.264 encoder, scaling, H.264 and HEVC decoding), then
  * the rest, each group in the order most chains need them: moves, the encoders, scaling, decoders,
- * tone maps, deinterlacers, then overlays.
+ * tone maps, deinterlacers, image overlays, then text.
  */
 export const probedSteps = (domain: Domain, snapshot: CapabilitySnapshot): ReadonlyArray<Step> => {
   const steps = new Map<CapabilityKey, Step>();

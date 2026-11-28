@@ -27,6 +27,20 @@ mkdir -p "$library/movies/Long Fixture (2020)"
 "${FFMPEG_PATH:-ffmpeg}" -hide_banner -nostdin -v error -y -f lavfi \
   -i testsrc2=size=320x180:rate=24:duration=600 -c:v libx264 -preset ultrafast -pix_fmt yuv420p \
   -g 48 "$library/movies/Long Fixture (2020)/Long Fixture (2020).mp4"
+# Ten minutes with a styled ASS track, which the service burns in below: long enough that its
+# transcode, paused once it is ahead, is still there to read.
+mkdir -p "$library/movies/Styled Fixture (2020)"
+styled_script="$(mktemp --suffix=.ass)"
+printf '%s\n' "[Script Info]" "ScriptType: v4.00+" "PlayResX: 320" "PlayResY: 180" "" "[V4+ Styles]" \
+  "Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding" \
+  "Style: Default,DejaVu Sans,24,&H0000FFFF,&H000000FF,&H00000000,&H80000000,0,0,0,0,100,100,0,0,1,1,1,2,10,10,10,1" \
+  "" "[Events]" "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text" \
+  "Dialogue: 0,0:00:00.00,0:10:00.00,Default,,0,0,0,,A styled line" >"$styled_script"
+"${FFMPEG_PATH:-ffmpeg}" -hide_banner -nostdin -v error -y -f lavfi \
+  -i testsrc2=size=320x180:rate=24:duration=600 -i "$styled_script" -map 0:v -map 1:s \
+  -c:v libx264 -preset ultrafast -pix_fmt yuv420p -g 48 -c:s copy \
+  "$library/movies/Styled Fixture (2020)/Styled Fixture (2020).mkv"
+rm -f "$styled_script"
 # mktemp makes the folder private to this user; the media user (PUID) must read it, as it must
 # read any real library.
 chmod -R a+rX "$library"
@@ -56,7 +70,7 @@ cleanup() {
     compose down --volumes --remove-orphans >/dev/null 2>&1 || true
     rm -rf "$library"
   fi
-  rm -rf "$secrets"
+  rm -rf "$secrets" "${drawn:-}"
   exit $status
 }
 trap cleanup EXIT
@@ -356,6 +370,70 @@ done
 outer="$(through_outer_proxy)"
 check "a trusted outer proxy's clients each get their own limit" \
   'grep -qx 429 <<<"$outer" && [[ "$(tail -n 1 <<<"$outer")" == 200 ]]'
+
+# A styled text track burned in through the service, as a player asks for one: its first segment
+# comes, and no font cache is written anywhere while it runs.
+burning() {
+  node -e 'const [url, ticket] = process.argv.slice(1);
+    const capabilities = { containers: ["mp4"], videoCodecs: [{ codec: "h264", maxBitDepth: 8 }],
+      audioCodecs: [{ codec: "aac" }], maxWidth: 640, maxHeight: 360, hls: false, mse: true };
+    (async () => {
+      const r = await fetch(`${url}/api/playback/negotiate`, { method: "POST", headers: { "content-type": "application/json" },
+        body: JSON.stringify({ token: ticket, capabilities, startSeconds: 0, burnInSubtitle: "e1" }) });
+      const answer = await r.json();
+      if (r.status !== 200) throw new Error(JSON.stringify(answer));
+      const segment = await fetch(new URL(`0.m4s${new URL(answer.url).search}`, answer.url));
+      process.stdout.write(`${answer.burnedInSubtitle} ${segment.status} ${(await segment.arrayBuffer()).byteLength}`);
+    })().catch((e) => { console.error(String(e)); process.exit(1); });' "$MEDIA_BASE_URL" "$1"
+}
+in_media touch /tmp/before-burn
+burned="$(burning "$(cli_ticket "Styled Fixture")")" || burned="failed"
+check "the media service burns a styled text track in" '[[ "$burned" =~ ^e1\ 200\ [1-9] ]]'
+
+# The service keeps its tools' standard error unless a run fails, so libass draws again with what
+# the burn-in's own ffmpeg runs with, read from it: its binary, user, groups, and environment. At
+# the service's `-v error` it draws silently, so fontconfig, whose cache the image built, had
+# nothing to say or write; and a style naming a family the image lacks draws in DejaVu Sans's
+# faces at their size, as the frames and libass's choices at `-v info` show
+# (scripts/font-fallback.ts).
+burner_pid() {
+  in_media sh -c 'for p in /proc/[0-9]*; do
+    [ "$(awk "/^PPid:/ { print \$2 }" "$p/status" 2>/dev/null)" = "$1" ] || continue
+    case "$(tr "\0" " " < "$p/cmdline" 2>/dev/null)" in *subtitles=*) echo "${p#/proc/}";; esac
+  done' sh "$(media_pid)"
+}
+drawn="$(mktemp -d)"
+libass_says() {
+  local pid exe identity environment
+  pid="$(burner_pid)"
+  [[ "$pid" =~ ^[0-9]+$ ]] || { echo "no burn-in ffmpeg under the media service"; return; }
+  mapfile -t identity < <(in_media awk '/^Uid:/ { u = $2 } /^Gid:/ { g = $2 }
+    /^Groups:/ { $1 = ""; gsub(/^ +| +$/, ""); gsub(/ +/, ","); s = $0 }
+    END { print "--reuid=" u; print "--regid=" g; print "--groups=" (s == "" ? g : s) }' "/proc/${pid}/status")
+  # A process's binary and environment are readable only to its own user: the container's root
+  # lacks the capability to read another's.
+  exe="$(in_media setpriv "${identity[@]}" readlink "/proc/${pid}/exe")"
+  mapfile -d '' -t environment < <(in_media setpriv "${identity[@]}" cat "/proc/${pid}/environ")
+  [[ -n "$exe" && ${#environment[@]} -gt 0 ]] || { echo "the burn-in ffmpeg could not be read"; return; }
+  node "$root/scripts/font-fallback.ts" script |
+    in_media sh -c 'cat >/tmp/fallback.ass && chmod a+r /tmp/fallback.ass && rm -f /tmp/frames.gray'
+  draw() {
+    in_media setpriv "${identity[@]}" --inh-caps=-all env -i "${environment[@]}" "$exe" \
+      -hide_banner -nostdin -v "$1" -f lavfi -i color=c=black:s=640x360:r=1:d=8 \
+      -vf subtitles=filename=/tmp/fallback.ass,format=gray -f rawvideo -y "$2" 2>&1
+  }
+  draw error /dev/null
+  draw info /tmp/frames.gray >"$drawn/draw.log"
+  in_media cat /tmp/frames.gray >"$drawn/frames.gray"
+}
+libass_said="$(libass_says)" || true
+[[ -z "$libass_said" ]] || printf 'libass said:\n%s\n' "$libass_said" >&2
+check "libass draws as the burn-in's ffmpeg runs, and fontconfig says nothing" \
+  '[[ -z "$libass_said" ]]'
+check "a style naming a family the image lacks draws in DejaVu Sans's faces at their size" \
+  'node "$root/scripts/font-fallback.ts" judge "$drawn/frames.gray" "$drawn/draw.log"'
+check "the burn-in wrote no font cache" \
+  '[[ -z "$(in_media find / -xdev -newer /tmp/before-burn -path "*fontconfig*" 2>/dev/null)" ]]'
 
 if [[ "${QSV:-0}" == 1 ]]; then
   check "the media user encodes with Quick Sync in the container" \

@@ -156,14 +156,42 @@ const transcodeLines = (transcode: TranscodeSummary): ReadonlyArray<string> => [
   ),
 ];
 
+/**
+ * The file's subtitle tracks for people, the one drawn into the video marked: `subtitles: e2 ass
+ * eng (burned in), e3 hdmv_pgs_subtitle eng`; nothing for a file without any.
+ */
+const subtitleLine = (
+  subtitles: ReadonlyArray<{
+    readonly id: string;
+    readonly codec: string;
+    readonly language?: string | undefined;
+  }>,
+  burned: string | undefined,
+): ReadonlyArray<string> =>
+  subtitles.length === 0
+    ? []
+    : [
+        `subtitles: ${subtitles
+          .map((track) =>
+            [
+              track.id,
+              track.codec,
+              ...(track.language === undefined ? [] : [track.language]),
+              ...(track.id === burned ? ["(burned in)"] : []),
+            ].join(" "),
+          )
+          .join(", ")}`,
+      ];
+
 const isPlaybackApiError = Schema.is(PlaybackApiError);
 
 const stream = coreShortcut("movies", "stream", {
   usage:
-    "<title> [--episode-id <id>] [--version <name|number>] [--from <seconds>] [--max-height <lines>] [--open]",
+    "<title> [--episode-id <id>] [--version <name|number>] [--from <seconds>] [--max-height <lines>] [--burn-subtitle <track>] [--open]",
   summary:
-    "Start a title by its ID or the best name match (a show resumes its next episode) and print the stream URL for mpv or VLC; --version picks a file by its name or its number in `media movies titles versions` (default: the one you last played, else the best quality); --max-height caps the picture, such as 720 on a slow link (a taller source is transcoded down); --open launches mpv",
+    "Start a title by its ID or the best name match (a show resumes its next episode) and print the stream URL for mpv or VLC; --version picks a file by its name or its number in `media movies titles versions` (default: the one you last played, else the best quality); --max-height caps the picture, such as 720 on a slow link (a taller source is transcoded down); --burn-subtitle draws a subtitle track into the video by the ID the output's `subtitles:` line lists, such as e3, styled ASS and picture subtitles included (the stream then transcodes); --open launches mpv",
   options: {
+    "burn-subtitle": { type: "string" },
     "episode-id": { type: "string" },
     from: { type: "string" },
     "max-height": { type: "string" },
@@ -189,6 +217,19 @@ const stream = coreShortcut("movies", "stream", {
       }
 
       const maxHeight = Option.map(stringFlag(invocation.tokens, "max-height"), Number);
+
+      const rawSubtitle = invocation.tokens.values["burn-subtitle"];
+
+      const burnSubtitle = Predicate.isString(rawSubtitle)
+        ? Option.some(rawSubtitle.trim())
+        : Option.none();
+
+      if (Option.contains(burnSubtitle, "")) {
+        return yield* usage(
+          invocation,
+          "--burn-subtitle expects a subtitle track's ID from the `subtitles:` line, such as e3",
+        );
+      }
 
       if (
         Option.isSome(maxHeight) &&
@@ -284,7 +325,7 @@ const stream = coreShortcut("movies", "stream", {
         Option.none(),
         {
           quality: Option.map(maxHeight, (height) => ({ maxHeight: height })),
-          burnInSubtitle: Option.none(),
+          burnInSubtitle: burnSubtitle,
         },
       ).pipe(
         Effect.map(Result.succeed),
@@ -315,6 +356,14 @@ const stream = coreShortcut("movies", "stream", {
         expiresAt: playback.expiresAt,
         video: playback.video,
         transcode: playback.transcode ?? null,
+        subtitles: playback.subtitles.map((track) => ({
+          id: track.id,
+          codec: track.codec,
+          kind: track.kind,
+          language: track.language ?? null,
+          title: track.title ?? null,
+        })),
+        burnedInSubtitle: playback.burnedInSubtitle ?? null,
       };
 
       if (booleanFlag(invocation.tokens, "open")) {
@@ -340,6 +389,7 @@ const stream = coreShortcut("movies", "stream", {
         [
           `${title.name}${Option.match(episode, { onNone: () => "", onSome: (label) => ` ${label}` })}${started.file.versionName === null ? "" : ` · ${started.file.versionName}`} (${playback.mode}, ${MediaLabels.codecLabel(playback.video.codec)}, from ${formatDuration(playback.startSeconds * 1000)})`,
           ...(playback.transcode === undefined ? [] : transcodeLines(playback.transcode)),
+          ...subtitleLine(playback.subtitles, playback.burnedInSubtitle),
           playback.url,
         ].join("\n"),
       );

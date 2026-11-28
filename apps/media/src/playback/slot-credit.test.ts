@@ -190,7 +190,7 @@ const setup = Effect.gen(function* () {
       audioIndex: undefined,
       startSeconds: 0,
       quality: undefined,
-      burnSubtitle: undefined,
+      burnText: undefined,
       keyframes,
     },
   };

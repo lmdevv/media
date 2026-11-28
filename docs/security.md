@@ -76,6 +76,21 @@ that argument.
   `^[^./\\][^/\\]*\.zip$` and resolve inside `BACKUP_DIR`; the scanner follows links only inside
   the root and visits loops once; playback, sidecar subtitles, and local artwork are re-checked
   against `LIBRARY_ROOTS` on use.
+- **Burned-in text subtitles** come from library files, untrusted input to ffmpeg and libass. The
+  track is converted by ffmpeg into `subtitle.ass` in the stream's own folder under
+  `TRANSCODE_DIR`, and a sidecar is read where it is, never changed. The converted track must be
+  under 32 MiB and start as an ASS script (`[Script Info]`), or the stream does not start: the
+  service reads ffmpeg's output from a pipe and stops it once 32 MiB arrived, holding no more than
+  that and one read, and ffmpeg allocates at most 64 MiB in one block (`-max_alloc`), so a script's
+  header far past the bound fails to open. The bound also holds fonts a script carries in its own
+  `[Fonts]` section, which libass loads. Fonts
+  are taken from the file's attachments by stream index only, into files the service names
+  (`<n>.font`): a name the file gives never becomes a path. Only attachments typed as fonts are
+  taken, at most 64, 32 MiB each and 128 MiB in all, within the probe timeout, and each one kept
+  must be a regular file, not a link, that starts as a TrueType, OpenType, or collection font does. The folder goes with the stream. Every
+  filter value is escaped for both of ffmpeg's parsers by one function (`filterValue`), and
+  nothing from a file, a title or a name, reaches an argument (`burned-text.test.ts`,
+  `subtitle-probes.test.ts`, `subtitle-burn-in.test.ts`).
 - **Tickets:** every byte route admits only a core ticket and checks its key, purpose, resource,
   and expiry, at most six hours and never after its session (ADR 0011), so a ticket for one file
   or session cannot reach another's stream.

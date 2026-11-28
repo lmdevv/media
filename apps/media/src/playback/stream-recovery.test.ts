@@ -215,6 +215,28 @@ const deinterlacerFailsLater = await writeFakeFfmpeg({
   logInvocations: true,
 });
 
+/** What ffmpeg prints when Quick Sync's overlay cannot start its composition. */
+const OVERLAY_FAILED =
+  "[Parsed_overlay_qsv_10 @ 0x1] Failed to create a VPP session: undefined behavior (-16)";
+
+/** The first stream run that draws the subtitle on Quick Sync fails; its probe then fails too. */
+const overlayFails = await writeFakeFfmpeg({
+  rules: [
+    { token: "overlay_qsv", runs: "hls", stderr: OVERLAY_FAILED, arm: "overlay", limit: 1 },
+    { token: "overlay_qsv", runs: "probe", stderr: OVERLAY_FAILED, armedBy: "overlay" },
+  ],
+  logInvocations: true,
+});
+
+/** libass failing to start, as ffmpeg reports it from the text subtitle's filter. */
+const LIBASS_FAILED = "[Parsed_subtitles_6 @ 0x1] Error initializing libass";
+
+/** The first stream run that draws a text subtitle fails. */
+const textBurnFails = await writeFakeFfmpeg({
+  rules: [{ token: "subtitles=filename", runs: "hls", stderr: LIBASS_FAILED, limit: 1 }],
+  logInvocations: true,
+});
+
 /** Runs stall after their first fragment until killed, so a seek replaces a live run. */
 const stalling = await writeFakeFfmpeg({ hlsStallsAfterFragments: 1, logInvocations: true });
 
@@ -316,7 +338,11 @@ const PICTURES = {
  * Twelve seconds at 640x360, HDR10 HEVC or interlaced MPEG-2, with an AAC track (1), an AC-3
  * track (2), and a DVD subtitle (3), in a library of its own.
  */
-const addFilm = Effect.fn(function* (library: string, picture: keyof typeof PICTURES = "hdr") {
+const addFilm = Effect.fn(function* (
+  library: string,
+  picture: keyof typeof PICTURES = "hdr",
+  subtitle: "picture" | "text" = "picture",
+) {
   const workspace = yield* FixtureWorkspace.Service;
   const tools = yield* MediaTools.Service;
   const scanner = yield* LibraryScanner.Service;
@@ -326,7 +352,10 @@ const addFilm = Effect.fn(function* (library: string, picture: keyof typeof PICT
   const root = path.join(workspace.root, library);
   const output = path.join(root, FILM);
 
+  const text = path.join(root, "lines.srt");
+
   yield* fs.makeDirectory(path.dirname(output), { recursive: true });
+  yield* fs.writeFileString(text, "1\n00:00:01,000 --> 00:00:11,000\nA line\n");
   yield* tools.ffmpeg([
     "-hide_banner",
     "-nostdin",
@@ -343,7 +372,7 @@ const addFilm = Effect.fn(function* (library: string, picture: keyof typeof PICT
     "-i",
     "sine=frequency=660:sample_rate=48000:duration=12",
     "-i",
-    VOBSUB,
+    subtitle === "text" ? text : VOBSUB,
     "-map",
     "0:v",
     "-map",
@@ -1173,6 +1202,95 @@ describe.skipIf(!hasFfmpeg)("stream recovery", () => {
           assert.include(replacement, "-hwaccel");
           assert.deepStrictEqual(kept(replacement), kept(first));
           assert.isTrue(kept(first).subtitle);
+        }),
+      120_000,
+    );
+  });
+
+  layer(
+    recovering(overlayFails),
+    options,
+  )((it) => {
+    it.effect(
+      "draws the subtitle on the CPU between Quick Sync's stages when its overlay fails, keeping what the viewer chose",
+      () =>
+        Effect.gen(function* () {
+          const fileId = yield* addFilm("overlay-lost");
+
+          const film = yield* negotiated({
+            token: signTestToken({ fid: fileId, sid: "film" }),
+            ...CHOICES,
+          });
+
+          assert.strictEqual(film.generation, 2);
+          assert.strictEqual(film.mode, "transcode-qsv", "the encode stays on the GPU");
+          assert.strictEqual(yield* fetchStatus(segmentOf(film.url, 3)), 200);
+          assert.deepInclude(film.transcode?.changes[0], {
+            generation: 2,
+            reason: "reproduced",
+            excluded: ["burn-image.qsv"],
+          });
+          assert.deepStrictEqual(
+            film.transcode?.stages.filter((stage) => stage.op !== "decode"),
+            [
+              { op: "scale", domain: "qsv", impl: "scale.qsv" },
+              { op: "tonemap", domain: "qsv", impl: "tonemap.qsv" },
+              { op: "move", domain: "qsv", impl: "move.qsv>cpu", move: { from: "qsv", to: "cpu" } },
+              { op: "burn-image", domain: "cpu", impl: "burn-image.cpu" },
+              { op: "move", domain: "qsv", impl: "move.cpu>qsv", move: { from: "cpu", to: "qsv" } },
+              { op: "encode", domain: "qsv", impl: "encode.qsv.h264" },
+            ],
+          );
+
+          const runs = yield* runsOf(overlayFails, film.streamId ?? "");
+          const [first = [], replacement = []] = runs;
+
+          assert.lengthOf(runs, 2);
+          assert.include(first.join(" "), "overlay_qsv");
+          assert.notInclude(replacement.join(" "), "overlay_qsv");
+          assert.include(replacement.join(" "), "hwdownload");
+          assert.include(replacement, "h264_qsv");
+          assert.deepStrictEqual(kept(replacement), kept(first));
+          assert.isTrue(kept(first).subtitle);
+        }),
+      120_000,
+    );
+  });
+
+  layer(
+    MediaTestServer.layer({ FFMPEG_PATH: textBurnFails, HARDWARE_ACCELERATION: "none" }),
+    options,
+  )((it) => {
+    it.effect(
+      "ends the stream when libass fails, rather than play on without the subtitle the viewer chose",
+      () =>
+        Effect.gen(function* () {
+          const fileId = yield* addFilm("text-burn-lost", "hdr", "text");
+
+          const film = yield* negotiated({
+            token: signTestToken({ fid: fileId, sid: "film" }),
+            ...CHOICES,
+          });
+
+          assert.deepInclude(film.transcode?.stages ?? [], {
+            op: "burn-text",
+            domain: "cpu",
+            impl: "burn-text.cpu",
+          });
+
+          // No other row draws text, so the failed one leaves nothing to plan the choice with.
+          const answer = yield* fetchAnswer(segmentOf(film.url, 3));
+
+          assert.strictEqual(answer.status, 500, answer.body);
+          assert.deepInclude(JSON.parse(answer.body), {
+            _tag: "TranscodeFailed",
+            reason: "nothing-left",
+          });
+
+          const runs = yield* runsOf(textBurnFails, film.streamId ?? "");
+
+          assert.lengthOf(runs, 1);
+          assert.include(runs[0]?.join(" ") ?? "", "subtitles=filename");
         }),
       120_000,
     );
