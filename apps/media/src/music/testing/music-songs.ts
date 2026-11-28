@@ -5,6 +5,7 @@
 import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
 import {
+  chmod,
   mkdir,
   mkdtemp,
   readdir,
@@ -135,6 +136,12 @@ export const writeSong = async (path: string, song: Song): Promise<void> => {
 export const writeBytes = async (path: string, bytes: Uint8Array | string): Promise<void> => {
   await mkdir(dirname(path), { recursive: true });
   await writeFile(path, bytes);
+};
+
+/** Writes the shell script `lines` to `path` and makes it executable, for a stand-in tool. */
+export const writeScript = async (path: string, lines: ReadonlyArray<string>): Promise<void> => {
+  await writeBytes(path, ["#!/bin/sh", ...lines, ""].join("\n"));
+  await chmod(path, 0o755);
 };
 
 /**

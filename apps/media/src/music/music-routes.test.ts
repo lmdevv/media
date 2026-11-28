@@ -22,9 +22,10 @@ import {
   Scope,
   SubscriptionRef,
 } from "effect";
-import { HttpServer } from "effect/http";
+import { FetchHttpClient, HttpServer } from "effect/http";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
+import * as ArtworkStore from "../artwork/artwork-store.ts";
 import * as CachePruner from "../cache-pruner.ts";
 import * as CoreTickets from "../core/core-tickets.ts";
 import { serve } from "../http/http-server.ts";
@@ -33,6 +34,7 @@ import * as PlaybackToken from "../playback/playback-grants.ts";
 import * as StreamOwners from "../playback/stream-owners.ts";
 import { makeFakeCore, stream } from "../testing/fake-core.ts";
 import { testConfigLayer } from "../testing/test-config.ts";
+import { testArtworkKeysLayer } from "../testing/test-tokens.ts";
 import { saveArt } from "./art-store.ts";
 import * as MusicRoutes from "./music-routes.ts";
 import {
@@ -217,6 +219,11 @@ beforeAll(async () => {
       }).pipe(Layer.provide(fake.layer), Layer.provide(StreamOwners.layer)),
     ),
     Layer.provide(sources(tracks)),
+    Layer.provide(
+      ArtworkStore.layer.pipe(
+        Layer.provide([testArtworkKeysLayer, MediaTools.layer, FetchHttpClient.layer]),
+      ),
+    ),
     Layer.provide(MusicTranscoder.layer.pipe(Layer.provide([MediaTools.layer, CachePruner.layer]))),
     Layer.provide(config),
     Layer.provide(NodeServices.layer),

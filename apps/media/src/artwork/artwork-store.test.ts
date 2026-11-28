@@ -28,27 +28,71 @@ class ImageHost extends Context.Service<ImageHost, { readonly baseUrl: string }>
   "test/ImageHost",
 ) {}
 
-const respond = Effect.gen(function* () {
-  const request = yield* HttpServerRequest.HttpServerRequest;
+/** Answers a provider image request: `landscape` for one whose URL says so. */
+const respond = (landscape: Uint8Array) =>
+  Effect.gen(function* () {
+    const request = yield* HttpServerRequest.HttpServerRequest;
 
-  return request.url.includes("oversized")
-    ? HttpServerResponse.stream(Stream.fromIterable(Array.from({ length: 21 }, () => MEGABYTE)), {
-        contentType: "image/jpeg",
-      })
-    : HttpServerResponse.uint8Array(SMALL, { contentType: "image/jpeg" });
+    if (request.url.includes("oversized")) {
+      return HttpServerResponse.stream(
+        Stream.fromIterable(Array.from({ length: 21 }, () => MEGABYTE)),
+        { contentType: "image/jpeg" },
+      );
+    }
+
+    return HttpServerResponse.uint8Array(request.url.includes("landscape") ? landscape : SMALL, {
+      contentType: "image/jpeg",
+    });
+  });
+
+/** A 1,200 by 600 JPEG. */
+const makeLandscape = Effect.gen(function* () {
+  const tools = yield* MediaTools.Service;
+  const fs = yield* FileSystem.FileSystem;
+  const path = yield* Path.Path;
+  const directory = yield* fs.makeTempDirectoryScoped({ prefix: "media-artwork-landscape-" });
+  const file = path.join(directory, "landscape.jpg");
+
+  yield* tools.ffmpeg([
+    "-v",
+    "error",
+    "-f",
+    "lavfi",
+    "-i",
+    "testsrc=size=1200x600",
+    "-frames:v",
+    "1",
+    "-q:v",
+    "1",
+    file,
+  ]);
+
+  return yield* fs.readFile(file);
 });
 
-const imageHost = Layer.effect(
-  ImageHost,
-  HttpServer.addressFormattedWith((baseUrl) => Effect.succeed(ImageHost.of({ baseUrl }))),
-).pipe(
-  Layer.provideMerge(
-    HttpRouter.serve(HttpRouter.add("GET", "/*", respond), {
-      disableLogger: true,
-      disableListenLog: true,
-    }),
+const imageHost = Layer.unwrap(
+  makeLandscape.pipe(
+    Effect.orDie,
+    Effect.map((landscape) =>
+      Layer.effect(
+        ImageHost,
+        HttpServer.addressFormattedWith((baseUrl) => Effect.succeed(ImageHost.of({ baseUrl }))),
+      ).pipe(
+        Layer.provideMerge(
+          HttpRouter.serve(HttpRouter.add("GET", "/*", respond(landscape)), {
+            disableLogger: true,
+            disableListenLog: true,
+          }),
+        ),
+        Layer.provideMerge(NodeHttpServer.layer(createServer, { port: 0, host: "127.0.0.1" })),
+      ),
+    ),
   ),
-  Layer.provideMerge(NodeHttpServer.layer(createServer, { port: 0, host: "127.0.0.1" })),
+).pipe(
+  // Its own tools and configuration, apart from the store's under test.
+  Layer.provide(
+    MediaTools.layer.pipe(Layer.provide(Layer.fresh(testConfigLayer({}))), Layer.fresh),
+  ),
 );
 
 const redirectedClient = Layer.effect(
@@ -76,7 +120,7 @@ const storeLayer = Layer.unwrap(
 
     return ArtworkStore.layer.pipe(
       Layer.provideMerge(testArtworkKeysLayer),
-      Layer.provide(MediaTools.layer),
+      Layer.provideMerge(MediaTools.layer),
       Layer.provide(redirectedClient),
       Layer.provideMerge(testConfigLayer({ DATA_DIR: dataDir, LIBRARY_ROOTS: library })),
     );
@@ -110,6 +154,47 @@ describe("artwork store", () => {
         assert.isTrue(Predicate.isTagged(error, "ArtworkUnavailable"));
         assert.include(String(error.cause), "ArtworkTooLarge");
       }),
+    );
+
+    it.effect(
+      "resizes movie artwork by its width and a music cover by its shorter side, never confusing the two",
+      () =>
+        Effect.gen(function* () {
+          const store = yield* ArtworkStore.Service;
+          const keys = yield* ArtworkKeys.Service;
+          const tools = yield* MediaTools.Service;
+          const url = "https://image.tmdb.org/t/p/original/landscape.jpg";
+
+          const sizeOf = (file: string) =>
+            tools
+              .ffprobe([
+                "-v",
+                "error",
+                "-show_entries",
+                "stream=width,height",
+                "-of",
+                "csv=p=0",
+                file,
+              ])
+              .pipe(Effect.map((out) => out.trim()));
+
+          const key = yield* keys.seal(ArtworkKeys.ArtworkSource.Remote({ url }));
+          const original = yield* store.image(key, Option.none());
+
+          // A remote image's fingerprint is its URL, so both copies below share file and fingerprint.
+          const poster = yield* store.image(key, Option.some(342));
+          const cover = yield* store.coverCopy(original.path, url, 336, Effect.succeed("jpeg"));
+          const posterAgain = yield* store.image(key, Option.some(342));
+
+          assert.strictEqual(yield* sizeOf(poster.path), "342,172");
+          assert.isTrue(ArtworkStore.CoverCopy.$is("Copy")(cover));
+
+          if (!ArtworkStore.CoverCopy.$is("Copy")(cover)) return;
+          assert.strictEqual(yield* sizeOf(cover.image.path), "672,336");
+          assert.notStrictEqual(cover.image.path, poster.path);
+          assert.strictEqual(posterAgain.path, poster.path);
+          assert.strictEqual(yield* sizeOf(posterAgain.path), "342,172");
+        }),
     );
 
     it.effect("reports a resize it cannot store as unavailable", () =>

@@ -22,7 +22,7 @@ Convex functions stay plain TypeScript with `v` validators, declared in `package
 | `@media/contracts/media-commands`   | The media service's own HTTP commands (`mediaCommands`), with their routes and schemas                |
 | `@media/contracts/media-api`        | The media service's Effect HttpApi (playback negotiation, stream control, downloads, health)          |
 | `@media/contracts/media-playback`   | Its routes, request and response schemas, and tagged errors, for clients without Effect HTTP          |
-| `@media/contracts/artwork`          | Artwork keys, `ARTWORK_WIDTHS`, and artwork URLs                                                      |
+| `@media/contracts/artwork`          | Artwork keys, `ARTWORK_WIDTHS`, music's `COVER_SIZES`, and artwork URLs                               |
 | `@media/contracts/trickplay`        | Scrub thumbnail manifests and their URLs                                                              |
 | `@media/contracts/cast`             | What a Chromecast plays, and the receiver credential its URLs carry in place of the ticket (ADR 0011) |
 | `@media/contracts/direct-play`      | Whether a client plays a file directly, shared by the media service, the SDK, and the clients         |

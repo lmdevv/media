@@ -1,3 +1,4 @@
+import { sizedArtworkUrl } from "@media/contracts/artwork";
 import type { ArtworkWidth } from "@media/contracts/artwork";
 
 // An iPad's billboard is up to 2752 pixels wide, past the largest resize, so it takes the original.
@@ -24,9 +25,5 @@ export const artworkUrl = (
 ): string | undefined => {
   if (path === null || path === undefined || path === "") return undefined;
 
-  const width = WIDTHS[use];
-
-  if (width === undefined) return `${mediaUrl}${path}`;
-
-  return `${mediaUrl}${path}${path.includes("?") ? "&" : "?"}w=${String(width)}`;
+  return sizedArtworkUrl(`${mediaUrl}${path}`, WIDTHS[use]);
 };

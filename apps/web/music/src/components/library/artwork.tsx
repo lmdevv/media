@@ -3,13 +3,15 @@ import { useState } from "react";
 import type { CSSProperties, ReactNode } from "react";
 
 import { placeholderGradient } from "@/lib/art";
-import { artSrc } from "@/lib/art-src";
+import { coverSrc } from "@/lib/art-src";
+import { useDrawnPixels } from "@/lib/use-drawn-pixels";
 
 /**
  * A cover or artist image. Without a URL, or when the image fails, it draws the deterministic
  * placeholder gradient for `seed`, so the same album looks the same everywhere. The image is
  * decorative (`alt=""`), but `children`, such as a play button on the cover, stay in the
- * accessibility tree, so the frame itself is not `aria-hidden`.
+ * accessibility tree, so the frame itself is not `aria-hidden`. The image loads once the frame is
+ * laid out, at the server's copy for the size the frame is drawn at (`coverSrc`).
  */
 export function Artwork({
   url,
@@ -27,10 +29,12 @@ export function Artwork({
   readonly children?: ReactNode;
 }) {
   const [failed, setFailed] = useState(false);
-  const showImage = url !== null && !failed;
+  const [frame, pixels] = useDrawnPixels();
+  const showImage = url !== null && !failed && pixels !== null;
 
   return (
     <div
+      ref={frame}
       className={cn(
         "relative shrink-0 overflow-hidden",
         round ? "rounded-full" : "rounded-md",
@@ -40,7 +44,7 @@ export function Artwork({
     >
       {showImage ? (
         <img
-          src={artSrc(url)}
+          src={coverSrc(url, pixels)}
           alt=""
           loading="lazy"
           decoding="async"

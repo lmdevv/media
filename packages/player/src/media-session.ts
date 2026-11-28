@@ -1,3 +1,5 @@
+import { COVER_SIZES, sizedArtworkUrl } from "@media/contracts/artwork";
+
 /** What the system media controls show of a song. */
 export interface NowPlayingTrack {
   readonly title: string;
@@ -16,6 +18,18 @@ export interface MediaSessionHandlers {
   readonly previous: () => void;
   readonly seekTo: (positionMs: number) => void;
 }
+
+/**
+ * A cover as the system media controls take it: each resized copy with its size, so the browser
+ * downloads the one that fits its controls rather than the stored original. A copy's shorter side
+ * is the size, and the controls draw it square. No type is given: the server answers a JPEG or PNG
+ * copy, or the cover as stored when a copy would not show it the same.
+ */
+const nowPlayingArtwork = (artUrl: string): MediaImage[] =>
+  COVER_SIZES.map((size) => ({
+    src: sizedArtworkUrl(artUrl, size),
+    sizes: `${String(size)}x${String(size)}`,
+  }));
 
 const session = (): MediaSession | null =>
   "mediaSession" in navigator ? navigator.mediaSession : null;
@@ -79,7 +93,7 @@ export const showNowPlaying = (
       title: track.title,
       artist: track.artist,
       album: track.album,
-      artwork: track.artUrl === null ? [] : [{ src: track.artUrl }],
+      artwork: track.artUrl === null ? [] : nowPlayingArtwork(track.artUrl),
     });
   }
 

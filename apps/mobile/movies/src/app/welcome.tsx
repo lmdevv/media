@@ -4,7 +4,7 @@ import { View } from "react-native";
 import welcomeArt from "../../assets/images/welcome.jpg";
 
 import { Button } from "@/components/ui/button";
-import { Image } from "@/components/ui/image";
+import { BundledImage } from "@/components/ui/image";
 import { Screen } from "@/components/ui/screen";
 import { Text } from "@/components/ui/text";
 
@@ -23,7 +23,7 @@ export default function Welcome() {
       }
     >
       <View className="h-20 regular:hidden" />
-      <Image
+      <BundledImage
         source={welcomeArt}
         contentFit="cover"
         accessibilityIgnoresInvertColors

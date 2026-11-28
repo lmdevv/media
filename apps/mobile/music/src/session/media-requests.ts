@@ -1,3 +1,4 @@
+import { artworkCacheKey } from "@media/contracts/artwork";
 import { Option } from "effect";
 
 /**
@@ -202,9 +203,12 @@ export const listenForMediaRequests = (
  */
 const COVER_STATUS = /status code (\d{3})/u;
 
-/** One doubt per cover per watch: its URL without the ticket names it. */
+/**
+ * One doubt per cover image per watch. Its URL without the ticket names it, size included, so a
+ * failed copy of one size never uses up the hearing of the original or of another size.
+ */
 const coverRequest = (url: string): ((status: number | null) => void) =>
-  mediaRequest(url, url.split("?")[0] ?? url);
+  mediaRequest(url, artworkCacheKey(url));
 
 /**
  * Starts observing the cover image at `url`; returns its `onError`, which reads the status from
