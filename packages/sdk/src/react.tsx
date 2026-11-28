@@ -85,7 +85,7 @@ export interface PlatformProviderProps {
    * nothing is saved when omitted. Pass the same object on every render: a new one opens a new
    * client.
    */
-  readonly saved?: SaveAnswers;
+  readonly saved?: SaveAnswers | undefined;
   readonly children: ReactNode;
 }
 

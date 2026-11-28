@@ -645,7 +645,11 @@ Old movies' Convex project, its SDK client, and its command registry were delete
 - The movies iOS app saves who is signed in and what Home draws first (`movies.titles.home`, the
   libraries, the Collections row) in `saved-answers.<server>.json` in its caches folder, which
   iOS keeps out of backups and may empty. With no data-protection entitlement, the file takes
-  iOS's default class, readable once the phone was unlocked after it started. A saved answer
+  iOS's default class, readable once the phone was unlocked after it started. A launch whose
+  shared keychain names another person on the server than the app last signed in as saves and
+  shows nothing and deletes the file: that person's password sign-in in the other app took the
+  phone and ended this app's session (D64), which the app still holds until the core says so. A
+  saved answer
   shows for a week at most, inside the 7 to 14 days an artwork ticket admits. A launch opens Home
   from it, and while it shows, Continue Watching and the billboard play without naming an
   episode, so the server picks where the person is now; the downloads engine and app events wait

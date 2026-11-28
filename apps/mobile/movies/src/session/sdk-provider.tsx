@@ -51,7 +51,7 @@ export function SdkProvider({
   useServerRelease(connection.mediaUrl);
 
   // Held for the provider's life, which its `key` ties to the server: a new object opens a new client.
-  const [saved] = useState(() => savedHome(connection.convexUrl, THIS_APP.version ?? "unknown"));
+  const [saved] = useState(() => savedHome(connection, THIS_APP.version ?? "unknown"));
 
   return (
     <PlatformProvider
