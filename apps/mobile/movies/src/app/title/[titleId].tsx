@@ -195,7 +195,9 @@ function TitleDetailView({
             ) : null}
             {show && detail === null ? (
               <>
-                <Blank className={`h-6 w-32 ${GUTTER}`} />
+                <View className={GUTTER}>
+                  <Blank className="h-6 w-32" />
+                </View>
                 <EpisodesBlank />
               </>
             ) : null}
