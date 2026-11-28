@@ -52,12 +52,15 @@ server is out of reach, the player plays the phone's own queue of downloaded son
 keeps each download as a pin and reads its songs from the core; the sync engine
 (`src/downloads/sync`) plans what to fetch and delete, keeps each song on the core with
 `core.downloads.add`, and fetches its finished file (`&finished=1`) with a ticket from
-`core.downloads.fetch`. It keeps each downloaded song's lyrics too, so Now Playing shows them with
-no connection. Files and a SQLite index live in Application Support under
-`downloads/<server>/<account>/`, which the VaultFiles module in `@media/mobile-core` marks
-excluded from backup. Signing
-out deletes the server's downloads. Screens use the hooks in `src/downloads/index.ts` and never
-see files.
+`core.downloads.fetch`. With Wi-Fi only on, the default, nothing transfers while iOS rates the
+network expensive or constrained (the NetworkCost module in `@media/mobile-core`); in Low Power
+Mode only the downloads the person starts then transfer (`transferGate`). It keeps each
+downloaded song's lyrics too, so Now Playing shows them with no connection, and asks for them
+again only when the core lists a new lyrics revision for the song. Files and a SQLite index live
+in Application Support under `downloads/<server>/<account>/`, which the VaultFiles module in
+`@media/mobile-core` marks excluded from backup. Signing out first releases the person's songs on
+the core, then deletes the server's downloads for every account. Screens use the hooks in
+`src/downloads/index.ts` and never see files.
 
 ## iPad
 

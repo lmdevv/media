@@ -430,6 +430,51 @@ describe("DownloadSync's lyrics questions", () => {
   });
 });
 
+describe("DownloadSync.releaseAll", () => {
+  it("releases every song the core keeps here for the account, and stops fetching", async () => {
+    const one = song("t1", "Safe from Harm");
+    const two = song("t2", "One Love");
+
+    media.serve("/song/t1", "first song");
+    await settled((snapshot) => snapshot.ready);
+    await sync.request(ALBUM, DETAILS);
+    sync.offerManifest(pinIdOf(ALBUM), manifestOf([one]));
+    await settled((snapshot) => snapshot.copies.size === 1);
+    sync.offerKept(
+      new Map([
+        [one.id, null],
+        [two.id, null],
+      ]),
+    );
+    await sync.releaseAll();
+
+    expect(core.calls.filter((call) => call.startsWith("release:")).toSorted()).toEqual([
+      "release:t1",
+      "release:t2",
+    ]);
+    expect(core.kept.size).toBe(0);
+
+    sync.offerManifest(pinIdOf(ALBUM), manifestOf([one, two]));
+    await new Promise((resolve) => setTimeout(resolve, 50));
+
+    expect(core.calls.filter((call) => call.startsWith("keep:"))).toEqual(["keep:t1"]);
+  });
+
+  it("sends nothing while the server is out of reach", async () => {
+    const one = song("t1", "Safe from Harm");
+
+    media.serve("/song/t1", "first song");
+    await settled((snapshot) => snapshot.ready);
+    await sync.request(ALBUM, DETAILS);
+    sync.offerManifest(pinIdOf(ALBUM), manifestOf([one]));
+    await settled((snapshot) => snapshot.copies.size === 1);
+    sync.setOnline(false);
+    await sync.releaseAll();
+
+    expect(core.calls.filter((call) => call.startsWith("release:"))).toEqual([]);
+  });
+});
+
 describe("DownloadSync over the core", () => {
   it("keeps each song of a download on the core, fetches it with a ticket, and stores its revision", async () => {
     const one = song("t1", "Safe from Harm");

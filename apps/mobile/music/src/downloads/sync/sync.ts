@@ -309,6 +309,29 @@ export class DownloadSync {
   }
 
   /**
+   * Stops every fetch and plan, then, while the server answers, releases on the core every song
+   * it keeps on this device for this account: those it listed, and those this phone holds or
+   * was fetching. Resolves once every release answered. For signing out: the vault is deleted
+   * next, so nothing here would release them later. Offline it only stops, and the core keeps
+   * them until this account opens an empty vault here and its first plan releases them.
+   */
+  async releaseAll(): Promise<void> {
+    const releasing = this.#online;
+
+    const songs = new Set([
+      ...Option.getOrElse(this.#listed, (): ListedLyrics => new Map()).keys(),
+      ...this.#view.copies.keys(),
+      ...this.#wanted,
+    ]);
+
+    await this.stop();
+
+    if (!releasing) return;
+
+    await Promise.allSettled([...songs].map((trackId) => this.#options.core.release(trackId)));
+  }
+
+  /**
    * The songs the core keeps on this device, with the revision of each one's lyrics, as
    * `core.downloads.list` answered. A song it keeps that no download here holds any more is
    * released, as after a removal made offline. A kept song's lyrics are asked for only while

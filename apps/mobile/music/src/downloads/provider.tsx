@@ -126,6 +126,31 @@ const DownloadsContext = createContext<Downloads | null>(null);
 
 const shutdowns = new Map<string, () => Promise<void>>();
 
+/** Each running sync's `releaseAll`, by the server's address. */
+const releasers = new Map<string, () => Promise<void>>();
+
+/** How long signing out waits for the core to answer the releases. */
+const RELEASE_WAIT_MS = 5000;
+
+/**
+ * Releases on the core the downloads the signed-in account keeps on this phone, before signing
+ * out ends the session the core takes them from. Stops the server's sync, and waits up to
+ * `RELEASE_WAIT_MS` for the core to answer; offline it only stops it (`DownloadSync.releaseAll`).
+ */
+export const releaseDownloads = async (origin: string): Promise<void> => {
+  const release = releasers.get(origin);
+
+  if (release === undefined) return;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+
+  const waited = new Promise<void>((resolve) => {
+    timer = setTimeout(resolve, RELEASE_WAIT_MS);
+  });
+
+  await Promise.race([release().catch(() => undefined), waited]);
+  clearTimeout(timer);
+};
+
 /**
  * Deletes every download kept for the server at `origin`, for any account: after its sync has
  * stopped and its vault closed, so no transfer still in flight writes a file back.
@@ -549,6 +574,7 @@ export function DownloadsProvider({ children }: { readonly children: ReactNode }
     if (userId === null) return undefined;
     let closed = false;
     let created: DownloadSync | null = null;
+    let releaser: (() => Promise<void>) | null = null;
     let shutting: Promise<void> | null = null;
     const opening = openVault(mediaUrl, userId);
 
@@ -590,6 +616,8 @@ export function DownloadsProvider({ children }: { readonly children: ReactNode }
       });
 
       created = opened;
+      releaser = () => opened.releaseAll();
+      releasers.set(mediaUrl, releaser);
       opened.setLowPower(saving.current);
       opened.setWifiOnly(wifi.current);
       opened.setMetered(costly.current);
@@ -601,6 +629,7 @@ export function DownloadsProvider({ children }: { readonly children: ReactNode }
     void run();
 
     return () => {
+      if (releaser !== null && releasers.get(mediaUrl) === releaser) releasers.delete(mediaUrl);
       void shutdown().finally(() => {
         if (shutdowns.get(mediaUrl) === shutdown) shutdowns.delete(mediaUrl);
       });
