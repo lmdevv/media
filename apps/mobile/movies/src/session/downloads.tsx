@@ -53,7 +53,7 @@ const networkOf = (state: Network.NetworkState): NetworkNow => ({
 /**
  * Runs the downloads engine of the person signed in here for the screens below: from who the core
  * says is signed in, else, while it cannot be reached, who this app last signed in as. The engine
- * starts working only once the core confirms the person. Whenever the person changes, signed out
+ * starts working only once the core confirms the person on this phone's device. Whenever the person changes, signed out
  * included, it first prepares the downloads: excludes them from backup and finishes the removals
  * of anyone who signed out here.
  */
@@ -67,7 +67,13 @@ export function DownloadsProvider({ children }: { readonly children: ReactNode }
     ...(status === "signedIn" ? [] : (["skip"] as const)),
   );
 
-  const confirmed = status === "signedIn" && me.status === "success" ? me.data.userId : null;
+  // The core keeps downloads per device and refuses a session on none, so the engine starts only
+  // once the sign-in has put the session on this phone's device.
+  const confirmed =
+    status === "signedIn" && me.status === "success" && me.data.device !== null
+      ? me.data.userId
+      : null;
+
   const last = useOfflinePerson();
   const userId = confirmed ?? last?.userId ?? null;
   const settings = useDownloadSettings();

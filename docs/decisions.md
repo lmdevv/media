@@ -387,7 +387,9 @@ Old movies' Convex project, its SDK client, and its command registry were delete
   removal of every download added before the stamp, deletes the files, and deletes the record.
   The core takes a removal only from the person's own session, so a removal it has not
   acknowledged waits in the person's folder, holding no files, until that person signs in here
-  again. Another person's folder is never read.
+  again. Another person's folder is never read. The engine starts only once the session is on this
+  phone's device, which a sign-in sets after the session opens: the core refuses a removal from a
+  session on no device, for good.
 
 ## Subtitle delay
 
