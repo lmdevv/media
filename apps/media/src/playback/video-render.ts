@@ -239,7 +239,12 @@ export const renderVideo = (pipeline: VideoPipeline, options: RenderOptions): Re
   } else {
     const { side } = burnStep.rendering;
     const drawn = callsOf(steps.slice(burn), burn);
-    const shown = [...trim(options.trimPicture), ...callsOf(steps.slice(0, burn), 0)];
+
+    const shown = [
+      ...trim(options.trimPicture),
+      ...callsOf(steps.slice(0, burn), 0),
+      ...(side.picture ?? []).map((call): Owned => ({ call, steps: [burn] })),
+    ];
 
     // The rate is restated once, in the overlay's chain when a filter there needs it.
     const [picture, overlay] =

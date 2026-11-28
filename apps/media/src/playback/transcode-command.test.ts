@@ -10,7 +10,14 @@ import {
   planVideo,
   type VideoIntent,
 } from "./video-pipeline.ts";
-import { ImplId, Op, type OutputCodec, sdrTarget, type SourceVideo } from "./video-ops.ts";
+import {
+  ImplId,
+  Op,
+  type OutputCodec,
+  sdrTarget,
+  type SourceVideo,
+  subtitleCanvas,
+} from "./video-ops.ts";
 
 const hlsCommandArgs = (command: HlsCommand): ReadonlyArray<string> => hlsCommand(command).args;
 
@@ -50,12 +57,15 @@ interface EncodeOptions {
   readonly without?: ReadonlyArray<string>;
   /** A text track drawn in, styled (ASS) or plain, in place of an image subtitle. */
   readonly burnText?: "styled" | "plain";
+  /** The source's picture, 1920x1080 when absent; it is encoded at its own size. */
+  readonly size?: { readonly width: number; readonly height: number };
 }
 
 const DEVICES = { qsv: "/dev/dri/renderD128", vaapi: "/dev/dri/renderD129" } as const;
 
 /**
- * The plan a 1920x1080 source gets on `domain` (and the CPU) when the device verified everything:
+ * The plan a 1920x1080 source (or one of `size`) gets on `domain` (and the CPU) when the device
+ * verified everything:
  * an 8 Mbit/s H.264 encode at its size, or `output` at its share of that, tone-mapped from HDR10
  * when asked.
  */
@@ -69,8 +79,8 @@ const encode = (domain: "qsv" | "vaapi" | "software", options: EncodeOptions) =>
     depth,
     colour: toneMap ? "hdr10" : "sdr",
     scan: options.interlaced === true ? "interlaced" : "progressive",
-    width: 1920,
-    height: 1080,
+    width: options.size?.width ?? 1920,
+    height: options.size?.height ?? 1080,
   };
 
   const intent: VideoIntent = {
@@ -102,8 +112,7 @@ const encode = (domain: "qsv" | "vaapi" | "software", options: EncodeOptions) =>
                   depth: 8,
                   pixelFormat: "pal8",
                   scan: "progressive",
-                  width: 1920,
-                  height: 1080,
+                  ...subtitleCanvas(options.subtitleCodec ?? "hdmv_pgs_subtitle", source),
                 },
               },
             }),
@@ -132,16 +141,26 @@ const dvd = (from: number) =>
     video: encode("software", { burnSubtitle: 3, subtitleCodec: "dvd_subtitle" }),
   });
 
+/** Where a GPU overlay puts the visible part of a PGS canvas: at the picture's height, centred. */
+const BY_HEIGHT =
+  "x=(main_w-overlay_w)/2:y=(main_h-overlay_h)/2:w=overlay_iw*main_h/overlay_ih:h=main_h";
+
 /**
- * Where a GPU overlay puts a PGS canvas: fitted inside the picture at its own aspect and centred,
- * each comma of the expressions escaped for the graph.
+ * What a GPU row does on the CPU to a PGS canvas (1920x1080) over a `width` by `height` picture
+ * before it uploads it: holds it at that size, and keeps the columns the picture shows.
  */
-const FITTED = [
-  "x=(main_w-overlay_w)/2",
-  "y=(main_h-overlay_h)/2",
-  "w=if(gte(overlay_iw*main_h\\,main_w*overlay_ih)\\,main_w\\,overlay_iw*main_h/overlay_ih)",
-  "h=if(gte(overlay_iw*main_h\\,main_w*overlay_ih)\\,overlay_ih*main_w/overlay_iw\\,main_h)",
-].join(":");
+const pgsOnGpu = (width: number, height: number) => {
+  const shown = Math.round((1080 * width) / height);
+
+  return `scale=1920:1080${shown < 1920 ? `,crop=${String(shown)}:1080` : ""},format=bgra,hwupload`;
+};
+
+/** What the CPU row does to a PGS canvas: scales it to the picture's height, then keeps its middle. */
+const pgsOnCpu = (width: number, height: number) => {
+  const scaled = Math.round((1920 * height) / 1080);
+
+  return `scale=${String(scaled)}:${String(height)}${scaled > width ? `,crop=${String(width)}:${String(height)}` : ""}`;
+};
 
 const after = (args: ReadonlyArray<string>, flag: string): string | undefined =>
   args[args.indexOf(flag) + 1];
@@ -260,7 +279,7 @@ describe("hlsCommandArgs", () => {
       "va",
     ]);
     expect(after(args, "-vf")).toBe(
-      "scale_vaapi=w=1920:h=1080:format=p010,tonemap_vaapi=format=nv12:p=bt709:t=bt709:m=bt709",
+      "scale_vaapi=w=1920:h=1080:format=p010,tonemap_vaapi=format=nv12:p=bt709:t=bt709:m=bt709,setparams=color_primaries=bt709:color_trc=bt709:colorspace=bt709:range=tv",
     );
     expect(args.slice(args.indexOf("-c:v"), args.indexOf("-force_key_frames"))).toStrictEqual([
       "-c:v",
@@ -332,7 +351,7 @@ describe("hlsCommandArgs", () => {
     expect(scaled.owners?.filters.get("Parsed_fps_3")).toStrictEqual([1]);
     expect(toneMapped.owners?.filters.get("Parsed_fps_6")).toStrictEqual([2]);
     expect(after(burned.args, "-filter_complex")?.split(";")[2]).toContain("fps=source_fps[video]");
-    expect(burned.owners?.filters.get("Parsed_fps_6")).toStrictEqual([2]);
+    expect(burned.owners?.filters.get("Parsed_fps_7")).toStrictEqual([2]);
     expect(after(burnedOnCpu.args, "-filter_complex")?.split(";")[2]).not.toContain("fps=");
 
     // Each step the restatement follows needs the filter from the build, so a build without it
@@ -437,7 +456,7 @@ describe("hlsCommandArgs", () => {
     expect(after(args, "-c:v")).toBe("libx264");
   });
 
-  it("draws a burned-in subtitle on the SDR picture at the output size, the PGS canvas fitted", () => {
+  it("draws a burned-in subtitle on the SDR picture at the output size, PGS at its height", () => {
     const software = hlsCommandArgs({
       ...command(AudioPlan.Copy({ index: 1 }), "aac"),
       video: encode("software", { burnSubtitle: 3 }),
@@ -447,7 +466,7 @@ describe("hlsCommandArgs", () => {
     expect(after(software, "-filter_complex")).toBe(
       [
         "[0:0]scale=1920:1080:flags=bicubic[picture]",
-        "[0:3]scale=1920:1080:force_original_aspect_ratio=decrease[subtitle]",
+        `[0:3]${pgsOnCpu(1920, 1080)}[subtitle]`,
         "[picture][subtitle]overlay=x=(main_w-overlay_w)/2:y=(main_h-overlay_h)/2:eof_action=pass:repeatlast=0,format=yuv420p[video]",
       ].join(";"),
     );
@@ -463,6 +482,31 @@ describe("hlsCommandArgs", () => {
     );
   });
 
+  it("places a PGS canvas at a 2.39:1, 16:9, or 4:3 picture's height, its sides cut to fit", () => {
+    const sizes = [
+      { width: 1920, height: 800 },
+      { width: 1920, height: 1080 },
+      { width: 1440, height: 1080 },
+    ] as const;
+
+    for (const size of sizes) {
+      const graph = (domain: "qsv" | "vaapi" | "software") =>
+        after(
+          hlsCommandArgs({
+            ...command(AudioPlan.Copy({ index: 1 }), "aac"),
+            video: encode(domain, { burnSubtitle: 3, size }),
+          }),
+          "-filter_complex",
+        );
+
+      expect(graph("software")).toContain(`[0:3]${pgsOnCpu(size.width, size.height)}[subtitle]`);
+      expect(graph("qsv")).toContain(`[0:3]${pgsOnGpu(size.width, size.height)}[subtitle]`);
+      expect(graph("qsv")).toContain(`overlay_qsv=${BY_HEIGHT}:`);
+      expect(graph("vaapi")).toContain(`[0:3]${pgsOnGpu(size.width, size.height)}[subtitle]`);
+      expect(graph("vaapi")).toContain(`overlay_vaapi=${BY_HEIGHT}:`);
+    }
+  });
+
   it("draws an image subtitle on the GPU, its canvas decoded on the CPU and uploaded", () => {
     const vaapi = hlsCommandArgs({
       ...command(AudioPlan.Copy({ index: 1 }), "aac"),
@@ -473,9 +517,9 @@ describe("hlsCommandArgs", () => {
     expect(vaapi).toContain("-hwaccel");
     expect(after(vaapi, "-filter_complex")).toBe(
       [
-        "[0:0]scale_vaapi=w=1920:h=1080:format=p010,tonemap_vaapi=format=nv12:p=bt709:t=bt709:m=bt709[picture]",
-        "[0:3]format=bgra,hwupload[subtitle]",
-        `[picture][subtitle]overlay_vaapi=${FITTED}:eof_action=pass:repeatlast=0[video]`,
+        "[0:0]scale_vaapi=w=1920:h=1080:format=p010,tonemap_vaapi=format=nv12:p=bt709:t=bt709:m=bt709,setparams=color_primaries=bt709:color_trc=bt709:colorspace=bt709:range=tv,setparams=color_primaries=unknown[picture]",
+        `[0:3]${pgsOnGpu(1920, 1080)}[subtitle]`,
+        `[picture][subtitle]overlay_vaapi=${BY_HEIGHT}:eof_action=pass:repeatlast=0[video]`,
       ].join(";"),
     );
 
@@ -487,7 +531,7 @@ describe("hlsCommandArgs", () => {
     expect(after(qsv, "-filter_complex")).toBe(
       [
         "[0:0]hwmap,format=qsv,vpp_qsv=w=1920:h=1080:format=nv12[picture]",
-        "[0:3]format=bgra,hwupload[subtitle]",
+        "[0:3]scale=720:576,format=bgra,hwupload[subtitle]",
         "[picture][subtitle]overlay_qsv=w=main_w:h=main_h:eof_action=pass:repeatlast=0,fps=source_fps[video]",
       ].join(";"),
     );
@@ -508,8 +552,8 @@ describe("hlsCommandArgs", () => {
 
     expect(after(vaapi, "-filter_complex")).toBe(
       [
-        "[0:0]scale_vaapi=w=1920:h=1080:format=p010,tonemap_vaapi=format=nv12:p=bt709:t=bt709:m=bt709,hwdownload,format=nv12[picture]",
-        "[0:3]scale=1920:1080:force_original_aspect_ratio=decrease[subtitle]",
+        "[0:0]scale_vaapi=w=1920:h=1080:format=p010,tonemap_vaapi=format=nv12:p=bt709:t=bt709:m=bt709,setparams=color_primaries=bt709:color_trc=bt709:colorspace=bt709:range=tv,hwdownload,format=nv12[picture]",
+        `[0:3]${pgsOnCpu(1920, 1080)}[subtitle]`,
         "[picture][subtitle]overlay=x=(main_w-overlay_w)/2:y=(main_h-overlay_h)/2:eof_action=pass:repeatlast=0,format=nv12,hwupload[video]",
       ].join(";"),
     );
@@ -642,6 +686,8 @@ describe("hlsCommandArgs", () => {
     });
 
     expect(inputs(args)).toStrictEqual([
+      "-canvas_size",
+      "1920x1080",
       "-ss",
       "30.000000",
       "-copyts",

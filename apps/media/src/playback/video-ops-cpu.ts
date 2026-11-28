@@ -27,6 +27,7 @@ import {
   row,
   type Row,
   transferOf,
+  visibleCanvas,
 } from "./video-ops.ts";
 
 /** Any codec ffmpeg decodes in software, in the layout the stream has. */
@@ -115,9 +116,11 @@ const toneMapCpu: OpImpl<"ToneMap"> = {
 };
 
 /**
- * Draws an image subtitle on the SDR picture at its size: the subtitle's canvas (720x576 for DVD)
- * is stretched to the picture it covers, or fitted inside it at its own aspect and centred
- * (`canvasFit`). Subtitles are SDR, so this comes after any tone map.
+ * Draws an image subtitle on the SDR picture at its size: the subtitle's canvas (720x576 for DVD,
+ * `subtitleCanvas`) is stretched to the picture it covers, or scaled to the picture's height, its
+ * middle the picture shows kept and centred (`canvasFit`). Either way a `scale` takes the frames
+ * first, as only it takes a frame whose canvas changed. Subtitles are SDR, so this comes after any
+ * tone map.
  */
 const burnImageCpu: OpImpl<"BurnImage"> = {
   id: ImplId("burn-image.cpu"),
@@ -129,15 +132,16 @@ const burnImageCpu: OpImpl<"BurnImage"> = {
     input.colour === "sdr" && op.subtitle.frame.memory === "cpu" ? "bitmap" : undefined,
   output: (_, input) => ({ ...input, depth: 8, pixelFormat: "yuv420p" }),
   render: (op, input) => {
-    const size = [String(input.width), String(input.height)];
-    const fitted = canvasFit(op.subtitle.codec) === "fit";
+    const byHeight = canvasFit(op.subtitle.codec) === "height";
+    const canvas = op.subtitle.frame;
+    const scaled = Math.round((canvas.width * input.height) / canvas.height);
 
     return {
       ...NOTHING,
       filters: [
         filter(
           "overlay",
-          ...(fitted
+          ...(byHeight
             ? [["x", "(main_w-overlay_w)/2"] as const, ["y", "(main_h-overlay_h)/2"] as const]
             : []),
           ["eof_action", "pass"],
@@ -147,13 +151,12 @@ const burnImageCpu: OpImpl<"BurnImage"> = {
       side: {
         input: op.subtitle.input,
         stream: op.subtitle.stream,
-        calls: [
-          filter(
-            "scale",
-            ...size,
-            ...(fitted ? [["force_original_aspect_ratio", "decrease"] as const] : []),
-          ),
-        ],
+        calls: byHeight
+          ? [
+              filter("scale", String(scaled), String(input.height)),
+              ...visibleCanvas({ width: scaled, height: input.height }, input.width, input.height),
+            ]
+          : [filter("scale", String(input.width), String(input.height))],
       },
     };
   },

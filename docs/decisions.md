@@ -182,10 +182,17 @@ Old movies' Convex project, its SDK client, and its command registry were delete
   negotiating again with `burnInSubtitle`, which always transcodes: the picture is scaled and
   tone-mapped as usual (on the GPU when one encodes), then the subtitle is drawn on the SDR frame,
   its canvas stretched over the picture (DVD subtitles carry none and are read on a 720x576 canvas)
-  or, for PGS, fitted inside it at its own aspect. On a GPU the subtitle's frames are decoded on the
-  CPU, uploaded at the canvas's size, and scaled and blended by the GPU's overlay, so the picture
-  stays on the device; a device or build without the overlay draws it on the CPU between a download
-  and an upload. After a seek the subtitle comes from a second reading of the file from 30 seconds
+  or, for PGS, scaled to the picture's height at its own aspect and centred, as players place it,
+  its sides cut where the picture is narrower (a 4:3 one). On a GPU the subtitle's frames are
+  decoded on the CPU, uploaded at the canvas's size, and scaled and blended by the GPU's overlay,
+  so the picture stays on the device; a device or build without the overlay draws it on the CPU
+  between a download and an upload. The service tells ffmpeg the canvas (720x576 for DVD and DVB,
+  1920x1080 for PGS, the picture's size otherwise), as ffmpeg sizes one it learns only from the
+  first subtitle packet to the picture until then, and every path scales the subtitle to it first,
+  since only `scale` takes a canvas that changes mid-run: Quick Sync's upload failed, and ffmpeg 9
+  aborted, where a 4K file's first PGS packet came after the probe. VA-API's overlay blends the
+  subtitle's black as full range over frames that name BT.709 primaries, so it blends over a
+  picture whose primaries are cleared, and a stream it draws on names none. After a seek the subtitle comes from a second reading of the file from 30 seconds
   earlier, so a line already on screen is drawn. Choosing a text subtitle or none negotiates again
   without it, back to the cheaper mode.
 - A text track can be burned in the same way, by naming it in `burnInSubtitle` (embedded `e<n>` or
@@ -193,7 +200,10 @@ Old movies' Convex project, its SDK client, and its command registry were delete
   own styles, positions, effects, and attached fonts, plain text in one default style (DejaVu Sans,
   white with a black border, a sixteenth of the picture tall). The stream converts the track into an
   ASS file on the file's own timeline in its folder before it starts, cached for an embedded track,
-  so a seek shows a cue that began earlier at once. libass draws on the CPU on every path: on a GPU
+  so a seek shows a cue that began earlier at once. Two tracks convert at a time, as for WebVTT, and
+  streams asking for one track while it converts share that conversion; a track of 32 MiB or more
+  as ASS, or one that does not start as an ASS script, is refused, and so is a codec ffmpeg cannot
+  write as ASS (teletext), at negotiation. libass draws on the CPU on every path: on a GPU
   the picture is downloaded for it and uploaded again: drawing on a transparent canvas for the
   GPU's overlay renders translucent colours wrong under both ffmpeg builds, and on an Arc A380 it
   was slower (1080p through Quick Sync, 144 frames a second against 212). The CLI asks for it

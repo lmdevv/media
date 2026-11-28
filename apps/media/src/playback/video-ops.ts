@@ -234,6 +234,8 @@ interface SideFilters {
   readonly input: number;
   readonly stream: number;
   readonly calls: ReadonlyArray<FilterCall>;
+  /** Filters the picture runs through on its own chain before the join. */
+  readonly picture?: ReadonlyArray<FilterCall>;
 }
 
 /** What one step adds to an ffmpeg run. */
@@ -400,10 +402,46 @@ export const DEINTERLACE_PROBES: ReadonlyArray<ProbeCase<"Deinterlace">> = [
  * How an image subtitle's canvas covers the picture. DVD, DVB, and XSUB canvases share the video's
  * own pixel grid (720x576 over an anamorphic picture), so they `stretch` to the picture's size. PGS
  * draws on a square-pixel canvas (1920x1080 even over a picture cropped to 2.39:1, or a 4K one),
- * so it is `fit` inside the picture at its own aspect and centred, as players place it.
+ * so it is scaled to the picture's `height` at its own aspect and centred, as players place it: a
+ * 1920x1080 canvas is 1422x800 over 1920x800, and over 1440x1080 keeps its size with 240 columns
+ * cut from each side, where a caption placed there is cut too.
  */
-export const canvasFit = (codec: string): "stretch" | "fit" =>
-  codec === "hdmv_pgs_subtitle" ? "fit" : "stretch";
+export const canvasFit = (codec: string): "stretch" | "height" =>
+  codec === "hdmv_pgs_subtitle" ? "height" : "stretch";
+
+/**
+ * The canvas an image subtitle of `codec` is drawn on over a `video`-sized source: 720x576 for DVD
+ * and DVB, 1920x1080 for PGS (Blu-ray's, UHD discs too), and the picture's own size for the rest.
+ * ffmpeg is told it (`-canvas_size`), as a canvas it learns only from the first subtitle packet
+ * starts at the picture's size; and each row scales the subtitle's frames to it before anything
+ * else, as a packet can still change it. ffmpeg passes such a frame on without rebuilding the
+ * graph, and of the filters here only `scale` takes it: Quick Sync's upload fails on it ("Error
+ * synchronizing the operation"), and under ffmpeg 9 VA-API's upload, `crop`, and `overlay` abort
+ * or crash, where a 4K picture's canvas changed from 3840x2160 to 1920x1080 or 1280x720.
+ */
+export const subtitleCanvas = (
+  codec: string,
+  video: { readonly width: number; readonly height: number },
+): { readonly width: number; readonly height: number } =>
+  codec === "dvd_subtitle" || codec === "dvb_subtitle"
+    ? { width: 720, height: 576 }
+    : codec === "hdmv_pgs_subtitle"
+      ? { width: 1920, height: 1080 }
+      : { width: video.width, height: video.height };
+
+/**
+ * The columns of a `canvas` that a `width` by `height` picture shows once the canvas is scaled to
+ * the picture's height: a `crop` of the middle ones where the canvas is the wider, else nothing.
+ */
+export const visibleCanvas = (
+  canvas: { readonly width: number; readonly height: number },
+  width: number,
+  height: number,
+): ReadonlyArray<FilterCall> => {
+  const shown = Math.round((canvas.height * width) / height);
+
+  return shown < canvas.width ? [filter("crop", String(shown), String(canvas.height))] : [];
+};
 
 /**
  * The image subtitle a probe of an overlay reads: a 320x240 canvas in BGRA, the layout an image

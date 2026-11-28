@@ -35,6 +35,7 @@ import {
   surfaceDepth,
   surfaceFormat,
   transferOf,
+  visibleCanvas,
 } from "./video-ops.ts";
 
 /** Codecs Intel media engines may decode; each codec and layout is still proven per device. */
@@ -302,18 +303,19 @@ const toneMapQsv: OpImpl<"ToneMap"> = {
 
 /**
  * Where an overlay on a GPU puts the subtitle's canvas, uploaded at its own size, as expressions of
- * the picture's size (`main_w`) and the canvas's (`overlay_iw`): stretched over the picture, or
- * fitted inside it at its own aspect and centred (`canvasFit`). On an Arc A380, under ffmpeg 7.1
- * and 9, Quick Sync's and VA-API's scaling put each band edge of a 320x240 canvas over a 640x360
- * picture on the same column as the CPU's `scale` and `overlay`.
+ * the picture's size (`main_w`) and the canvas's (`overlay_iw`): stretched over the picture, or,
+ * cropped first to the columns the picture shows (`visibleCanvas`), scaled to the picture's height
+ * and centred (`canvasFit`). On an Arc A380, under ffmpeg 7.1 and 9, Quick Sync's and VA-API's
+ * scaling put each band edge of a 320x240 canvas over a 640x360 picture on the same column as the
+ * CPU's `scale` and `overlay`.
  */
 const overlayPlace = (codec: string): ReadonlyArray<readonly [string, string]> =>
-  canvasFit(codec) === "fit"
+  canvasFit(codec) === "height"
     ? [
         ["x", "(main_w-overlay_w)/2"],
         ["y", "(main_h-overlay_h)/2"],
-        ["w", "if(gte(overlay_iw*main_h,main_w*overlay_ih),main_w,overlay_iw*main_h/overlay_ih)"],
-        ["h", "if(gte(overlay_iw*main_h,main_w*overlay_ih),overlay_ih*main_w/overlay_iw,main_h)"],
+        ["w", "overlay_iw*main_h/overlay_ih"],
+        ["h", "main_h"],
       ]
     : [
         ["w", "main_w"],
@@ -323,7 +325,8 @@ const overlayPlace = (codec: string): ReadonlyArray<readonly [string, string]> =
 /**
  * An image subtitle drawn on `domain`'s SDR NV12 surfaces by `overlay`, so the picture never leaves
  * the device: the subtitle's own frames, small and sparse, are decoded on the CPU into BGRA at the
- * canvas's size, uploaded, and scaled and blended on the device. Both
+ * canvas's size (`subtitleCanvas`, held there by a `scale` that passes them on untouched unless a
+ * packet changed it), uploaded, and scaled and blended on the device. Both
  * overlays take BGRA with straight alpha per pixel, as ffmpeg hands image subtitles to filters:
  * under ffmpeg 7.1 and 9 on an Arc A380, a band of white at half opacity over gray came out halfway
  * between the two (193 for 191.5), and a premultiplied one gray. Between captions and before the
@@ -332,7 +335,11 @@ const overlayPlace = (codec: string): ReadonlyArray<readonly [string, string]> =
  * of the picture while it decodes, and after a seek by the second of subtitle frames kept before
  * the picture starts (`transcode-command.ts`), each holding an uploaded surface until the overlay
  * pairs it: the upload's pool grows to that, where a fixed one of 16 surfaces ran out (ENOMEM) on
- * a seek into a DVD caption and at the end of the file, under both builds.
+ * a seek into a DVD caption and at the end of the file, under both builds. VA-API's overlay, on the
+ * same card with iHD 26.3.5 under both builds, blends the subtitle's black as full range (Y 0, so a
+ * half-transparent border lands 8 levels dark) over a picture whose frames name BT.709 primaries,
+ * as a tone-mapped picture's and many SDR files' do, and as limited range (Y 16) over one that
+ * names none: its row clears the picture's primaries for the blend, so the stream names none.
  */
 const burnImageOn = (
   domain: GpuDomain,
@@ -342,28 +349,45 @@ const burnImageOn = (
   op: "BurnImage",
   on: domain,
   takes: domain,
-  needs: () => [`filter:${overlay}`, "filter:hwupload"],
+  needs: () =>
+    overlay === "overlay_vaapi"
+      ? [`filter:${overlay}`, "filter:hwupload", "filter:setparams"]
+      : [`filter:${overlay}`, "filter:hwupload"],
   variant: (op, frame) =>
     frame.colour === "sdr" && frame.pixelFormat === "nv12" && op.subtitle.frame.memory === "cpu"
       ? "bitmap/nv12"
       : undefined,
   output: (_, frame) => frame,
-  render: (op) => ({
-    ...NOTHING,
-    filters: [
-      filter(
-        overlay,
-        ...overlayPlace(op.subtitle.codec),
-        ["eof_action", "pass"],
-        ["repeatlast", "0"],
-      ),
-    ],
-    side: {
+  render: (op, frame) => {
+    const side = {
       input: op.subtitle.input,
       stream: op.subtitle.stream,
-      calls: [filter("format", "bgra"), filter("hwupload")],
-    },
-  }),
+      calls: [
+        filter("scale", String(op.subtitle.frame.width), String(op.subtitle.frame.height)),
+        ...(canvasFit(op.subtitle.codec) === "height"
+          ? visibleCanvas(op.subtitle.frame, frame.width, frame.height)
+          : []),
+        filter("format", "bgra"),
+        filter("hwupload"),
+      ],
+    };
+
+    return {
+      ...NOTHING,
+      filters: [
+        filter(
+          overlay,
+          ...overlayPlace(op.subtitle.codec),
+          ["eof_action", "pass"],
+          ["repeatlast", "0"],
+        ),
+      ],
+      side:
+        overlay === "overlay_vaapi"
+          ? { ...side, picture: [filter("setparams", ["color_primaries", "unknown"])] }
+          : side,
+    };
+  },
   probes: BURN_IMAGE_PROBES,
 });
 
@@ -521,14 +545,16 @@ const scaleVaapi: OpImpl<"Scale"> = {
 
 /**
  * `tonemap_vaapi` from P010 HDR surfaces to BT.709 SDR in NV12; it needs the stream's mastering
- * display metadata.
+ * display metadata. The row tags the frames BT.709 limited range (`setparams`), which they already
+ * say: without it, under Debian's ffmpeg 7.1, libass after the download drew ASS orange at Y 148
+ * and red at 74, BT.601's values, where the CPU and Quick Sync paths draw BT.709's 141 and 63.
  */
 const toneMapVaapi: OpImpl<"ToneMap"> = {
   id: ImplId("tonemap.vaapi"),
   op: "ToneMap",
   on: "vaapi",
   takes: "vaapi",
-  needs: () => ["filter:tonemap_vaapi"],
+  needs: () => ["filter:tonemap_vaapi", "filter:setparams"],
   variant: (_, frame) =>
     HDR_COLOURS.has(frame.colour) && frame.pixelFormat === "p010le"
       ? transferOf(frame.colour)
@@ -538,6 +564,13 @@ const toneMapVaapi: OpImpl<"ToneMap"> = {
     ...NOTHING,
     filters: [
       filter("tonemap_vaapi", ["format", "nv12"], ["p", "bt709"], ["t", "bt709"], ["m", "bt709"]),
+      filter(
+        "setparams",
+        ["color_primaries", "bt709"],
+        ["color_trc", "bt709"],
+        ["colorspace", "bt709"],
+        ["range", "tv"],
+      ),
     ],
   }),
   probes: toneMapProbes,

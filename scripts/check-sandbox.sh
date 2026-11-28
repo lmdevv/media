@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # Runs the media service's tests (with real ffmpeg: encoders started, released, restarted, and
-# closed, library scans, backups, downloads) under the system call sandbox nix/module.nix gives
-# media-server.service, on the Node and ffmpeg that unit runs. A system call the filter denies,
-# such as the fchown inside libuv's copyfile, kills the process here instead of failing one call,
-# so the run fails on any denied call the service or ffmpeg makes.
+# closed, library scans, backups, downloads, subtitles burned in) under the system call sandbox
+# nix/module.nix gives media-server.service, on the Node, ffmpeg, and fonts that unit runs. A
+# system call the filter denies, such as the fchown inside libuv's copyfile, kills the process here
+# instead of failing one call, so the run fails on any denied call the service or ffmpeg makes.
 #
 #   scripts/check-sandbox.sh                                  # every media test
 #   scripts/check-sandbox.sh apps/media/src/playback          # some test files or folders
@@ -67,6 +67,9 @@ setpriv_dir="$(built 'lib.getBin (lib.findFirst (p: lib.getName p == "util-linux
 [[ -x "$node_dir/node" ]] || fail "no node in $node_dir"
 [[ -x "$ffmpeg_dir/ffmpeg" && -x "$ffmpeg_dir/ffprobe" ]] || fail "no ffmpeg in $ffmpeg_dir"
 [[ -x "$setpriv_dir/setpriv" ]] || fail "no setpriv in $setpriv_dir"
+# The fonts file and prebuilt cache the unit gives libass; tests draw text with them.
+fonts_conf="$(built config.systemd.services.media-server.environment.FONTCONFIG_FILE)"
+[[ -f "$fonts_conf" ]] || fail "no fonts file at $fonts_conf"
 
 properties=()
 while IFS= read -r property; do
@@ -96,6 +99,7 @@ environment=(
   -E CI=1
   -E "FFMPEG_PATH=$ffmpeg_dir/ffmpeg"
   -E "FFPROBE_PATH=$ffmpeg_dir/ffprobe"
+  -E "FONTCONFIG_FILE=$fonts_conf"
 )
 for name in TMPDIR QSV_DEVICE VAAPI_DEVICE LIBVA_DRIVER_NAME; do
   if [[ -n "${!name:-}" ]]; then environment+=(-E "$name=${!name}"); fi
@@ -106,7 +110,7 @@ sandboxed() {
 }
 
 echo "check-sandbox: ${properties[*]}"
-echo "check-sandbox: node $node_dir, ffmpeg $ffmpeg_dir"
+echo "check-sandbox: node $node_dir, ffmpeg $ffmpeg_dir, fonts $fonts_conf"
 
 canary="$(mktemp -d)"
 trap 'rm -rf "$canary"' EXIT

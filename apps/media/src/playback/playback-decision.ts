@@ -13,6 +13,7 @@ import type { PlaybackMode } from "@media/contracts/models/playback";
 import { Data, Result } from "effect";
 
 import type { AudioTrack, MediaProbe, VideoStream } from "../media/media-probe.ts";
+import { burnableText } from "../subtitles/burned-text.ts";
 import {
   type CapabilitySnapshot,
   encodeDomain,
@@ -27,6 +28,7 @@ import {
   Op,
   type OutputCodec,
   type OutputTarget,
+  subtitleCanvas,
   type TextSubtitle,
   toneMapsTo,
 } from "./video-ops.ts";
@@ -198,13 +200,14 @@ const exceeds = (probe: MediaProbe, video: VideoStream, quality: PlaybackQuality
 
 /**
  * Whether `request` names a subtitle this file can have drawn in: one of its image tracks, or a
- * text track, which the caller found among its embedded tracks or its sidecars.
+ * text track the caller found among its embedded tracks or its sidecars, in a codec ffmpeg can
+ * write as ASS.
  */
 const burnable = (probe: MediaProbe, request: BurnRequest): boolean =>
   BurnRequest.$match(request, {
     Image: ({ stream }) =>
       probe.subtitles.some((track) => track.index === stream && track.kind === "bitmap"),
-    Text: () => true,
+    Text: ({ subtitle }) => burnableText(subtitle.codec),
     Refused: () => false,
   });
 
@@ -353,8 +356,7 @@ const burnOf = (probe: MediaProbe, video: VideoStream, request: BurnRequest): Bu
                 depth: 8,
                 pixelFormat: "pal8",
                 scan: "progressive",
-                width: video.width,
-                height: video.height,
+                ...subtitleCanvas(subtitle.codec, video),
               },
             },
           });

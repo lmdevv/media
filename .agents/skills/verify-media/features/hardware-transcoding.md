@@ -19,7 +19,7 @@ the evidence of where it ran.
 - `hw-burn-in` draws the DVD (image) subtitle track into the picture: on a GPU path with the GPU's
   overlay (`overlay_qsv`, `overlay_vaapi`), the subtitle's frames decoded on the CPU and uploaded,
   the picture never leaving the device. `subtitle-burn-in-pgs` does the same with a generated PGS
-  track (`pgs.mjs`) whose 1920x1080 canvas is fitted into a 1920x800 picture at its own aspect.
+  track (`pgs.mjs`) whose 1920x1080 canvas is scaled to a 1920x800 picture's height and centred.
   `subtitle-burn-in-text` draws a generated styled ASS track
   (positioned, coloured, in the block font the file attaches) with libass, on the CPU on every path,
   a GPU path downloading the picture for it and uploading it again.

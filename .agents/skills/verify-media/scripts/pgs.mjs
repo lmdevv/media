@@ -1,7 +1,7 @@
 // A Blu-ray presentation graphics (PGS, `.sup`) subtitle stream with one picture, which ffmpeg can
 // mux but not encode: a white bar with a half-transparent black frame, shown on a canvas from one
-// time to another. The hardware matrix muxes it over a cropped picture to see how the canvas is
-// fitted.
+// time to another. The hardware matrix muxes it over a cropped picture to see where the canvas is
+// placed.
 //
 //   node pgs.mjs OUT.sup   writes the default one
 import { writeFileSync } from "node:fs";

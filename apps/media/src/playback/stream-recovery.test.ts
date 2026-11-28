@@ -228,6 +228,15 @@ const overlayFails = await writeFakeFfmpeg({
   logInvocations: true,
 });
 
+/** libass failing to start, as ffmpeg reports it from the text subtitle's filter. */
+const LIBASS_FAILED = "[Parsed_subtitles_6 @ 0x1] Error initializing libass";
+
+/** The first stream run that draws a text subtitle fails. */
+const textBurnFails = await writeFakeFfmpeg({
+  rules: [{ token: "subtitles=filename", runs: "hls", stderr: LIBASS_FAILED, limit: 1 }],
+  logInvocations: true,
+});
+
 /** Runs stall after their first fragment until killed, so a seek replaces a live run. */
 const stalling = await writeFakeFfmpeg({ hlsStallsAfterFragments: 1, logInvocations: true });
 
@@ -329,7 +338,11 @@ const PICTURES = {
  * Twelve seconds at 640x360, HDR10 HEVC or interlaced MPEG-2, with an AAC track (1), an AC-3
  * track (2), and a DVD subtitle (3), in a library of its own.
  */
-const addFilm = Effect.fn(function* (library: string, picture: keyof typeof PICTURES = "hdr") {
+const addFilm = Effect.fn(function* (
+  library: string,
+  picture: keyof typeof PICTURES = "hdr",
+  subtitle: "picture" | "text" = "picture",
+) {
   const workspace = yield* FixtureWorkspace.Service;
   const tools = yield* MediaTools.Service;
   const scanner = yield* LibraryScanner.Service;
@@ -339,7 +352,10 @@ const addFilm = Effect.fn(function* (library: string, picture: keyof typeof PICT
   const root = path.join(workspace.root, library);
   const output = path.join(root, FILM);
 
+  const text = path.join(root, "lines.srt");
+
   yield* fs.makeDirectory(path.dirname(output), { recursive: true });
+  yield* fs.writeFileString(text, "1\n00:00:01,000 --> 00:00:11,000\nA line\n");
   yield* tools.ffmpeg([
     "-hide_banner",
     "-nostdin",
@@ -356,7 +372,7 @@ const addFilm = Effect.fn(function* (library: string, picture: keyof typeof PICT
     "-i",
     "sine=frequency=660:sample_rate=48000:duration=12",
     "-i",
-    VOBSUB,
+    subtitle === "text" ? text : VOBSUB,
     "-map",
     "0:v",
     "-map",
@@ -1236,6 +1252,45 @@ describe.skipIf(!hasFfmpeg)("stream recovery", () => {
           assert.include(replacement, "h264_qsv");
           assert.deepStrictEqual(kept(replacement), kept(first));
           assert.isTrue(kept(first).subtitle);
+        }),
+      120_000,
+    );
+  });
+
+  layer(
+    MediaTestServer.layer({ FFMPEG_PATH: textBurnFails, HARDWARE_ACCELERATION: "none" }),
+    options,
+  )((it) => {
+    it.effect(
+      "ends the stream when libass fails, rather than play on without the subtitle the viewer chose",
+      () =>
+        Effect.gen(function* () {
+          const fileId = yield* addFilm("text-burn-lost", "hdr", "text");
+
+          const film = yield* negotiated({
+            token: signTestToken({ fid: fileId, sid: "film" }),
+            ...CHOICES,
+          });
+
+          assert.deepInclude(film.transcode?.stages ?? [], {
+            op: "burn-text",
+            domain: "cpu",
+            impl: "burn-text.cpu",
+          });
+
+          // No other row draws text, so the failed one leaves nothing to plan the choice with.
+          const answer = yield* fetchAnswer(segmentOf(film.url, 3));
+
+          assert.strictEqual(answer.status, 500, answer.body);
+          assert.deepInclude(JSON.parse(answer.body), {
+            _tag: "TranscodeFailed",
+            reason: "nothing-left",
+          });
+
+          const runs = yield* runsOf(textBurnFails, film.streamId ?? "");
+
+          assert.lengthOf(runs, 1);
+          assert.include(runs[0]?.join(" ") ?? "", "subtitles=filename");
         }),
       120_000,
     );

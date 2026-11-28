@@ -688,6 +688,15 @@ describe("decidePlayback", () => {
       PlaybackPlan.Unsupported({ reason: "subtitle-not-burnable" }),
     );
     expect(withoutLibass(withText, chrome)).toStrictEqual(PlaybackPlan.Direct({ audioIndex: 1 }));
+
+    // A codec ffmpeg cannot write as ASS is refused here, not when the stream starts.
+    const teletext = BurnRequest.Text({ subtitle: { codec: "dvb_teletext", style: "plain" } });
+    const movText = BurnRequest.Text({ subtitle: { codec: "mov_text", style: "plain" } });
+
+    expect(software(withText, chrome, { burnSubtitle: teletext })).toStrictEqual(
+      PlaybackPlan.Unsupported({ reason: "subtitle-not-burnable" }),
+    );
+    expect(impls(software(withText, chrome, { burnSubtitle: movText }))).toContain("burn-text.cpu");
   });
 
   it("decodes on the CPU and keeps scaling and encoding on the GPU when the device cannot decode", () => {

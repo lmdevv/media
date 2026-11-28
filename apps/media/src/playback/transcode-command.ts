@@ -283,9 +283,6 @@ const SUBTITLE_LEAD = 30;
  */
 const SUBTITLE_MARGIN = 1;
 
-/** DVD subtitles carry no canvas size; without one ffmpeg sizes them to the video and crops. */
-const DVD_CANVAS = "720x576";
-
 const seekArgs = (seek: number | undefined): ReadonlyArray<string> =>
   seek === undefined ? [] : ["-ss", seconds(seek)];
 
@@ -296,7 +293,12 @@ const subtitleReading = (command: EncodeSource) => {
   const offset = command.from - command.sourceStart;
 
   return {
-    canvas: subtitle?.codec === "dvd_subtitle" ? ["-canvas_size", DVD_CANVAS] : [],
+    // The canvas the plan drew the subtitle on (`subtitleCanvas`), so ffmpeg does not size it to the
+    // picture until a packet says otherwise: DVD subtitles carry none at all.
+    canvas:
+      subtitle === undefined
+        ? []
+        : ["-canvas_size", `${String(subtitle.frame.width)}x${String(subtitle.frame.height)}`],
     seeked: burning && offset > 0.001,
     lead: offset - SUBTITLE_LEAD > 0.001 ? offset - SUBTITLE_LEAD : undefined,
   };

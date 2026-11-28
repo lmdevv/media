@@ -555,6 +555,125 @@ const blockText = (rgb: Uint8Array) => {
   return { filled: yellow / inside, stray };
 };
 
+const LATE_FILM = "Late Clock (2020)/Late Clock (2020).mkv";
+
+/**
+ * A 40 s film whose clock starts at 10 s, with the styled script (e1) and a plain SRT sidecar each
+ * showing one cue from 21 s to 22 s into the film: 31 s to 32 s on its clock.
+ */
+const addLateFilm = Effect.fn(function* (library: string) {
+  const workspace = yield* FixtureWorkspace.Service;
+  const tools = yield* MediaTools.Service;
+  const scanner = yield* LibraryScanner.Service;
+  const fs = yield* FileSystem.FileSystem;
+  const path = yield* Path.Path;
+  const libraryId = LibraryId.make(library);
+  const root = path.join(workspace.root, library);
+  const output = path.join(root, LATE_FILM);
+  const script = path.join(root, "late.ass");
+  const sidecar = output.replace(/\.mkv$/u, ".en.srt");
+
+  yield* fs.makeDirectory(path.dirname(output), { recursive: true });
+  yield* fs.writeFileString(
+    script,
+    STYLED_SCRIPT.replace("0:00:01.00,0:00:50.00", "0:00:21.00,0:00:22.00"),
+  );
+  yield* fs.writeFileString(sidecar, "1\n00:00:21,000 --> 00:00:22,000\nPlain sidecar line\n");
+  yield* tools.ffmpeg([
+    "-hide_banner",
+    "-nostdin",
+    "-v",
+    "error",
+    "-y",
+    "-f",
+    "lavfi",
+    "-i",
+    "color=c=0x305070:s=640x360:r=25:d=40",
+    "-i",
+    script,
+    "-map",
+    "0:v",
+    "-map",
+    "1:s",
+    "-c:v",
+    "libx264",
+    "-preset",
+    "ultrafast",
+    "-pix_fmt",
+    "yuv420p",
+    "-g",
+    "25",
+    "-c:s",
+    "copy",
+    "-attach",
+    FONT,
+    "-metadata:s:t:0",
+    "mimetype=application/x-truetype-font",
+    "-output_ts_offset",
+    "10",
+    output,
+  ]);
+  yield* scanner.scan({ libraryId, root, mode: "incremental" });
+
+  return { fileId: MemoryLibrary.fileIdOf(libraryId, LATE_FILM), sidecar, output };
+});
+
+/** The frame a playlist's stream shows at `time` seconds into the film, as 640x360 RGB. */
+const rgbAt = Effect.fn(function* (playlistUrl: string, time: number) {
+  const server = yield* MediaTestServer.Service;
+  const tools = yield* MediaTools.Service;
+  const fs = yield* FileSystem.FileSystem;
+  const url = new URL(playlistUrl);
+
+  const playlist = yield* HttpClient.get(`${server.baseUrl}${url.pathname}${url.search}`).pipe(
+    Effect.flatMap((response) => response.text),
+    Effect.orDie,
+  );
+
+  const durations = playlist
+    .split("\n")
+    .filter((line) => line.startsWith("#EXTINF:"))
+    .map((line) => Number.parseFloat(line.slice("#EXTINF:".length)));
+
+  const index = yield* segmentHolding(playlistUrl, time);
+  const start = durations.slice(0, index).reduce((sum, duration) => sum + duration, 0);
+  const file = yield* joinedSegment(playlistUrl, index);
+  const frame = yield* fs.makeTempFileScoped({ suffix: ".rgb" });
+
+  // The first frame at or after `time`, a millisecond early so a frame exactly at it is the one.
+  yield* tools.ffmpeg([
+    "-hide_banner",
+    "-nostdin",
+    "-v",
+    "error",
+    "-y",
+    "-ss",
+    Math.max(0, time - start - 0.001).toFixed(3),
+    "-i",
+    file,
+    "-frames:v",
+    "1",
+    "-pix_fmt",
+    "rgb24",
+    "-f",
+    "rawvideo",
+    frame,
+  ]);
+
+  return yield* fs.readFile(frame);
+});
+
+/** How many near-white samples the bottom third of a 640x360 RGB picture holds. */
+const whiteAtBottom = (rgb: Uint8Array): number => {
+  let white = 0;
+
+  for (let at = 640 * 240 * 3; at < rgb.length; at += 3) {
+    if ((rgb[at] ?? 0) > 200 && (rgb[at + 1] ?? 0) > 200 && (rgb[at + 2] ?? 0) > 200) white += 1;
+  }
+
+  return white;
+};
+
 describe.skipIf(!hasFfmpeg)("text subtitles", () => {
   layer(MediaTestServer.layer(), { excludeTestServices: true, timeout: "120 seconds" })((it) => {
     it.effect(
@@ -603,6 +722,49 @@ describe.skipIf(!hasFfmpeg)("text subtitles", () => {
           );
           yield* stop(token, burned.streamId);
           assert.isFalse(yield* fs.exists(join(server.transcodeDir, burned.streamId ?? "")));
+        }).pipe(Effect.scoped),
+      90_000,
+    );
+
+    it.effect(
+      "shows a cue from its first frame to its last after a seek, on a file whose clock starts late",
+      () =>
+        Effect.gen(function* () {
+          const { fileId, sidecar, output } = yield* addLateFilm("text-late").pipe(Effect.orDie);
+          const token = signTestToken({ fid: fileId, sid: "burn-text-late" });
+
+          assert.closeTo(yield* firstPacketTime(output, "v"), 10, 0.1);
+
+          // The cue is 21 s to 22 s into the film; each frame is 0.04 s.
+          const shown = [20.96, 21, 21.96, 22] as const;
+
+          const styled = yield* negotiate(token, "e1");
+          const moved = yield* seek(token, styled.streamId, 20);
+          const blocks = [];
+
+          for (const time of shown) {
+            blocks.push(blockText(yield* rgbAt(moved.playlistUrl, time)).filled);
+          }
+
+          assert.isBelow(blocks[0] ?? 1, 0.05, "before the cue");
+          assert.isAtLeast(blocks[1] ?? 0, 0.97, "its first frame");
+          assert.isAtLeast(blocks[2] ?? 0, 0.97, "its last frame");
+          assert.isBelow(blocks[3] ?? 1, 0.05, "after it");
+          yield* stop(token, styled.streamId);
+
+          const plain = yield* negotiate(token, sidecarTrackId(sidecar));
+          const replaced = yield* seek(token, plain.streamId, 20);
+          const lines = [];
+
+          for (const time of shown) {
+            lines.push(whiteAtBottom(yield* rgbAt(replaced.playlistUrl, time)));
+          }
+
+          assert.isBelow(lines[0] ?? 1000, 20, "before the cue");
+          assert.isAbove(lines[1] ?? 0, 300, "its first frame");
+          assert.isAbove(lines[2] ?? 0, 300, "its last frame");
+          assert.isBelow(lines[3] ?? 1000, 20, "after it");
+          yield* stop(token, plain.streamId);
         }).pipe(Effect.scoped),
       90_000,
     );
