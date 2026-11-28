@@ -100,11 +100,14 @@ class FakeCore implements DownloadsCore {
     this.#base = base;
   }
 
-  keep = (trackId: TrackId): Promise<void> => {
+  /** Holds each keep's answer until it resolves; null answers at once. */
+  keepHeld: Promise<void> | null = null;
+
+  keep = async (trackId: TrackId): Promise<void> => {
     this.calls.push(`keep:${trackId}`);
     this.kept.set(trackId, this.kept.get(trackId) ?? `rev${trackId}`);
 
-    return Promise.resolve();
+    if (this.keepHeld !== null) await this.keepHeld;
   };
 
   release = (trackId: TrackId): Promise<void> => {
@@ -574,6 +577,77 @@ describe("DownloadSync's lyrics questions as each snapshot is published", () => 
   });
 });
 
+describe("DownloadSync's lyrics questions from the state each snapshot is published in", () => {
+  const one = song("t1", "Safe from Harm");
+  const two = song("t2", "One Love");
+  const TWO = { kind: "track", id: two.id } as const;
+
+  const trackManifest = (title: string): DownloadManifest => ({
+    pin: {
+      id: pinIdOf(TWO),
+      target: TWO,
+      createdAt: 1,
+      available: true,
+      ...DETAILS,
+      title,
+      artHash: null,
+    },
+    entries: [{ track: two, rev: UNKNOWN_REVISION, artHash: null, state: "held" }],
+  });
+
+  /**
+   * Keeps `one` in the album with lyrics behind at s1, and `two` in a download of its own, then
+   * holds a plan on that second download's pin save and closes the gate.
+   */
+  const holdAPlanWithTheGateClosed = async (): Promise<Gate> => {
+    await settled((snapshot) => snapshot.ready);
+    await sync.request(ALBUM, DETAILS);
+    await sync.request(TWO, DETAILS);
+    sync.offerManifest(pinIdOf(ALBUM), heldManifest([one]));
+    sync.offerManifest(pinIdOf(TWO), trackManifest("One Love"));
+    sync.offerKept(new Map([[one.id, at("s1")]]));
+    await settled((snapshot) => asked(snapshot).length === 1);
+    await settled(() => vault.view.pins.get(pinIdOf(TWO))?.members.length === 1);
+
+    const held = gate();
+
+    vault.pinGate = held;
+    sync.offerManifest(pinIdOf(TWO), trackManifest("One Love, retitled"));
+    await vi.waitFor(() => {
+      expect(held.waiting).toBe(true);
+    });
+    sync.setWifiOnly(true);
+    sync.setMetered(true);
+
+    return held;
+  };
+
+  it("asks nothing for a song whose only download went while the gate was closed", async () => {
+    const held = await holdAPlanWithTheGateClosed();
+
+    await sync.remove(ALBUM);
+
+    expect(sync.getSnapshot().pins.map(({ pin }) => pin.id)).toEqual([pinIdOf(TWO)]);
+
+    sync.setMetered(false);
+
+    expect(sync.getSnapshot().lyricsQuestions).toEqual([]);
+
+    held.open();
+  });
+
+  it("asks at the revision offered while the gate was closed, never the one before", async () => {
+    const held = await holdAPlanWithTheGateClosed();
+
+    sync.offerKept(new Map([[one.id, at("s2")]]));
+    sync.setMetered(false);
+
+    expect(asked(sync.getSnapshot())).toEqual([{ trackId: one.id, rev: "s2" }]);
+
+    held.open();
+  });
+});
+
 describe("DownloadSync's lyrics retries", () => {
   it("asks a pending song again a minute later, though a settled song of its batch was saved", async () => {
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
@@ -666,6 +740,48 @@ describe("DownloadSync's lyrics retries", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+});
+
+describe("DownloadSync stopping a fetch while the core keeps its song", () => {
+  const one = song("t1", "Safe from Harm");
+
+  /** Starts fetching `one` with its keep held, and resolves once the keep was asked. */
+  const keepHeld = async (): Promise<() => void> => {
+    const { promise, resolve } = Promise.withResolvers<void>();
+
+    core.keepHeld = promise;
+    media.serve("/song/t1", "first song");
+    await settled((snapshot) => snapshot.ready);
+    await sync.request(ALBUM, DETAILS);
+    sync.offerManifest(pinIdOf(ALBUM), manifestOf([one]));
+    await vi.waitFor(() => {
+      expect(core.calls).toContain("keep:t1");
+    });
+
+    return resolve;
+  };
+
+  it("asks for no ticket once stopped", async () => {
+    const answer = await keepHeld();
+    const stopping = sync.stop();
+
+    answer();
+    await stopping;
+
+    expect(core.calls).toEqual(["keep:t1"]);
+  });
+
+  it("asks for no ticket, and records no failure, once Wi-Fi only stops it", async () => {
+    const answer = await keepHeld();
+
+    sync.setWifiOnly(true);
+    sync.setMetered(true);
+    answer();
+    await new Promise((resolve) => setTimeout(resolve, 50));
+
+    expect(core.calls).toEqual(["keep:t1"]);
+    expect(sync.getSnapshot().tracks.get(one.id)).toBe("queued");
   });
 });
 

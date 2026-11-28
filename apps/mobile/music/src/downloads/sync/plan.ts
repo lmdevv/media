@@ -270,8 +270,8 @@ const bucketCount = (songs: number): number => {
 /**
  * What to look up lyrics for: each kept song the core lists with lyrics at a revision other than
  * the one this phone keeps them at, one batch per bucket of kept songs by a hash of their IDs. A
- * song whose lyrics here are current is never asked, nor one `resting` names: its last lookup
- * was pending or failed, and the sync asks again later. A new download moves only its own bucket,
+ * song whose lyrics here, or offered and not yet saved, are current is never asked, nor one
+ * `resting` names: its last lookup was pending or failed, and the sync asks again later. A new download moves only its own bucket,
  * and the songs the others hold stay as they were. A bucket that passes `HELD_LYRICS_LIMIT` is
  * split in ID order.
  */
@@ -288,7 +288,18 @@ export const lyricsQuestions = (
   for (const trackId of kept) {
     const current = listed.get(trackId) ?? null;
 
-    if (current === null || resting.has(trackId) || vault.lyrics.get(trackId)?.rev === current) {
+    const offered = desired.lyrics.get(trackId);
+
+    if (
+      current === null ||
+      resting.has(trackId) ||
+      vault.lyrics.get(trackId)?.rev === current ||
+      (offered !== undefined &&
+        LyricsChange.match(offered, {
+          Changed: ({ rev }) => rev === current,
+          Removed: () => false,
+        }))
+    ) {
       continue;
     }
 

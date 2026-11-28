@@ -170,7 +170,7 @@ export const fetchFinishedFile = async (
   try {
     url = finishedUrl(await request.sign());
   } catch (cause) {
-    return signingFailed(cause);
+    return stopped() ? FetchOutcome.Stopped() : signingFailed(cause);
   }
 
   const resign = async (): Promise<FetchOutcome | null> => {
@@ -188,7 +188,7 @@ export const fetchFinishedFile = async (
 
       return null;
     } catch (cause) {
-      return signingFailed(cause);
+      return stopped() ? FetchOutcome.Stopped() : signingFailed(cause);
     }
   };
 

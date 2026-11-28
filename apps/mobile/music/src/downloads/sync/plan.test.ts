@@ -452,6 +452,30 @@ describe("lyricsQuestions", () => {
     ]);
   });
 
+  it("leaves out a song whose lyrics at the current revision are offered and not yet saved", () => {
+    const offered = TrackId.make("offered");
+    const due = TrackId.make("due");
+
+    expect(
+      lyricsQuestions(
+        desiredOf(
+          [album],
+          [manifest(album, [entry(offered, "r1"), entry(due, "r1")])],
+          [],
+          [
+            LyricsChange.cases.Changed.make({
+              trackId: offered,
+              rev: LyricsRevision.make("s1"),
+              lyrics: WORDS,
+            }),
+          ],
+        ),
+        vaultOf([]),
+        listedAt([offered, due], "s1"),
+      ).map((question) => question.held),
+    ).toEqual([[{ trackId: due, rev: "s1" }]]);
+  });
+
   it("leaves out a song resting after a pending or failed lookup", () => {
     const resting = TrackId.make("resting");
     const due = TrackId.make("due");

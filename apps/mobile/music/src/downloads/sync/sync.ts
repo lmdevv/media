@@ -1,5 +1,5 @@
 import type { Data } from "effect";
-import { Equal, Option } from "effect";
+import { Option } from "effect";
 
 import { DownloadResult, fetchFinishedFile, FetchOutcome } from "./finished-file";
 import type { Transfer } from "./finished-file";
@@ -117,8 +117,9 @@ export interface DownloadsSnapshot {
    * holds none when, as it is published, the sync has stopped, the server is out of reach, or
    * `transferGate` holds the sync's work (Wi-Fi only on a metered network, Low Power Mode); each of
    * those changes publishes at once. None either for a song whose lookup was pending or failed
-   * less than `LYRICS_RETRY_MS` ago at the same revision. Recomputed once a plan has applied what
-   * it could, and the same array, of the same question objects, until a question changes.
+   * less than `LYRICS_RETRY_MS` ago at the same revision. Worked out from the sync's state as each
+   * snapshot is published, and the same array, of the same question objects, until a question
+   * changes.
    */
   readonly lyricsQuestions: ReadonlyArray<LyricsQuestion>;
 }
@@ -200,6 +201,15 @@ export const EMPTY_DOWNLOADS: DownloadsSnapshot = {
 /** The questions of a snapshot while the sync may not ask: one array, so nothing re-renders. */
 const NO_QUESTIONS: ReadonlyArray<LyricsQuestion> = [];
 
+/** Whether two questions under one key ask about the same songs at the same revisions. */
+const sameQuestion = (left: LyricsQuestion, right: LyricsQuestion): boolean =>
+  left.held.length === right.held.length &&
+  left.held.every((song, index) => {
+    const other = right.held[index];
+
+    return song.trackId === other?.trackId && song.rev === other.rev;
+  });
+
 const delay = (ms: number, signal: AbortSignal): Promise<void> =>
   new Promise((resolve) => {
     if (signal.aborted) {
@@ -275,10 +285,7 @@ export class DownloadSync {
     { readonly rev: LyricsRevision; readonly at: number }
   >();
   #lyricsWake: ReturnType<typeof setTimeout> | null = null;
-  /**
-   * The questions the last plan found. A snapshot carries them only while `#mayAsk` holds when it
-   * is published (`#publish`), whatever plan is running then.
-   */
+  /** The questions last published, whose objects `#currentQuestions` keeps while they hold. */
   #questions: ReadonlyArray<LyricsQuestion> = [];
   readonly #readLyrics = new Map<
     TrackId,
@@ -706,7 +713,7 @@ export class DownloadSync {
       })
       .finally(() => {
         this.#planning = false;
-        this.#askAgain();
+        this.#restLyrics();
         this.#publish();
 
         if (this.#replan) this.#plan();
@@ -776,11 +783,14 @@ export class DownloadSync {
     this.#notify();
   }
 
-  #askAgain(): void {
+  /**
+   * Forgets the lyrics retries that are due or whose song the server moved to another revision, and
+   * wakes a plan when the next one falls due. A stopped sync starts no timer.
+   */
+  #restLyrics(): void {
     if (this.#stopped) return;
     const listed = Option.getOrElse(this.#listed, (): ListedLyrics => new Map());
     const now = this.#options.now();
-    const resting = new Set<TrackId>();
     let next: number | null = null;
 
     for (const [trackId, retry] of this.#lyricsRetries) {
@@ -789,25 +799,44 @@ export class DownloadSync {
         continue;
       }
 
-      resting.add(trackId);
       next = Math.min(next ?? retry.at, retry.at);
     }
 
     this.#wakeForLyrics(next === null ? null : next - now);
+  }
+
+  /**
+   * The lyrics questions the sync's state asks now: from the downloads and manifests it holds, the
+   * vault's rows, the lyrics offered and not yet saved, the core's listed revisions, and the songs
+   * resting after a pending or failed lookup. `#publish` asks for them, so every snapshot's
+   * questions are those of the moment it is published. Returns the same array, and keeps each
+   * question that didn't change the same object, so a watcher keeps the lookups it has in flight.
+   */
+  #currentQuestions(): ReadonlyArray<LyricsQuestion> {
+    const listed = Option.getOrElse(this.#listed, (): ListedLyrics => new Map());
+    const now = this.#options.now();
+    const resting = new Set<TrackId>();
+
+    for (const [trackId, retry] of this.#lyricsRetries) {
+      if (listed.get(trackId) === retry.rev && retry.at > now) resting.add(trackId);
+    }
 
     const questions = lyricsQuestions(this.#desired(), this.#view, listed, resting);
-
-    if (Equal.equals(questions, this.#questions)) return;
-
-    // A question that didn't change stays the same object, so its watcher keeps the lookups it
-    // has in flight while another bucket's answers land.
     const before = new Map(this.#questions.map((question) => [question.key, question]));
+    let changed = questions.length !== this.#questions.length;
 
-    this.#questions = questions.map((question) => {
+    const kept = questions.map((question, index) => {
       const same = before.get(question.key);
+      const next = same !== undefined && sameQuestion(same, question) ? same : question;
 
-      return same !== undefined && Equal.equals(same, question) ? same : question;
+      if (next !== this.#questions[index]) changed = true;
+
+      return next;
     });
+
+    if (changed) this.#questions = kept;
+
+    return this.#questions;
   }
 
   #wakeForLyrics(ms: number | null): void {
@@ -970,6 +999,9 @@ export class DownloadSync {
       const outcome = await fetchFinishedFile(this.#options.transfer, {
         sign: async () => {
           await core.keep(trackId);
+
+          // Stopped while the core kept the song: no ticket is asked for a fetch that won't run.
+          if (stop.signal.aborted) throw new Error("The fetch stopped");
           const ticket = await core.ticket(trackId, profile);
           fetched.rev = ticket.revision;
 
@@ -1220,7 +1252,7 @@ export class DownloadSync {
       tracks: this.#trackStates(copies),
       copies,
       usage: { tracks: copies.size, bytes, freeBytes: this.#options.vault.freeBytes() },
-      lyricsQuestions: this.#mayAsk() ? this.#questions : NO_QUESTIONS,
+      lyricsQuestions: this.#mayAsk() ? this.#currentQuestions() : NO_QUESTIONS,
     };
 
     this.#notify();
