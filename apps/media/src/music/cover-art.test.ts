@@ -33,6 +33,7 @@ import { makeFakeCore, stream } from "../testing/fake-core.ts";
 import { testConfigLayer } from "../testing/test-config.ts";
 import { testArtworkKeysLayer } from "../testing/test-tokens.ts";
 import { saveArt } from "./art-store.ts";
+import { ClassifyWithin } from "./cover-copy.ts";
 import * as Files from "./music-files.ts";
 import * as MusicRoutes from "./music-routes.ts";
 import {
@@ -127,11 +128,17 @@ const startServer = async (data: string, options: ServerOptions = {}) => {
     FFPROBE_PATH: process.env["FFPROBE_PATH"] ?? "ffprobe",
   });
 
+  // A time for telling a cover's kind that no run reaches, so a busy machine tells every kind
+  // and the counts below hold; `cover-copy.test.ts` covers the time running out.
+  const patient = MusicRoutes.layer.pipe(
+    Layer.provide(Layer.succeed(ClassifyWithin, Duration.minutes(2))),
+  );
+
   // The routes' own file system, so a stand-in reaches the files they answer with.
   const routes =
     fileSystem === undefined
-      ? MusicRoutes.layer
-      : MusicRoutes.layer.pipe(
+      ? patient
+      : patient.pipe(
           Layer.provide(
             Layer.effect(
               FileSystem.FileSystem,
