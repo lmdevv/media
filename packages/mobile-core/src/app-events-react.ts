@@ -147,7 +147,9 @@ export interface ScreenPlace {
 /**
  * Times the opening of the screen of record `id`: answers the frame mark to render as the
  * screen's last child, or null. The mark renders with the content, in the same commit, so its
- * ready refresh is the content's first. Identity rule: the screen claims the press that opened it
+ * ready refresh is the content's first. `heldAtMount` says whether the screen held its content as it
+ * mounted, which names the open's cache state (`kept` or `fetched`); it defaults to
+ * `contentReady`, for a screen that draws what it holds in its first commit. Identity rule: the screen claims the press that opened it
  * when it mounts focused, as route instance `place.key`, and only that claim closes that press's
  * timer, when the mark reports the content at rest. A later press, a blur, or an unmount ends the claim, so an
  * earlier screen's late content never closes a later press's timer.
@@ -159,8 +161,9 @@ export const useOpenMark = (
   id: string,
   place: ScreenPlace,
   contentReady: boolean,
+  heldAtMount: boolean = contentReady,
 ): ReactNode => {
-  const [cache] = useState<OpenCache>(contentReady ? "kept" : "fetched");
+  const [cache] = useState<OpenCache>(heldAtMount ? "kept" : "fetched");
   const [drawn, setDrawn] = useState(false);
   const claim = useRef(Option.none<OpenClaim>());
   const { key, focused } = place;

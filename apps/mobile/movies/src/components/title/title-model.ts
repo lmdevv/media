@@ -11,6 +11,7 @@ import type {
   Progress,
   Season,
   ShowStatus,
+  TitleCard,
   TitleDetail,
 } from "@/lib/catalog";
 import { facts, formatRemaining, formatRuntime } from "@/lib/format";
@@ -89,21 +90,27 @@ const pictureOf = (versions: ReadonlyArray<MediaVersion>): string | null => {
 
 /**
  * The line under the title: `2024 · 2h 46m · PG-13 · 4K` for a movie, `Thriller · 2 seasons ·
- * TV-MA` for a show.
+ * TV-MA` for a show. A row's card has no versions or seasons, so its line leaves out the picture
+ * and the season count: `2024 · 2h 46m · PG-13`, `Thriller · TV-MA`.
  */
-export const titleFacts = (title: TitleDetail): string =>
-  title.kind === "movie"
+export const titleFacts = (title: TitleCard | TitleDetail): string => {
+  const detail = "versions" in title ? title : null;
+
+  return title.kind === "movie"
     ? facts(
         title.year,
         title.runtimeMs === null ? null : formatRuntime(title.runtimeMs),
         title.certification,
-        pictureOf(title.versions),
+        detail === null ? null : pictureOf(detail.versions),
       )
     : facts(
         title.genres[0],
-        title.seasons.length === 0 ? null : countOf(title.seasons.length, "season", "seasons"),
+        detail === null || detail.seasons.length === 0
+          ? null
+          : countOf(detail.seasons.length, "season", "seasons"),
         title.certification,
       );
+};
 
 const firstSeason = (title: TitleDetail): number | undefined =>
   (title.seasons.find((season) => season.seasonNumber > 0) ?? title.seasons[0])?.seasonNumber;

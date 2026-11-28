@@ -95,15 +95,17 @@ export const HomeLaunchMarks = ({ content }: { readonly content: ContentSource |
 
 /**
  * Times the opening of this screen, of record `id`, from the press that opened it to the first
- * frame its content is in view; render the answer as the screen's last child.
+ * frame its content is in view; render the answer as the screen's last child. `heldAtMount` says whether
+ * the screen held its content as it mounted, when it draws that content a frame later.
  */
 export const useScreenOpenMark = (
   screen: TimedScreen,
   id: string,
   contentReady: boolean,
+  heldAtMount: boolean = contentReady,
 ): ReactNode => {
   const { key } = useRoute();
   const focused = useIsFocused();
 
-  return useOpenMark(appEvents, FrameMark, screen, id, { key, focused }, contentReady);
+  return useOpenMark(appEvents, FrameMark, screen, id, { key, focused }, contentReady, heldAtMount);
 };

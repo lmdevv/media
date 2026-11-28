@@ -10,6 +10,7 @@ import type { ReactNode } from "react";
 import { AppState, Platform } from "react-native";
 
 import { appKeychains } from "@/lib/keychains";
+import { TitleHandoffProvider } from "@/lib/open-title";
 
 import { savedHome } from "./saved-home";
 
@@ -38,8 +39,9 @@ const useServerRelease = (mediaUrl: string): void => {
 /**
  * The platform client for `connection`, provided to everything below. Its session lives in this
  * app's own keychain group (D48), and every sign-in goes through the media server's sign-in boundary.
- * It saves Home's answers for the next launch to show at once. It also follows the server's
- * release, so an answer this app can't read asks to update it.
+ * It saves Home's answers for the next launch to show at once, and holds the cards pressed titles
+ * hand their pages. It also follows the server's release, so an answer this app can't read asks to
+ * update it.
  */
 export function SdkProvider({
   connection,
@@ -61,7 +63,7 @@ export function SdkProvider({
       storageKey={sessionKeyFor(connection.mediaUrl)}
       saved={saved}
     >
-      {children}
+      <TitleHandoffProvider>{children}</TitleHandoffProvider>
     </PlatformProvider>
   );
 }
