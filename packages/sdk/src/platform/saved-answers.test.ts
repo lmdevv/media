@@ -428,6 +428,47 @@ describe("saved answers", () => {
     expect(seen).toStrictEqual([{ status: "success", data: SERVER_NOW }]);
   }, 20_000);
 
+  it("saves an answer the server gave before the file was read", async () => {
+    const read = heldRead();
+
+    const written = await withFake((fake) =>
+      Effect.gen(function* () {
+        const disk = memoryFile(null, read.done);
+        const calls = { count: 0 };
+
+        // The one answer comes while the file is still being read; any later ask never answers.
+        yield* fake.handle("core/server:info", () =>
+          Effect.suspend(() => {
+            calls.count += 1;
+
+            return calls.count === 1
+              ? Effect.succeed(Reply.Success({ value: SERVER_NOW }))
+              : Effect.never;
+          }),
+        );
+
+        const platform = open(fake, { subject: ADA, file: disk.file });
+
+        return yield* Effect.promise(async () => {
+          const info = follow(platform.core.server.info.watch());
+
+          await until(() => isLive(info.now()));
+          read.finish();
+          await until(() => disk.state.writes > 0);
+          info.stop();
+          await platform.dispose();
+
+          return parseWritten(disk.state.text);
+        });
+      }),
+    );
+
+    expect({ session: written.session, queries: queriesIn(written) }).toStrictEqual({
+      session: ADA,
+      queries: [INFO],
+    });
+  }, 20_000);
+
   it("saves only the queries it names, shows no saved answer for another, and drops one from the file", async () => {
     const meAnswer = gate();
 

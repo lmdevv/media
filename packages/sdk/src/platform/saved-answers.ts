@@ -90,8 +90,14 @@ type Opened = Data.TaggedEnum<{
 
 const Opened = Data.taggedEnum<Opened>();
 
+/** An answer that came before the stored session's saved answers were read, and whose it was. */
+interface Held {
+  readonly session: string;
+  readonly saved: Saved;
+}
+
 type Saving = Data.TaggedEnum<{
-  Starting: {};
+  Starting: { readonly held: ReadonlyMap<string, Held> };
   Waiting: {};
   For: { readonly session: string; readonly answers: ReadonlyMap<string, Saved> };
   Off: {};
@@ -222,7 +228,7 @@ export const layer = (
       const scope = yield* Effect.scope;
       const queries = new Set(options.queries);
       const maxAge = Duration.fromInputUnsafe(options.maxAge);
-      const saving = yield* SubscriptionRef.make<Saving>(Saving.Starting());
+      const saving = yield* SubscriptionRef.make<Saving>(Saving.Starting({ held: new Map() }));
       const disk = yield* Semaphore.make(1);
       let writeScheduled = false;
 
@@ -286,6 +292,17 @@ export const layer = (
         Stream.changesWith(Option.makeEquivalence((a: string, b: string) => a === b)),
       );
 
+      const scheduleWrite = Effect.gen(function* () {
+        if (writeScheduled) return;
+
+        writeScheduled = true;
+        yield* Effect.forkIn(Effect.delay(write, WRITE_AFTER), scope);
+      });
+
+      /**
+       * Reads the file for `identity`, the stored session's, and starts saving for it: the file's
+       * answers, then those the server gave it meanwhile, which are newer.
+       */
       const begin = Effect.fn("SavedAnswers.begin")(function* (identity: Option.Option<string>) {
         const file = yield* opened;
         const found = Opened.$is("Found")(file) ? Option.some(file.found) : Option.none();
@@ -295,34 +312,49 @@ export const layer = (
           yield* remove;
         }
 
-        return Option.match(identity, {
-          onNone: () => Saving.Waiting(),
-          onSome: (session) =>
-            Saving.For({
-              session,
-              answers: Option.match(owned, {
-                onNone: () => new Map<string, Saved>(),
-                onSome: (saved) => saved.answers,
-              }),
-            }),
-        });
+        const answeredMeanwhile = yield* SubscriptionRef.modify(
+          saving,
+          (state): readonly [boolean, Saving] => {
+            if (!isStarting(state)) return [false, state];
+
+            if (Option.isNone(identity)) return [false, Saving.Waiting()];
+
+            const session = identity.value;
+
+            const meanwhile = [...state.held].flatMap(([key, held]) =>
+              held.session === session ? [[key, held.saved] as const] : [],
+            );
+
+            const answers = new Map([
+              ...Option.match(owned, { onNone: () => [], onSome: (saved) => saved.answers }),
+              ...meanwhile,
+            ]);
+
+            return [meanwhile.length > 0, Saving.For({ session, answers })];
+          },
+        );
+
+        if (answeredMeanwhile) yield* scheduleWrite;
       });
 
       const follow = Effect.fn("SavedAnswers.follow")(function* (identity: Option.Option<string>) {
         const state = yield* SubscriptionRef.get(saving);
 
-        const next = yield* Saving.$match(state, {
-          Starting: () => begin(identity),
+        if (isStarting(state)) {
+          yield* begin(identity);
+
+          return;
+        }
+
+        const next = Saving.$match(state, {
+          Starting: () => state,
           Waiting: () =>
-            Effect.succeed(
-              Option.match(identity, {
-                onNone: () => state,
-                onSome: (session) => Saving.For({ session, answers: new Map() }),
-              }),
-            ),
-          For: ({ session }) =>
-            Effect.succeed(Option.contains(identity, session) ? state : Saving.Off()),
-          Off: () => Effect.succeed(state),
+            Option.match(identity, {
+              onNone: () => state,
+              onSome: (session) => Saving.For({ session, answers: new Map() }),
+            }),
+          For: ({ session }) => (Option.contains(identity, session) ? state : Saving.Off()),
+          Off: () => state,
         });
 
         yield* SubscriptionRef.set(saving, next);
@@ -365,30 +397,40 @@ export const layer = (
           Effect.gen(function* () {
             if (!queries.has(command.name)) return;
 
-            const state = yield* SubscriptionRef.get(saving);
             const identity = yield* client.session.currentIdentity;
 
-            if (!isFor(state) || !Option.contains(identity, state.session)) return;
+            if (Option.isNone(identity)) return;
 
             const value = Schema.encodeUnknownOption(command.result)(result);
 
             if (Option.isNone(value)) return;
 
+            const key = keyOf(command.name, args);
             const savedAt = yield* Clock.currentTimeMillis;
-            const answers = new Map(state.answers);
+            const saved: Saved = { query: command.name, args, savedAt, value: value.value };
 
-            answers.set(keyOf(command.name, args), {
-              query: command.name,
-              args,
-              savedAt,
-              value: value.value,
-            });
-            yield* SubscriptionRef.set(saving, Saving.For({ session: state.session, answers }));
+            const kept = yield* SubscriptionRef.modify(
+              saving,
+              (state): readonly [boolean, Saving] => {
+                if (isStarting(state)) {
+                  const held = new Map(state.held).set(key, { session: identity.value, saved });
 
-            if (writeScheduled) return;
+                  return [false, Saving.Starting({ held })];
+                }
 
-            writeScheduled = true;
-            yield* Effect.forkIn(Effect.delay(write, WRITE_AFTER), scope);
+                if (!isFor(state) || state.session !== identity.value) return [false, state];
+
+                return [
+                  true,
+                  Saving.For({
+                    session: state.session,
+                    answers: new Map(state.answers).set(key, saved),
+                  }),
+                ];
+              },
+            );
+
+            if (kept) yield* scheduleWrite;
           }),
       });
     }),
