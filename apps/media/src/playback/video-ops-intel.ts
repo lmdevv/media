@@ -486,6 +486,16 @@ const uploadOf = (codec: string, picture: Size): Upload => {
 };
 
 /**
+ * The primaries `frame` states, put back on it after VA-API's overlay cleared them for the blend
+ * (`burnImageOn`): BT.709 on a tone-mapped picture, an SDR source's own; nothing for a source that
+ * states none, whose stream names none either.
+ */
+const restoredPrimaries = (frame: Frame): ReadonlyArray<FilterCall> =>
+  frame.colour.primaries === undefined
+    ? []
+    : [filter("setparams", ["color_primaries", frame.colour.primaries])];
+
+/**
  * An image subtitle drawn on `domain`'s SDR NV12 surfaces by `overlay`, so the picture never leaves
  * the device: the subtitle's own frames, small and sparse, are decoded on the CPU into BGRA,
  * scaled to a fixed size (`uploadOf`), which a frame whose canvas changed mid-stream keeps,
@@ -502,7 +512,8 @@ const uploadOf = (codec: string, picture: Size): Upload => {
  * same card with iHD 26.3.5 under both builds, blends the subtitle's black as full range (Y 0, so a
  * half-transparent border lands 8 levels dark) over a picture whose frames name BT.709 primaries,
  * as a tone-mapped picture's and many SDR files' do, and as limited range (Y 16) over one that
- * names none: its row clears the picture's primaries for the blend, so the stream names none.
+ * names none: its row clears the picture's primaries for the blend and states the frame's own
+ * again after it (`restoredPrimaries`).
  */
 const burnImageOn = (
   domain: GpuDomain,
@@ -539,7 +550,10 @@ const burnImageOn = (
 
     return {
       ...NOTHING,
-      filters: [filter(overlay, ...upload.place, ["eof_action", "pass"], ["repeatlast", "0"])],
+      filters: [
+        filter(overlay, ...upload.place, ["eof_action", "pass"], ["repeatlast", "0"]),
+        ...(overlay === "overlay_vaapi" ? restoredPrimaries(frame) : []),
+      ],
       side:
         overlay === "overlay_vaapi"
           ? { ...side, picture: [filter("setparams", ["color_primaries", "unknown"])] }

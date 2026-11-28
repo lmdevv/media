@@ -622,7 +622,7 @@ describe("hlsCommandArgs", () => {
       [
         "[0:0]scale_vaapi=w=1920:h=1080:format=p010,tonemap_vaapi=format=nv12:p=bt709:t=bt709:m=bt709,setparams=color_primaries=bt709:color_trc=bt709:colorspace=bt709:range=tv,sidedata=mode=delete:type=MASTERING_DISPLAY_METADATA,sidedata=mode=delete:type=CONTENT_LIGHT_LEVEL,sidedata=mode=delete:type=DYNAMIC_HDR_PLUS,sidedata=mode=delete:type=DOVI_METADATA,sidedata=mode=delete:type=DOVI_RPU_BUFFER,setparams=color_primaries=unknown[picture]",
         "[0:3]scale=1920:1080,format=bgra,hwupload[subtitle]",
-        "[picture][subtitle]overlay_vaapi=x=0:y=0:w=1920:h=1080:eof_action=pass:repeatlast=0[video]",
+        "[picture][subtitle]overlay_vaapi=x=0:y=0:w=1920:h=1080:eof_action=pass:repeatlast=0,setparams=color_primaries=bt709[video]",
       ].join(";"),
     );
 
