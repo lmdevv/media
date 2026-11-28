@@ -9,7 +9,7 @@
 // flow.
 
 import { blockFont } from "./block-font.mjs";
-import { HDR_PATCHES, hdrPattern, judgePatches, REFERENCES, SDR_PATCHES, sdrPattern } from "./colour-patches.mjs";
+import { HDR_PATCHES, hdrPattern, judgeHdrPatches, judgePatches, REFERENCES, SDR_PATCHES, sdrPattern } from "./colour-patches.mjs";
 import { pgsStream } from "./pgs.mjs";
 
 /** The stages of the video pipeline, in the grid's order. */
@@ -18,6 +18,7 @@ export const STAGES = [
   "deinterlace",
   "scale",
   "hdr-to-sdr",
+  "keep-hdr",
   "subtitle-burn-in",
   "encode-h264",
   "encode-hevc",
@@ -292,6 +293,27 @@ export const FIXTURES = {
       ],
     },
   },
+  "hdr10-av1-patches": {
+    about:
+      "AV1 10-bit HDR10 (PQ, BT.2020, mastering 1000 cd/m²) in Matroska, 1920x1080 at 24 fps, 30 s: the HDR10 fixture's patches in a codec the HEVC device does not play, generated",
+    colour: "hdr10",
+    generate: {
+      title: "Verify Fixture HDR10 AV1 Patches",
+      year: 2026,
+      file: "Verify Fixture HDR10 AV1 Patches (2026).mkv",
+      files: { "hdr.raw": () => hdrPattern(100) },
+      args: [
+        ...patchInputs("hdr.raw", "gbrpf32le"),
+        "-filter_complex",
+        hdrPatchGraph("smpte2084", 100),
+        ...patchEncode(
+          ["-c:v", "libsvtav1", "-preset", "10", "-crf", "30", "-g", "48"],
+          ["-svtav1-params", "enable-hdr=1:mastering-display=G(0.265,0.69)B(0.15,0.06)R(0.68,0.32)WP(0.3127,0.329)L(1000,0.005):content-light=1000,400"],
+          ["-color_primaries", "bt2020", "-color_trc", "smpte2084", "-colorspace", "bt2020nc", "-color_range", "tv"],
+        ),
+      ],
+    },
+  },
   "hlg-patches": {
     about: "HEVC Main 10 HLG (BT.2020), 1920x1080 at 24 fps, 30 s: the HDR10 fixture's patches for a 1000 cd/m² HLG display, over a moving testsrc2 band, generated",
     colour: "hlg",
@@ -450,6 +472,20 @@ export const PROFILES = {
       mse: true,
     },
   },
+  "hevc-hdr": {
+    about:
+      "A device on an HDR screen that decodes HEVC Main and Main 10 up to level 5.1 in HDR10 and HLG and shows both, up to 1080p, and no H.264, with AAC: it plays nothing else, so even the CPU encodes HDR HEVC for it",
+    capabilities: {
+      containers: ["mp4"],
+      videoCodecs: [{ codec: "hevc", profiles: ["Main", "Main 10"], maxLevel: 153, maxBitDepth: 10, dynamicRanges: ["hdr10", "hlg"] }],
+      audioCodecs: [aac],
+      maxWidth: 1920,
+      maxHeight: 1080,
+      hls: true,
+      mse: true,
+      hdrScreen: ["hdr10", "hlg"],
+    },
+  },
   "av1-sdr": {
     about: "A device that decodes AV1 Main 8-bit SDR up to 1080p and no H.264, with AAC",
     capabilities: {
@@ -468,6 +504,7 @@ const GPU_DEINTERLACE = /deinterlace_(qsv|vaapi)|vpp_qsv=[^,;\s]*deinterlace=/;
 const GPU_SCALE = /scale_(qsv|vaapi)|vpp_qsv=[^,;\s]*\bw=/;
 const GPU_TONE_MAP = /tonemap_vaapi|vpp_qsv=[^,;\s]*tonemap=1|libplacebo=/;
 const GPU_OVERLAY = /overlay_(qsv|vaapi)/;
+const ANY_TONE_MAP = /(^|[\s,;\]])tonemap=|zscale=[^,;\s]*t=linear/;
 
 /**
  * Where an operation ran, read from one ffmpeg run's arguments and its GPU engine time. `uses`
@@ -510,6 +547,12 @@ export const WORK = {
   // run's arguments alone.
   text: {
     cpu: { uses: [/(^|[\s,;\]])subtitles=/], avoids: [], engine: "none" },
+  },
+  // An HDR source kept as HDR: HEVC Main 10 on the path, and no tone map anywhere in the run.
+  "keep-hdr": {
+    cpu: { uses: [/-c:v libx265\b/, /-profile:v main10\b/], avoids: [GPU_TONE_MAP, ANY_TONE_MAP], engine: "none", bytes: "x265" },
+    qsv: { uses: [/-c:v hevc_qsv\b/, /-profile:v main10\b/], avoids: [GPU_TONE_MAP, ANY_TONE_MAP], engine: "video", bytes: false },
+    vaapi: { uses: [/-c:v hevc_vaapi\b/, /-profile:v main10\b/], avoids: [GPU_TONE_MAP, ANY_TONE_MAP], engine: "video", bytes: false },
   },
   "encode-h264": {
     cpu: { uses: [/-c:v libx264\b/], avoids: [], engine: "none", bytes: "x264" },
@@ -631,6 +674,45 @@ const toneMapped = (id, paths, fixture, reference) => ({
     { check: "bit-depth", max: 8 },
     { check: "dimensions", expect: "source" },
     { check: "frame-rate", expect: ["source"] },
+  ],
+});
+
+/**
+ * How far a kept HDR patch may lie from the source's own: 3 in ΔE ITP (ITU-R BT.2124, where 1 is
+ * about the smallest difference a viewer sees, and one code of 10-bit PQ luma is 0.8), the scale's
+ * and the encoder's loss, since nothing is converted. Stated before any path was measured.
+ */
+const HDR_KEPT = { deltaItp: 3 };
+
+/**
+ * A row that keeps an HDR patch fixture's HDR for a device on an HDR screen, so it must encode:
+ * capped to `cap` lines, or with no cap, where the device does not play the fixture's codec. HEVC
+ * Main 10 in the source's colour, its static metadata, the multivariant playlist Apple's players
+ * read the range from, and every patch as the source's.
+ */
+const hdrKept = (id, fixture, range, cap) => ({
+  id,
+  stage: "keep-hdr",
+  paths: ALL_PATHS,
+  fixture,
+  profile: "hevc-hdr",
+  request: cap === undefined ? {} : { quality: { maxHeight: cap } },
+  start: 0,
+  seek: 20,
+  span: 4,
+  work: { "keep-hdr": "path" },
+  notBuilt: [],
+  checks: [
+    { check: "hdr-kept" },
+    { check: "codec", codec: "hevc", stage: false },
+    { check: "profile", profiles: ["Main 10"] },
+    { check: "codec-tag", tag: "hvc1" },
+    { check: "hdr-static" },
+    { check: "variant", range },
+    { check: "level", max: 153 },
+    ...(cap === undefined ? [{ check: "dimensions", expect: "source" }] : [{ check: "scaled", maxHeight: cap }, { check: "dimensions", expect: "negotiated" }]),
+    { check: "frame-rate", expect: ["source"] },
+    { check: "colour", reference: "source-hdr", transfer: range === "PQ" ? "pq" : "hlg", at: 21, tolerance: HDR_KEPT },
   ],
 });
 
@@ -821,6 +903,10 @@ export const ROWS = [
       { check: "frame-rate", expect: ["source"] },
     ],
   },
+  hdrKept("keep-hdr", "hdr10-patches", "PQ", 720),
+  hdrKept("keep-hdr-hlg", "hlg-patches", "HLG", 720),
+  hdrKept("keep-hdr-dv81", "dv81-patches", "PQ", 720),
+  hdrKept("keep-hdr-av1", "hdr10-av1-patches", "PQ", undefined),
   {
     id: "subtitle-burn-in",
     stage: "subtitle-burn-in",
@@ -1029,6 +1115,7 @@ export const parseProbe = (json) => {
     primaries: known(video.color_primaries),
     space: known(video.color_space),
     range: known(video.color_range),
+    level: number(video.level),
     fieldOrder: known(video.field_order),
     fps: rate(video.avg_frame_rate) ?? rate(video.r_frame_rate),
     baseFps: rate(video.r_frame_rate),
@@ -1044,6 +1131,79 @@ export const parseSideData = (json) => {
   const parsed = typeof json === "string" ? JSON.parse(json) : json;
   const types = (items) => (items ?? []).map((item) => item.side_data_type).filter((type) => typeof type === "string");
   return { stream: types(parsed.streams?.[0]?.side_data_list), frame: types(parsed.frames?.[0]?.side_data_list) };
+};
+
+/** The fields of HDR10's mastering display metadata, as ffprobe names them. */
+const MASTERING_FIELDS = ["red_x", "red_y", "green_x", "green_y", "blue_x", "blue_y", "white_point_x", "white_point_y", "min_luminance", "max_luminance"];
+
+/**
+ * The `-show_entries` of a video stream's and its first picture's side data with HDR10's static
+ * metadata in it, as `parseHdrMetadata` reads them.
+ */
+export const HDR_METADATA_ENTRIES = (() => {
+  const fields = ["side_data_type", ...MASTERING_FIELDS, "max_content", "max_average"].join(",");
+  return `stream_side_data=${fields}:frame_side_data=${fields}`;
+})();
+
+/** An ffprobe rational such as `34000/50000` as a number, to five places. */
+const rational = (text) => {
+  const [top, bottom] = String(text).split("/").map(Number);
+  return Number((bottom ? top / bottom : top).toFixed(5));
+};
+
+/**
+ * HDR10's static metadata on a video stream and its first picture, from `ffprobe -select_streams v:0
+ * -read_intervals %+#1 -show_entries HDR_METADATA_ENTRIES`: each `{ mastering, light }`, a field
+ * absent where it carries none. `kept` is what a player reads: the picture's, else the stream's.
+ */
+export const parseHdrMetadata = (json) => {
+  const parsed = typeof json === "string" ? JSON.parse(json) : json;
+  const read = (items) => {
+    const mastering = (items ?? []).find((item) => item.side_data_type === "Mastering display metadata");
+    const light = (items ?? []).find((item) => item.side_data_type === "Content light level metadata");
+    return {
+      mastering: mastering && Object.fromEntries(MASTERING_FIELDS.map((field) => [field, rational(mastering[field])])),
+      light: light && { maxCll: Number(light.max_content), maxFall: Number(light.max_average) },
+    };
+  };
+  const stream = read(parsed.streams?.[0]?.side_data_list);
+  const frame = read(parsed.frames?.[0]?.side_data_list);
+  return { stream, frame, kept: { mastering: frame.mastering ?? stream.mastering, light: frame.light ?? stream.light } };
+};
+
+/**
+ * The one variant of a multivariant playlist: its `EXT-X-STREAM-INF` attributes, quotes removed,
+ * and its media playlist's URI resolved against `base`; none for a media playlist.
+ */
+export const parseVariant = (text, base) => {
+  const lines = String(text).split("\n").map((line) => line.trim());
+  const at = lines.findIndex((line) => line.startsWith("#EXT-X-STREAM-INF:"));
+  if (at < 0) return undefined;
+  const attributes = {};
+  for (const match of lines[at].slice("#EXT-X-STREAM-INF:".length).matchAll(/([A-Z0-9-]+)=("[^"]*"|[^,]*)/g)) {
+    attributes[match[1]] = match[2].replace(/^"|"$/g, "");
+  }
+  const uri = lines.slice(at + 1).find((line) => line !== "" && !line.startsWith("#"));
+  return uri === undefined ? undefined : { attributes, uri: new URL(uri, base).href };
+};
+
+/**
+ * The codec string (RFC 6381, ISO/IEC 14496-15 E.3) of the HEVC stream whose `hvcC` box `bytes`
+ * hold, under the sample entry `entry`: profile, compatibility flags in reverse bit order, tier and
+ * level, then the constraint flags without trailing zero bytes, as `hvc1.2.4.L120.90`; none when
+ * there is no `hvcC`.
+ */
+export const hvcCodecString = (bytes, entry) => {
+  const at = bytes.indexOf("hvcC");
+  if (at < 0 || bytes.length < at + 17) return undefined;
+  const box = at + 4;
+  const profile = bytes[box + 1];
+  const compatibility = bytes.readUInt32BE(box + 2);
+  let reversed = 0;
+  for (let bit = 0; bit < 32; bit += 1) if ((compatibility & (1 << bit)) !== 0) reversed |= 1 << (31 - bit);
+  const constraints = [...bytes.subarray(box + 6, box + 12)].map((byte) => byte.toString(16).toUpperCase());
+  while (constraints.at(-1) === "0") constraints.pop();
+  return [entry, String(profile & 31), (reversed >>> 0).toString(16).toUpperCase(), `${(profile & 32) === 0 ? "L" : "H"}${bytes[box + 12]}`, ...constraints].join(".");
 };
 
 /** Frames of `ffprobe -show_entries frame=… -of json`, sorted by time: `{ pts, key, interlaced }`. */
@@ -1490,6 +1650,21 @@ export const ranOn = (operation, path, run, bytes, beside = false) => {
 
 const near = (a, b, tolerance) => a !== undefined && b !== undefined && Math.abs(a - b) <= tolerance;
 
+/**
+ * Whether two `{ mastering, light }` say the same: each present in both or neither, chromaticities
+ * within 0.0001, luminances within 0.1 % (and 0.0001 cd/m²), content light levels exactly.
+ */
+const sameHdr = (left, right) => {
+  if ((left.mastering === undefined) !== (right.mastering === undefined) || (left.light === undefined) !== (right.light === undefined)) return false;
+  const mastering =
+    left.mastering === undefined ||
+    Object.entries(left.mastering).every(([field, value]) => {
+      const other = right.mastering[field];
+      return field.endsWith("luminance") ? near(value, other, Math.max(0.0001, Math.abs(other) * 0.001)) : near(value, other, 0.0001);
+    });
+  return mastering && (left.light === undefined || (left.light.maxCll === right.light.maxCll && left.light.maxFall === right.light.maxFall));
+};
+
 const fetchesOf = (obs) => [obs.fetches?.start, obs.fetches?.seek].filter((fetch) => fetch !== undefined);
 
 const outputMedia = (obs) => obs.fetches?.seek?.media ?? obs.fetches?.start?.media;
@@ -1821,13 +1996,84 @@ export const CHECKS = {
         return tags(media) === tags(obs.source) ? ok(`tagged ${tags(media)} as the source`) : no(`tagged ${tags(media)}, the source ${tags(obs.source)}`);
       }),
   },
+  // An HDR source kept as HDR: the output is 10-bit and tagged in the source's own transfer,
+  // primaries, matrix, and range, so nothing mapped it to SDR or converted its colour.
+  "hdr-kept": {
+    class: "stage",
+    run: (obs) =>
+      everyOutput(obs, (media) => {
+        const tags = (of) => `${of?.transfer ?? "untagged"}/${of?.primaries ?? "untagged"}/${of?.space ?? "untagged"}/${of?.range ?? "untagged"}`;
+        if (!["smpte2084", "arib-std-b67"].includes(media.transfer)) return no(`the output is ${tags(media)}, not the source's HDR`);
+        if (tags(media) !== tags(obs.source)) return no(`tagged ${tags(media)}, the source ${tags(obs.source)}`);
+        return media.bitDepth === 10 ? ok(`kept ${tags(media)} at 10 bits`) : no(`${media.bitDepth ?? "unknown"}-bit, not 10`);
+      }),
+  },
+  // HDR10's static metadata as the source's, on the stream or its first picture, and no HDR10+ or
+  // Dolby Vision metadata the stream does not apply. Values match to what either codec can state:
+  // AV1 keeps chromaticities in 1/65536 and luminance in 1/16384 or 1/256, HEVC in 1/50000 and
+  // 1/10000 cd/m².
+  "hdr-static": {
+    class: "output",
+    run: (obs) => {
+      const want = obs.sourceHdr;
+      if (want === undefined) return no("could not measure: the source's HDR metadata was not read");
+      const fetches = fetchesOf(obs);
+      if (fetches.length === 0) return no("no output was fetched");
+      const said = (kept) => `mastering display ${kept.mastering === undefined ? "none" : `${kept.mastering.min_luminance}-${kept.mastering.max_luminance} cd/m²`}, content light ${kept.light === undefined ? "none" : `${kept.light.maxCll}/${kept.light.maxFall}`}`;
+      for (const fetch of fetches) {
+        if (fetch.hdr === undefined || fetch.sideData === undefined) return no(`could not measure: no side data was read from the ${fetch.name} output`);
+        const dynamic = [...fetch.sideData.stream, ...fetch.sideData.frame].filter((type) => /2094-40|hdr10\+|dolby vision|dovi/i.test(type));
+        if (dynamic.length > 0) return no(`the ${fetch.name} output carries ${[...new Set(dynamic)].join(", ")}`);
+        if (!sameHdr(fetch.hdr.kept, want)) return no(`the ${fetch.name} output has ${said(fetch.hdr.kept)}, the source ${said(want)}`);
+      }
+      return ok(`${said(want)} as the source; no dynamic metadata`);
+    },
+  },
+  // The multivariant playlist Apple's players present HDR from: one variant whose VIDEO-RANGE is
+  // the stream's, whose CODECS names the init segment's own hvcC and the audio, and whose
+  // RESOLUTION and FRAME-RATE are the stream's.
+  variant: {
+    class: "output",
+    run: (obs, params) => {
+      const fetches = fetchesOf(obs);
+      if (fetches.length === 0) return no("no output was fetched");
+      let last;
+      for (const fetch of fetches) {
+        const attributes = fetch.variant?.attributes;
+        if (attributes === undefined) return no(`the ${fetch.name} playlist is a media playlist alone: no variant states the range`);
+        if (attributes["VIDEO-RANGE"] !== params.range) return no(`the ${fetch.name} variant's VIDEO-RANGE is ${attributes["VIDEO-RANGE"] ?? "absent"}, not ${params.range}`);
+        const [video, ...audio] = (attributes.CODECS ?? "").split(",");
+        if (fetch.codecString === undefined) return no(`could not measure: no hvcC in the ${fetch.name} init segment`);
+        if (video !== fetch.codecString) return no(`the ${fetch.name} variant's CODECS names ${video}, its init segment's hvcC ${fetch.codecString}`);
+        if (fetch.audio !== undefined && !audio.some((codec) => codec.startsWith(fetch.audio.codec === "aac" ? "mp4a" : fetch.audio.codec))) {
+          return no(`the ${fetch.name} variant's CODECS (${attributes.CODECS}) lacks its ${fetch.audio.codec} audio`);
+        }
+        const size = `${fetch.media?.width}x${fetch.media?.height}`;
+        if (attributes.RESOLUTION !== size) return no(`the ${fetch.name} variant's RESOLUTION is ${attributes.RESOLUTION}, the stream ${size}`);
+        if (!near(Number(attributes["FRAME-RATE"]), obs.source?.fps, 0.01)) return no(`the ${fetch.name} variant's FRAME-RATE is ${attributes["FRAME-RATE"]}, the source ${fmt(obs.source?.fps, 3)}`);
+        if (!(Number(attributes.BANDWIDTH) >= Number(attributes["AVERAGE-BANDWIDTH"]) && Number(attributes["AVERAGE-BANDWIDTH"]) > 0)) {
+          return no(`the ${fetch.name} variant's bandwidths are ${attributes.BANDWIDTH} and ${attributes["AVERAGE-BANDWIDTH"]}`);
+        }
+        last = `VIDEO-RANGE=${attributes["VIDEO-RANGE"]} CODECS=${attributes.CODECS} RESOLUTION=${attributes.RESOLUTION} FRAME-RATE=${attributes["FRAME-RATE"]}`;
+      }
+      return ok(last);
+    },
+  },
+  level: {
+    class: "output",
+    run: (obs, params) =>
+      everyOutput(obs, ({ level }) => (level !== undefined && level <= params.max ? ok(`level ${level}, the client's ${params.max} or less`) : no(`level ${level ?? "unknown"}, above the client's ${params.max}`))),
+  },
   colour: {
     class: "output",
     run: (obs, params) => {
       const colour = obs.analysis?.colour;
       if (colour === undefined) return no("could not measure: no patches were read");
       if (colour.error !== undefined) return no(`could not measure: ${colour.error}`);
-      const verdict = judgePatches(colour.measured, colour.expected, colour.patches, params.tolerance);
+      const verdict =
+        params.reference === "source-hdr"
+          ? judgeHdrPatches(colour.measured, colour.expected, colour.patches, params.transfer, params.tolerance)
+          : judgePatches(colour.measured, colour.expected, colour.patches, params.tolerance);
       return verdict.ok ? ok(`patches at ${params.at} s against the ${params.reference} reference, ${verdict.evidence}`) : no(`patches at ${params.at} s against the ${params.reference} reference: ${verdict.evidence}`);
     },
   },

@@ -575,7 +575,10 @@ service's playback negotiation, judges the bytes it serves and where each stage 
 `captures/verify/<run>/hardware-matrix/grid.md`, `grid.tsv`, and `grid.json`, with each cell's
 evidence beside them. `$S apple-check [--side S] [--paths P] [--rows R]` has AVFoundation on the
 Mac read the bytes each cell was served, or the MP4 files named, and says whether it exposes a
-video track and how many frames it decodes: a grid `PASS` checks the bytes with ffmpeg only.
+video track, how many frames it decodes, and whether it calls the track HDR: a grid `PASS` checks
+the bytes with ffmpeg only. `$S apple-check [--side S] --playlist URL` plays a stream the side
+negotiated in AVPlayer on the Mac, through a forward of the side's port, and prints the range
+AVPlayer read from its variant and the transfer of the frames it played.
 [features/hardware-transcoding.md](features/hardware-transcoding.md) says how to run both for a PR
 and how to read them.
 

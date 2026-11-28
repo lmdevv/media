@@ -14,15 +14,19 @@ import {
   describeRun,
   FIXTURES,
   fingerprint,
+  HDR_METADATA_ENTRIES,
+  hvcCodecString,
   IDET,
   interlacedShare,
   judge,
   parseFrames,
+  parseHdrMetadata,
   parseIdet,
   parsePlaylist,
   parseProbe,
   parseSignalstats,
   parseThumbnails,
+  parseVariant,
   parseWatch,
   PATHS,
   pictureSane,
@@ -367,6 +371,136 @@ const healthy = (cell) => {
 };
 
 const cellOf = (id, path) => cells().find((cell) => cell.row.id === id && cell.path === path);
+
+const HDR10_MASTERING = { red_x: 0.68, red_y: 0.32, green_x: 0.265, green_y: 0.69, blue_x: 0.15, blue_y: 0.06, white_point_x: 0.3127, white_point_y: 0.329, min_luminance: 0.005, max_luminance: 1000 };
+
+const PQ_TAGS = { transfer: "smpte2084", primaries: "bt2020", space: "bt2020nc", range: "tv" };
+
+const KEPT_PATCHES = Array.from({ length: 32 }, (_, index) => ({ name: `patch ${index}`, kind: index < 8 ? "dark" : "mid" }));
+
+// What the runner would see for a keep-hdr cell whose HDR10 source was kept: HEVC Main 10 tagged
+// as the source, its static metadata, the variant, and patches as the source's.
+const keptHdr = (cell) => {
+  const base = healthy(cell);
+  const encoder = { cpu: "libx265", qsv: "hevc_qsv", vaapi: "hevc_vaapi" }[cell.path];
+  const codecString = cell.path === "vaapi" ? "hvc1.2.4.L93.B0" : "hvc1.2.4.L93.90";
+  const media = { codec: "hevc", profile: "Main 10", tag: "hvc1", width: 1280, height: 720, bitDepth: 10, level: 93, ...PQ_TAGS };
+  const kept = { mastering: HDR10_MASTERING, light: { maxCll: 1000, maxFall: 400 } };
+  const fetch = (name) => ({
+    ...base.fetches[name],
+    media,
+    variant: {
+      attributes: {
+        BANDWIDTH: "6192000",
+        "AVERAGE-BANDWIDTH": "4192000",
+        CODECS: `${codecString},mp4a.40.2`,
+        RESOLUTION: "1280x720",
+        "FRAME-RATE": "24.000",
+        "VIDEO-RANGE": "PQ",
+      },
+    },
+    codecString,
+    hdr: { stream: kept, frame: kept, kept },
+    fingerprint: cell.path === "cpu" ? "x265" : undefined,
+  });
+  const patch = [400, 500, 520];
+  return {
+    ...base,
+    negotiation: { ...base.negotiation, body: { ...base.negotiation.body, video: { width: 1280, height: 720, codec: "hevc", dynamicRange: "hdr10" } } },
+    fetches: { start: fetch("start"), seek: fetch("seek") },
+    runs: base.runs.map((run) => ({ ...run, args: [...run.args.slice(0, -2), encoder, "-profile:v", "main10", "/transcode/s/1/ffmpeg.m3u8"] })),
+    source: { ...base.source, width: 1920, height: 1080, ...PQ_TAGS },
+    sourceHdr: kept,
+    analysis: {
+      ...base.analysis,
+      colour: { measured: Array.from({ length: 32 }, () => patch), expected: Array.from({ length: 32 }, () => [patch[0] + 1, patch[1], patch[2]]), patches: KEPT_PATCHES },
+    },
+  };
+};
+
+describe("keeping HDR", () => {
+  test("passes HEVC Main 10 in the source's colour with its metadata, variant, and patches, on every path", () => {
+    for (const path of Object.keys(PATHS)) {
+      const cell = cellOf("keep-hdr", path);
+      const result = judge(cell, keptHdr(cell));
+      assert.equal(result.verdict, "PASS", `${path}: ${result.evidence}`);
+    }
+  });
+
+  test("calls an SDR stream that no run tried to keep HDR for not built, as main serves it", () => {
+    const cell = cellOf("keep-hdr", "qsv");
+    const obs = keptHdr(cell);
+    const sdr = (fetch) => ({ ...fetch, media: { ...fetch.media, profile: "Main", bitDepth: 8, transfer: "bt709", primaries: "bt709", space: "bt709" }, variant: undefined });
+    const result = judge(cell, {
+      ...obs,
+      fetches: { start: sdr(obs.fetches.start), seek: sdr(obs.fetches.seek) },
+      runs: obs.runs.map((run) => ({ ...run, args: run.args.map((arg) => (arg === "main10" ? "main" : arg)) })),
+    });
+    assert.equal(result.verdict, "NOT-BUILT", result.evidence);
+  });
+
+  test("fails a stream whose playlist states no range, the wrong one, or another codec than its bytes", () => {
+    const cell = cellOf("keep-hdr", "vaapi");
+    const obs = keptHdr(cell);
+    const withVariant = (change) => {
+      const fetch = (name) => ({ ...obs.fetches[name], ...change(obs.fetches[name]) });
+      return judge(cell, { ...obs, fetches: { start: fetch("start"), seek: fetch("seek") } });
+    };
+    assert.match(withVariant(() => ({ variant: undefined })).evidence, /variant: the start playlist is a media playlist alone/);
+    assert.match(
+      withVariant((fetch) => ({ variant: { attributes: { ...fetch.variant.attributes, "VIDEO-RANGE": "SDR" } } })).evidence,
+      /VIDEO-RANGE is SDR, not PQ/,
+    );
+    assert.match(withVariant(() => ({ codecString: "hvc1.2.4.L120.B0" })).evidence, /CODECS names hvc1\.2\.4\.L93\.B0, its init segment's hvcC hvc1\.2\.4\.L120\.B0/);
+  });
+
+  test("fails lost metadata, dynamic metadata, a matrix conversion, and a source it could not read", () => {
+    const cell = cellOf("keep-hdr", "qsv");
+    const obs = keptHdr(cell);
+    const each = (change) => ({ start: { ...obs.fetches.start, ...change }, seek: { ...obs.fetches.seek, ...change } });
+    assert.equal(judge(cell, { ...obs, fetches: each({ hdr: { stream: {}, frame: {}, kept: {} } }) }).verdict, "FAIL");
+    assert.match(judge(cell, { ...obs, fetches: each({ sideData: { stream: [], frame: ["Dolby Vision RPU Data"] } }) }).evidence, /carries Dolby Vision RPU Data/);
+    assert.match(judge(cell, { ...obs, sourceHdr: undefined }).evidence, /could not measure: the source's HDR metadata was not read/);
+    const converted = { ...obs.analysis.colour, measured: obs.analysis.colour.measured.map(() => [383, 509, 520]) };
+    assert.match(judge(cell, { ...obs, analysis: { ...obs.analysis, colour: converted } }).evidence, /colour: .*ΔE ITP/);
+  });
+
+  test("reads a variant's attributes, an hvcC's codec string, and HDR10's metadata from real bytes", () => {
+    const file = join(scratch, "hdr10.mp4");
+    const made = ffmpeg(
+      "-v",
+      "error",
+      "-f",
+      "lavfi",
+      "-i",
+      "testsrc2=size=320x240:rate=24:duration=1,format=yuv420p10le",
+      "-c:v",
+      "libx265",
+      "-preset",
+      "ultrafast",
+      "-x265-params",
+      "log-level=error:master-display=G(13250,34500)B(7500,3000)R(34000,16000)WP(15635,16450)L(10000000,50):max-cll=1000,400",
+      "-color_primaries",
+      "bt2020",
+      "-color_trc",
+      "smpte2084",
+      "-colorspace",
+      "bt2020nc",
+      "-tag:v",
+      "hvc1",
+      file,
+    );
+    assert.equal(made.status, 0, made.stderr);
+    assert.match(hvcCodecString(readFileSync(file), "hvc1"), /^hvc1\.2\.4\.L\d+\.90$/);
+    const read = ffprobe("-select_streams", "v:0", "-read_intervals", "%+#1", "-show_entries", HDR_METADATA_ENTRIES, "-of", "json", file);
+    assert.deepEqual(parseHdrMetadata(read.stdout).kept, { mastering: HDR10_MASTERING, light: { maxCll: 1000, maxFall: 400 } });
+    assert.deepEqual(parseVariant('#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=9,CODECS="hvc1.2.4.L120.90,mp4a.40.2",VIDEO-RANGE=HLG\nvideo.m3u8?t=x\n', "http://h/m/1/index.m3u8"), {
+      attributes: { BANDWIDTH: "9", CODECS: "hvc1.2.4.L120.90,mp4a.40.2", "VIDEO-RANGE": "HLG" },
+      uri: "http://h/m/1/video.m3u8?t=x",
+    });
+    assert.equal(parseVariant("#EXTM3U\n#EXT-X-MAP:URI=\"init.mp4\"\n#EXTINF:4,\n0.m4s\n", "http://h/"), undefined);
+  });
+});
 
 describe("verdicts", () => {
   test("a stage that ran on its path with the right output passes", () => {

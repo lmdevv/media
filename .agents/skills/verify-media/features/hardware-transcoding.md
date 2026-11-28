@@ -1,9 +1,9 @@
 # Hardware transcoding
 
 When a device can't play a file as it is, the media service converts the video for it: it decodes
-the source, deinterlaces, scales, maps HDR to SDR, burns in an image or a text subtitle, and
-encodes H.264, HEVC, or AV1, on the CPU or on an Intel GPU through Quick Sync (`qsv`) or VA-API
-(`vaapi`). The hardware matrix plays one fixture per stage on each path through the service's own
+the source, deinterlaces, scales, maps HDR to SDR or keeps it for a screen that shows it, burns in
+an image or a text subtitle, and encodes H.264, HEVC, or AV1, on the CPU or on an Intel GPU through
+Quick Sync (`qsv`) or VA-API (`vaapi`). The hardware matrix plays one fixture per stage on each path through the service's own
 playback negotiation, reads the bytes it serves, and records which stage works on which path, with
 the evidence of where it ran.
 
@@ -42,6 +42,13 @@ the evidence of where it ran.
   | 60, or unknown | 480 lines | none (Intel's own; HLG on the CPU) |
 - `scale-bt601`, `scale-bt2020`, and `scale-full-range` scale SDR patches in BT.601, BT.2020, and
   full range to 720 lines: their colour is carried, tags and pixels as the source's.
+- `hw-keep-hdr` keeps an HDR source's HDR for a device on an HDR screen (`hevc-hdr`: HEVC Main 10
+  in HDR10 and HLG on a screen that shows both, and no H.264, so the CPU encodes HDR for it too),
+  capped to 720 lines so it must encode: the HDR10 patches (`keep-hdr`), the HLG patches
+  (`keep-hdr-hlg`), and Dolby Vision 8.1 (`keep-hdr-dv81`, served as its HDR10 base layer), and
+  with no cap the HDR10 patches in AV1 (`keep-hdr-av1`), a codec the device does not play, come
+  out HEVC Main 10 in the source's colour with its static metadata, under a multivariant playlist
+  whose one variant states the range, on each path, with no tone map.
 - `hw-burn-in` draws the DVD (image) subtitle track into the picture: on a GPU path with the GPU's
   overlay (`overlay_qsv`, `overlay_vaapi`), the subtitle's frames decoded on the CPU and uploaded,
   the picture never leaving the device. `subtitle-burn-in-pgs` does the same with a generated PGS
@@ -122,12 +129,19 @@ Preconditions:
   open the stream. `$S apple-check [--side S] [--paths cpu,qsv,vaapi] [--rows encode-hevc,...]`
   sends each cell's `start.mp4` and `seek.mp4` to the Mac (`MAC_HOST`, as `ios up` uses), compiles
   `scripts/apple-check.swift` there, and prints a line per file: `cpu-encode-hevc-start.mp4
-  video=true frames=96` when AVFoundation exposes a video track and decodes that many frames,
-  `video=false frames=0` when it refuses the track (AVPlayer then says "Cannot Open"). It fails
-  unless every file shows video and decodes a frame. When the Mac can't run it, every file reads
-  `not checked`, never passed. `$S apple-check FILE...` checks any MP4s, such as an init segment
-  with fragments appended. AV1 needs a Mac that decodes it (M3 or later, A17 Pro or later on
-  iPhone); the M4 here does. Put its lines beside the grid's in the PR.
+  video=true frames=96 hdr=false transfer=ITU_R_709_2` when AVFoundation exposes a video track,
+  decodes that many frames, and calls the track SDR with BT.709's transfer, `video=false frames=0`
+  when it refuses the track (AVPlayer then says "Cannot Open"). It fails unless every file shows
+  video and decodes a frame. When the Mac can't run it, every file reads `not checked`, never
+  passed. `$S apple-check FILE...` checks any MP4s, such as an init segment with fragments
+  appended. AV1 needs a Mac that decodes it (M3 or later, A17 Pro or later on iPhone); the M4 here
+  does. Put its lines beside the grid's in the PR.
+- **Play an HDR stream in AVPlayer.** `$S apple-check --playlist URL` takes a playlist URL the side
+  answered (`media movies stream <title> --client hdr --max-height 1080`, or a negotiation's
+  `url`), forwards the side's port to the Mac, and has AVPlayer play it there for 6 s, muted:
+  `variant range=pq codecs=hvc1` is the range AVPlayer read from the multivariant playlist, and
+  `played status=ready size=1280x720 frames=144 transfer=SMPTE_ST_2084_PQ primaries=ITU_R_2020
+  eligible=true` what it played and whether the Mac's display presents HDR.
 - **Read a cell.** `<side>/<path>/<row>/cell.json` holds the verdict, each check with its class
   (`stage`, `output`, `path`) and evidence, and what was observed: the negotiation, each fetch's
   segments and ffprobe facts, each ffmpeg run's arguments and engine time, and the service's log
@@ -247,6 +261,24 @@ Preconditions:
   unregistered SEI (`SDR_SIDE_DATA`): mastering display, content light level, HDR10+, Dolby Vision,
   an ambient viewing environment, or a kind not met yet; `sdr-tags` also wants limited range; `source-tags`
   wants an SDR source's transfer, primaries, matrix, and range carried.
+- A `keep-hdr` row's checks: `hdr-kept`, the stage, wants a 10-bit output tagged in the source's
+  own transfer (PQ or HLG), primaries, matrix, and range; `hdr-static` wants HDR10's mastering
+  display and content light level, on the stream or its first picture, equal to the source's (none
+  for HLG) and no HDR10+ or Dolby Vision metadata; `variant` reads each fetch's `index.m3u8` as a
+  multivariant playlist and wants its `VIDEO-RANGE` the stream's, its `CODECS` the codec string of
+  the init segment's own `hvcC` and the audio's, and its `RESOLUTION` and `FRAME-RATE` the stream's
+  (a media playlist alone fails it); `level` wants the stream's level within the client's 5.1. Each
+  fetch's multivariant playlist is kept beside the cell (`start.m3u8`, `seek.m3u8`).
+- Its `colour` check reads the patches of the output and of the source, each decoded to 10-bit
+  Y'CbCr the same way with no conversion, and compares them in ΔE ITP (ITU-R BT.2124, through PQ's
+  EOTF, or HLG's on its nominal 1000 cd/m² display): every patch within 3, where 1 is about the
+  smallest difference a viewer sees and one code of 10-bit PQ luma is 0.8. Ffmpeg 7.1's Quick Sync
+  scale, left to convert HDR10 to BT.709's matrix under BT.2020 tags, reads 14 on the saturated
+  patches.
+- AVPlayer (macOS 27 on the M4) refuses a PQ stream whose variant states no `VIDEO-RANGE`, or
+  `SDR` or `HLG` (CoreMedia -12927), and any variant without `BANDWIDTH` (-12642) or `FRAME-RATE`
+  (-1002); it plays an HLG stream whatever its variant says, read as the range the variant states.
+  `CODECS`, `RESOLUTION`, and `AVERAGE-BANDWIDTH` changed nothing it played.
 - Fetched samples (`SAMPLES`: FFmpeg's test suite, which states no licence for them, and Apple's
   HLS example, published for testing players) are downloaded by the runner into
   `~/.cache/lar-verify-media/samples` by SHA-256, checked, copied into the fixture's folder for the

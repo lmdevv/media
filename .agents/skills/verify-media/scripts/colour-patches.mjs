@@ -274,6 +274,116 @@ export const judgePatches = (measured, expected, patches, tolerance) => {
   return faults.length === 0 ? { ok: true, evidence: `worst: ${summary}` } : { ok: false, evidence: `${faults.slice(0, 3).join("; ")}${faults.length > 3 ? ` and ${faults.length - 3} more` : ""}; worst: ${summary}` };
 };
 
+/**
+ * The mean 10-bit Y', Cb, and Cr codes of each patch in a yuv420p10le frame `width` by `height`
+ * whose top lines hold the patch area, scaled from 1920 wide, over the middle half of each cell, as
+ * `readPatches` reads R'G'B': what an HDR stream's patches are before any conversion.
+ */
+export const readYuvPatches = (yuv, width, height, count) => {
+  const samples = new Uint16Array(yuv.buffer, yuv.byteOffset, Math.floor(yuv.byteLength / 2));
+  const chroma = width * height;
+  const quarter = chroma / 4;
+  const scale = width / PATCH_AREA.width;
+  const mean = (plane, stride, x0, x1, y0, y1) => {
+    let sum = 0;
+    for (let y = y0; y < y1; y += 1) for (let x = x0; x < x1; x += 1) sum += samples[plane + y * stride + x];
+    return sum / ((x1 - x0) * (y1 - y0));
+  };
+  return Array.from({ length: count }, (_, index) => {
+    const cell = patchCell(index);
+    const x0 = Math.round((cell.x + cell.width / 4) * scale);
+    const x1 = Math.round((cell.x + (cell.width * 3) / 4) * scale);
+    const y0 = Math.round((cell.y + cell.height / 4) * scale);
+    const y1 = Math.round((cell.y + (cell.height * 3) / 4) * scale);
+    const half = (value) => Math.floor(value / 2);
+    return [
+      mean(0, width, x0, x1, y0, y1),
+      mean(chroma, width / 2, half(x0), half(x1), half(y0), half(y1)),
+      mean(chroma + quarter, width / 2, half(x0), half(x1), half(y0), half(y1)),
+    ];
+  });
+};
+
+/** SMPTE ST 2084's constants. */
+const PQ = { m1: 2610 / 16384, m2: (2523 / 4096) * 128, c1: 3424 / 4096, c2: (2413 / 4096) * 32, c3: (2392 / 4096) * 32 };
+
+/** PQ's EOTF: a signal in 0..1 to cd/m². */
+const pqToNits = (signal) => {
+  const power = Math.max(signal, 0) ** (1 / PQ.m2);
+  return 10000 * (Math.max(power - PQ.c1, 0) / (PQ.c2 - PQ.c3 * power)) ** (1 / PQ.m1);
+};
+
+/** PQ's inverse EOTF: cd/m² to a signal in 0..1. */
+const nitsToPq = (nits) => {
+  const power = (Math.max(nits, 0) / 10000) ** PQ.m1;
+  return ((PQ.c1 + PQ.c2 * power) / (1 + PQ.c3 * power)) ** PQ.m2;
+};
+
+/** HLG's inverse OETF (ITU-R BT.2100): a signal in 0..1 to scene light in 0..1. */
+const hlgToScene = (signal) => {
+  const a = 0.17883277;
+  const b = 1 - 4 * a;
+  const c = 0.5 - a * Math.log(4 * a);
+  return signal <= 0.5 ? (signal * signal) / 3 : (Math.exp((signal - c) / a) + b) / 12;
+};
+
+/**
+ * Display light in cd/m² of a 10-bit limited-range BT.2020 Y'CbCr colour in `transfer`: PQ's own,
+ * or HLG's on its nominal 1000 cd/m² display (BT.2100's OOTF, system gamma 1.2).
+ */
+const displayLight = ([y, cb, cr], transfer) => {
+  const luma = (y - 64) / 876;
+  const blue = (cb - 512) / 896;
+  const red = (cr - 512) / 896;
+  const r = luma + 1.4746 * red;
+  const b = luma + 1.8814 * blue;
+  const g = (luma - 0.2627 * r - 0.0593 * b) / 0.678;
+  if (transfer === "pq") return [r, g, b].map(pqToNits);
+  const scene = [r, g, b].map((value) => hlgToScene(Math.min(Math.max(value, 0), 1)));
+  const sceneLuma = 0.2627 * scene[0] + 0.678 * scene[1] + 0.0593 * scene[2];
+  return scene.map((value) => 1000 * sceneLuma ** 0.2 * value);
+};
+
+/** ICtCp (ITU-R BT.2100) of display light in cd/m², BT.2020 primaries. */
+const ictcpOf = ([r, g, b]) => {
+  const l = nitsToPq((1688 * r + 2146 * g + 262 * b) / 4096);
+  const m = nitsToPq((683 * r + 2951 * g + 462 * b) / 4096);
+  const s = nitsToPq((99 * r + 309 * g + 3688 * b) / 4096);
+  return [0.5 * l + 0.5 * m, (6610 * l - 13613 * m + 7003 * s) / 4096, (17933 * l - 17390 * m - 543 * s) / 4096];
+};
+
+/**
+ * ΔE ITP (ITU-R BT.2124) between two 10-bit BT.2020 Y'CbCr colours in `transfer` (`pq` or `hlg`):
+ * 1 is about the smallest difference a viewer sees, in the dark, bright, and saturated alike.
+ */
+export const deltaItp = (left, right, transfer) => {
+  const [i1, ct1, cp1] = ictcpOf(displayLight(left, transfer));
+  const [i2, ct2, cp2] = ictcpOf(displayLight(right, transfer));
+  return 720 * Math.sqrt((i1 - i2) ** 2 + (0.5 * (ct1 - ct2)) ** 2 + (cp1 - cp2) ** 2);
+};
+
+/**
+ * Judges an HDR stream's patches, `measured`, against the source's own, `expected`, both as 10-bit
+ * Y'CbCr in `transfer`: every patch within `tolerance.deltaItp` ΔE ITP of the source's, as the
+ * picture was scaled and re-encoded, not mapped. Returns `{ ok, evidence }` with the worst patch of
+ * each kind.
+ */
+export const judgeHdrPatches = (measured, expected, patches, transfer, tolerance) => {
+  const faults = [];
+  const worst = {};
+  patches.forEach((patch, index) => {
+    const off = deltaItp(measured[index], expected[index], transfer);
+    if (off > (worst[patch.kind]?.off ?? -1)) worst[patch.kind] = { off, name: patch.name };
+    if (off > tolerance.deltaItp) {
+      faults.push(`${patch.name} ΔE ITP ${fmt(off)} (${measured[index].map((v) => fmt(v, 0)).join("/")} for ${expected[index].map((v) => fmt(v, 0)).join("/")})`);
+    }
+  });
+  const summary = Object.entries(worst)
+    .map(([kind, { off, name }]) => `${kind} ΔE ITP ${fmt(off)} (${name})`)
+    .join(", ");
+  return faults.length === 0 ? { ok: true, evidence: `worst: ${summary}` } : { ok: false, evidence: `${faults.slice(0, 3).join("; ")}${faults.length > 3 ? ` and ${faults.length - 3} more` : ""}; worst: ${summary}` };
+};
+
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const [mode, ...rest] = process.argv.slice(2);
   const file = rest.at(-1);

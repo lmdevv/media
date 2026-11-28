@@ -18,7 +18,7 @@ import { join, relative } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 import { parseArgs } from "node:util";
 
-import { readPatches } from "./colour-patches.mjs";
+import { readPatches, readYuvPatches } from "./colour-patches.mjs";
 import { cliEnv } from "./core-seed.mjs";
 import * as Matrix from "./hardware-matrix.mjs";
 
@@ -296,7 +296,16 @@ const resolveFixture = async (name) => {
     }
     const probe = inContainer(["ffprobe", "-v", "error", "-show_streams", "-show_format", "-of", "json", path]);
     if (probe.status !== 0) throw new Error(`ffprobe could not read ${path}: ${probe.stderr.trim()}`);
-    return { name, fixture, path, titleId: title.id, fileId: version.id, source: Matrix.parseProbe(probe.stdout) };
+    const hdr = inContainer(["ffprobe", "-v", "error", "-select_streams", "v:0", "-read_intervals", "%+#1", "-show_entries", Matrix.HDR_METADATA_ENTRIES, "-of", "json", path]);
+    return {
+      name,
+      fixture,
+      path,
+      titleId: title.id,
+      fileId: version.id,
+      source: Matrix.parseProbe(probe.stdout),
+      sourceHdr: hdr.status === 0 ? Matrix.parseHdrMetadata(hdr.stdout).kept : undefined,
+    };
   })();
   resolved.set(name, found);
   return found;
@@ -307,14 +316,20 @@ const resolveFixture = async (name) => {
 const generationOf = (url) => Number(/\/media\/hls\/[^/]+\/(\d+)\//.exec(url)?.[1]);
 
 // The init segment and the segments that cover `span` seconds from `from`, written as one fMP4.
-// When the service replaced the generation (a fallback), the fetch follows it and says so.
+// A multivariant playlist (an HDR stream's) is followed to its one variant's media playlist, and
+// its attributes kept. When the service replaced the generation (a fallback), the fetch follows it
+// and says so.
 const fetchSpan = async (name, playlistUrl, from, span, dir, token) => {
   let url = playlistUrl;
   const notes = [];
   for (let attempt = 0; attempt < 3; attempt += 1) {
-    const listed = await get(url);
-    if (listed.status !== 200) return { name, ok: false, error: `the playlist answered ${listed.status} ${Matrix.redact(listed.text, token)}`, notes };
-    const playlist = Matrix.parsePlaylist(listed.bytes.toString("utf8"), url);
+    const entry = await get(url);
+    if (entry.status !== 200) return { name, ok: false, error: `the playlist answered ${entry.status} ${Matrix.redact(entry.text, token)}`, notes };
+    const variant = Matrix.parseVariant(entry.bytes.toString("utf8"), url);
+    if (variant !== undefined) writeFileSync(join(dir, `${name}.m3u8`), Matrix.redact(entry.bytes.toString("utf8"), token));
+    const listed = variant === undefined ? entry : await get(variant.uri);
+    if (listed.status !== 200) return { name, ok: false, error: `the variant's playlist answered ${listed.status} ${Matrix.redact(listed.text, token)}`, notes };
+    const playlist = Matrix.parsePlaylist(listed.bytes.toString("utf8"), variant?.uri ?? url);
     const wanted = Matrix.segmentsCovering(playlist.segments, from, span);
     if (playlist.init === undefined || wanted.length === 0) return { name, ok: false, error: `the playlist has no segments at ${from} s`, notes };
     const parts = [];
@@ -334,6 +349,7 @@ const fetchSpan = async (name, playlistUrl, from, span, dir, token) => {
         name,
         ok: true,
         generation: generationOf(url),
+        variant: variant && { attributes: variant.attributes },
         total: playlist.total,
         segments: wanted.map((segment, index) => ({ index: segment.index, start: segment.start, duration: segment.duration, bytes: parts[index + 1].length })),
         file,
@@ -415,18 +431,22 @@ const readFetch = (fetch, dir) => {
     "json",
     fetch.file,
   ]);
+  const hdr = tool("ffprobe", ["-v", "error", "-select_streams", "v:0", "-read_intervals", "%+#1", "-show_entries", Matrix.HDR_METADATA_ENTRIES, "-of", "json", fetch.file]);
   const decoded = tool("ffmpeg", ["-v", "error", "-nostdin", "-i", fetch.file, "-map", "0:v:0", "-f", "null", "-"]);
   const audio = streamPackets(here, fetch.file, "a:0");
   const video = streamPackets(here, fetch.file, "v:0");
   const decodes = (video.packets ?? []).map((packet) => packet.dts).filter(Number.isFinite);
   const sounds = (audio.packets ?? []).map((packet) => packet.pts).filter(Number.isFinite);
+  const media = streams.status === 0 ? Matrix.parseProbe(streams.stdout) : undefined;
   return {
     ...fetch,
     audio: sounds.length === 0 ? undefined : { start: Math.min(...sounds), codec: audio.codec, sampleRate: audio.sampleRate },
     firstDecoded: decodes.length === 0 ? undefined : Math.min(...decodes),
-    media: streams.status === 0 ? Matrix.parseProbe(streams.stdout) : undefined,
+    media,
     frames: frames.status === 0 ? Matrix.parseFrames(frames.stdout) : [],
     sideData: sides.status === 0 ? Matrix.parseSideData(sides.stdout) : undefined,
+    hdr: hdr.status === 0 ? Matrix.parseHdrMetadata(hdr.stdout) : undefined,
+    codecString: media?.codec === "hevc" ? Matrix.hvcCodecString(readFileSync(fetch.file), media.tag ?? "hvc1") : undefined,
     decodeErrors: decoded.status === 0 ? decoded.stderr : `${decoded.stderr}\nffmpeg exited ${decoded.status}`,
     fingerprint: Matrix.fingerprint(readFileSync(fetch.file)),
   };
@@ -503,11 +523,33 @@ const analysePicture = (obs, pictures, params, dir) => {
 /** A 1920x1080 picture in 8-bit BT.709 R'G'B', converted from the stream's own colour tags. */
 const RGB_FRAME = "scale=1920:1080:flags=bicubic,zscale=p=bt709:t=bt709:m=gbr:r=full,format=gbrp,format=rgb24";
 
+/** A 1920x1080 picture in 10-bit Y'CbCr, as it is: no colour conversion. */
+const YUV_FRAME = "scale=1920:1080:flags=bicubic,format=yuv420p10le";
+
+const YUV_FRAME_BYTES = 1920 * 1080 * 3;
+
+// The patches of the seek fetch's picture at `params.at` and of the source's own picture at that
+// time, both read as 10-bit Y'CbCr the same way, for a row that keeps HDR.
+const analyseHdrColour = (fetch, found, params, dir) => {
+  const patches = Matrix.patchesOf(params.reference);
+  const output = tool("ffmpeg", ["-v", "error", "-nostdin", "-copyts", "-i", fetch.file, "-map", "0:v:0", "-vf", `select='gte(t\\,${params.at})',${YUV_FRAME}`, "-frames:v", "1", "-f", "rawvideo", "-"], { encoding: "buffer" });
+  frameAt(fetch.file, params.at, join(dir, `output-${params.at}.png`));
+  if (output.status !== 0 || output.stdout.length < YUV_FRAME_BYTES) return { error: `the output picture at ${params.at} s: ${output.stderr.toString().trim().split("\n").at(-1) ?? "none"}` };
+  const source = inContainer(["ffmpeg", "-v", "error", "-nostdin", "-ss", String(params.at), "-i", found.path, "-map", "0:v:0", "-vf", YUV_FRAME, "-frames:v", "1", "-f", "rawvideo", "-"], { encoding: "buffer" });
+  if (source.status !== 0 || source.stdout.length < YUV_FRAME_BYTES) return { error: `the source picture at ${params.at} s: ${source.stderr.toString().trim().split("\n").at(-1) ?? "none"}` };
+  const measured = readYuvPatches(output.stdout, 1920, 1080, patches.length);
+  const expected = readYuvPatches(source.stdout, 1920, 1080, patches.length);
+  const lines = patches.map((patch, index) => `${patch.name}\t${measured[index].map((value) => value.toFixed(1)).join("/")}\t${expected[index].map((value) => value.toFixed(1)).join("/")}`);
+  writeFileSync(join(dir, "patches.tsv"), `patch\toutput Y'CbCr\tsource Y'CbCr\n${lines.join("\n")}\n`);
+  return { measured, expected, patches };
+};
+
 // The patches of the seek fetch's picture at `params.at`, and what they should be: the reference
 // tone map's, or the source's own picture at that time, read in the side.
 const analyseColour = (obs, found, params, dir) => {
   const fetch = obs.fetches.seek;
   if (!fetch?.ok) return undefined;
+  if (params.reference === "source-hdr") return analyseHdrColour(fetch, found, params, dir);
   const patches = Matrix.patchesOf(params.reference);
   const output = tool("ffmpeg", ["-v", "error", "-nostdin", "-copyts", "-i", fetch.file, "-map", "0:v:0", "-vf", `select='gte(t\\,${params.at})',${RGB_FRAME}`, "-frames:v", "1", "-f", "rawvideo", "-"], { encoding: "buffer" });
   frameAt(fetch.file, params.at, join(dir, `output-${params.at}.png`));
@@ -675,7 +717,9 @@ const measure = async (cell, found, health, dir) => {
   const { row } = cell;
   const profile = Matrix.PROFILES[row.profile].capabilities;
   const obs = { fetches: {}, health };
-  const started = media("movies", "play", "start", "--json", JSON.stringify({ titleId: found.titleId, fileId: found.fileId, capabilities: profile }));
+  // `movies.play.start` picks a version by what plays directly; the screen is the media server's.
+  const { hdrScreen: _screen, ...plays } = profile;
+  const started = media("movies", "play", "start", "--json", JSON.stringify({ titleId: found.titleId, fileId: found.fileId, capabilities: plays }));
   const token = started.ticket;
   const since = new Date(Date.now() - 2_000).toISOString();
   const watch = startWatch();
@@ -709,6 +753,7 @@ const measure = async (cell, found, health, dir) => {
   obs.fetches.start = obs.fetches.start && readFetch(obs.fetches.start, dir);
   obs.fetches.seek = obs.fetches.seek && readFetch(obs.fetches.seek, dir);
   obs.source = found.source;
+  obs.sourceHdr = found.sourceHdr;
   analyseSourceAudio(obs, found);
   const pictures = await picturesOf(found);
   obs.analysis = { timing: analyseTiming(obs, found, pictures, cell, dir) };
@@ -740,6 +785,9 @@ const summary = (obs) => ({
         error: fetch.error,
         notes: fetch.notes,
         generation: fetch.generation,
+        variant: fetch.variant,
+        codecString: fetch.codecString,
+        hdr: fetch.hdr?.kept,
         segments: fetch.segments,
         media: fetch.media,
         frames: fetch.frames?.length,

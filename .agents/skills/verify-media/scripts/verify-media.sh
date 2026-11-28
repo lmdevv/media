@@ -5,7 +5,7 @@
 #   verify-media.sh doctor [--side S]
 #   verify-media.sh hardware [--side S] none|qsv|vaapi
 #   verify-media.sh hardware-matrix [--side S] [--paths cpu,qsv,vaapi] [--rows ROW,...] [--grid-only]
-#   verify-media.sh apple-check [--side S] [--paths cpu,qsv,vaapi] [--rows ROW,...] | apple-check FILE...
+#   verify-media.sh apple-check [--side S] [--paths cpu,qsv,vaapi] [--rows ROW,...] | apple-check FILE... | apple-check [--side S] --playlist URL
 #   verify-media.sh browser [--side S] [--app movies|music|account] <command> [flags]
 #   verify-media.sh cli [--side S] [--as PERSON] -- <media args>
 #   verify-media.sh logs [--side S] [lines]
@@ -676,23 +676,43 @@ cmd_hardware_matrix() {
 
 # Asks AVFoundation on the Mac ($MAC_HOST) what it makes of the bytes the grid's cells were
 # served (each cell's start.mp4 and seek.mp4: the init segment, then its fragments), or of the FILEs
-# named: whether it exposes a video track, and how many frames it decodes. ffmpeg reading the bytes
-# well is no proof that Apple's players open them: an init segment AVFoundation refuses still
-# probes and decodes in ffmpeg. Prints one line per file, `not checked` for every file when the Mac
-# could not run the check, and fails unless every file showed video and decoded a frame. It runs in a
-# subshell, whose exit removes its staging folder.
+# named: whether it exposes a video track, how many frames it decodes, whether it calls the track
+# HDR, and its transfer. ffmpeg reading the bytes well is no proof that Apple's players open them:
+# an init segment AVFoundation refuses still probes and decodes in ffmpeg. Prints one line per file,
+# `not checked` for every file when the Mac could not run the check, and fails unless every file
+# showed video and decoded a frame. With `--playlist URL`, a playlist URL a negotiation or seek on
+# the side answered, it forwards the side's port to the Mac and has AVPlayer play the stream there
+# instead, printing each variant's range as AVPlayer read it and what it played (the frames'
+# transfer), and fails unless it played. It runs in a subshell, whose exit removes its staging
+# folder.
 cmd_apple_check() (
   take_side "$@"
-  local paths="cpu,qsv,vaapi" rows="" files=() i=0 f path row
+  local paths="cpu,qsv,vaapi" rows="" files=() playlist="" i=0 f path row
   while ((i < ${#args[@]})); do
     case "${args[i]}" in
       --paths) paths="${args[i + 1]:?--paths needs a list}"; i=$((i + 2)) ;;
       --rows) rows="${args[i + 1]:?--rows needs a list}"; i=$((i + 2)) ;;
+      --playlist) playlist="${args[i + 1]:?--playlist needs a URL}"; i=$((i + 2)) ;;
       *) files+=("${args[i]}"); i=$((i + 1)) ;;
     esac
   done
   stage="$(mktemp -d "${TMPDIR:-/tmp}/apple-check.XXXXXX")"
   trap 'rm -rf -- "$stage"' EXIT
+  if [[ -n "$playlist" ]]; then
+    local port played
+    port="$(read_state port)"
+    [[ -n "$port" ]] || die "apple-check: the $side side is not up"
+    [[ "$playlist" == "http://localhost:$port/"* ]] || die "apple-check: --playlist must be one of the $side side's URLs, http://localhost:$port/…"
+    ln -s "$scripts/apple-check.swift" "$stage/apple-check.swift"
+    played="$(tar -C "$stage" -chf - . | ssh -o BatchMode=yes -o ConnectTimeout=10 -o ExitOnForwardFailure=yes \
+      -R "$port:localhost:$port" "$mac" \
+      "set -e; d=\$(mktemp -d /tmp/verify-media-apple.XXXXXX); trap 'rm -rf \"\$d\"' EXIT; tar -xf - -C \"\$d\"; cd \"\$d\"
+       swiftc -O -o apple-check apple-check.swift >/dev/null 2>&1; ./apple-check --play $(printf '%q' "$playlist") 6" 2>&1)" ||
+      die "apple-check: AVPlayer could not run on $mac: $(tail -1 <<<"$played")"
+    echo "$played"
+    grep -q '^played status=ready ' <<<"$played"
+    return
+  fi
   if ((${#files[@]} == 0)); then
     local cells="$evidence_root/hardware-matrix/$side"
     [[ -d "$cells" ]] || die "no hardware-matrix cells for the $side side under $cells; run hardware-matrix first"
