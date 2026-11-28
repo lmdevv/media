@@ -126,6 +126,7 @@ describe("the table of source colours", () => {
       expect(hdr10Plus.hdr10Plus).toBe(true);
       expect(sourceColour(hdr10Plus)).toStrictEqual({
         signal: "pq",
+        transfer: "smpte2084",
         primaries: "bt2020",
         matrix: "bt2020nc",
         range: "limited",

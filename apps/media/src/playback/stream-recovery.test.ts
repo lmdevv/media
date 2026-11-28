@@ -228,8 +228,11 @@ const overlayFails = await writeFakeFfmpeg({
   logInvocations: true,
 });
 
-/** libass failing to start, as ffmpeg reports it from the text subtitle's filter. */
-const LIBASS_FAILED = "[Parsed_subtitles_6 @ 0x1] Error initializing libass";
+/**
+ * libass failing to start, as ffmpeg reports it from the text subtitle's filter: the 13th of an HDR
+ * film's CPU chain, after the scale and the tone map's 11 filters.
+ */
+const LIBASS_FAILED = "[Parsed_subtitles_12 @ 0x1] Error initializing libass";
 
 /** The first stream run that draws a text subtitle fails. */
 const textBurnFails = await writeFakeFfmpeg({

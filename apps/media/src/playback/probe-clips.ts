@@ -58,6 +58,7 @@ const HDR10_X265 =
 /** The colour of the HDR clips: BT.2020 in limited range, with HDR10's metadata or none. */
 const hdr = (signal: "pq" | "hlg", mastering: Colour["mastering"]): Colour => ({
   signal,
+  transfer: signal === "pq" ? "smpte2084" : "arib-std-b67",
   primaries: "bt2020",
   matrix: "bt2020nc",
   range: "limited",

@@ -10,6 +10,7 @@ import {
   AudioPlan,
   decidePlayback,
   type DolbyVisionCopy,
+  ENCODE_REFUSALS,
   PlaybackPlan,
   VideoPlan,
 } from "./playback-decision.ts";
@@ -237,6 +238,20 @@ const copyArgs = (kept: DolbyVisionCopy): ReadonlyArray<string> => {
 
   return args.slice(at, args.indexOf("-map", at));
 };
+
+describe("a refusal at the encode rung", () => {
+  it("is one a negotiation decides again from evidence, as it does before any probe", () => {
+    const evidenceFree = decidePlayback(file("mkv", dolbyVisionOf(5, 0)), sdrBrowser, {
+      audioIndex: undefined,
+      capabilities: { domains: [], verified: new Set(), excluded: new Set() },
+    });
+
+    expect(delivery(evidenceFree)).toBe("refused dolby-vision-not-convertible");
+    expect(
+      PlaybackPlan.$is("Unsupported")(evidenceFree) && ENCODE_REFUSALS.has(evidenceFree.reason),
+    ).toBe(true);
+  });
+});
 
 describe("a copy that keeps Dolby Vision", () => {
   it("writes its configuration, in Dolby Vision's own sample entry for profile 5 alone", () => {

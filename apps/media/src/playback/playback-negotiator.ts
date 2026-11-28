@@ -23,6 +23,7 @@ import {
   decidePlayback,
   decideWithin,
   type DecisionOptions,
+  ENCODE_REFUSALS,
   encodeIntent,
   PlaybackPlan,
   VideoPlan,
@@ -71,8 +72,7 @@ const reachesEncode = (plan: PlaybackPlan): boolean =>
   PlaybackPlan.$match(plan, {
     Direct: () => false,
     Hls: ({ video }) => VideoPlan.$is("Encode")(video),
-    Unsupported: ({ reason }) =>
-      reason === "no-transcode-target" || reason === "hdr-tone-mapping-requires-hardware",
+    Unsupported: ({ reason }) => ENCODE_REFUSALS.has(reason),
   });
 
 /** What drawing a subtitle track in asks of the decision, and of the stream for a text track. */

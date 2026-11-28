@@ -18,7 +18,8 @@ the evidence of where it ran.
 - `hw-hdr-to-sdr` maps the HDR10 HEVC version to BT.709 SDR for an SDR browser, and each kind of
   HDR source the table of source colours decides for (`apps/media/src/playback/source-colours.ts`):
   generated colour patches in HDR10 (`hdr-to-sdr-patches`) and HLG (`hdr-to-sdr-hlg`), and Dolby
-  Vision 8.1 (the HDR10 patches re-encoded with a fetched sample's RPUs), 8.4 (an iPhone's clip),
+  Vision 8.1 and 8.4 (the HDR10 and HLG patches re-encoded with the RPUs of fetched samples, an
+  iPhone's recording for 8.4),
   7 (one picture with its enhancement layer), and 5 (Apple's HLS example), the last fetched (below).
   Quick Sync's and VA-API's paths map with libplacebo (BT.2390, on a Vulkan device of the same GPU)
   where it is proven, else with the GPU's own tone map; the CPU maps with zscale and Hable, and

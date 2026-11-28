@@ -10,7 +10,14 @@ import {
   planVideo,
   type VideoIntent,
 } from "./video-pipeline.ts";
-import { ImplId, Op, type OutputCodec, sdrTarget, type SourceVideo } from "./video-ops.ts";
+import {
+  type Colour,
+  ImplId,
+  Op,
+  type OutputCodec,
+  sdrTarget,
+  type SourceVideo,
+} from "./video-ops.ts";
 import { HDR10, SDR_BT709 } from "../testing/colours.ts";
 
 const hlsCommandArgs = (command: HlsCommand): ReadonlyArray<string> => hlsCommand(command).args;
@@ -58,6 +65,8 @@ interface EncodeOptions {
   readonly size?: { readonly width: number; readonly height: number };
   /** The device proved libplacebo's tone map too, which a chain then prefers to its own. */
   readonly placebo?: boolean;
+  /** An SDR source's colour, in place of BT.709 in limited range. */
+  readonly colour?: Colour;
 }
 
 const DEVICES = { qsv: "/dev/dri/renderD128", vaapi: "/dev/dri/renderD129" } as const;
@@ -75,7 +84,7 @@ const encode = (domain: "qsv" | "vaapi" | "software", options: EncodeOptions) =>
     codec: options.codec ?? "h264",
     pixelFormat: depth > 8 ? "yuv420p10le" : "yuv420p",
     depth,
-    colour: toneMap ? HDR10 : SDR_BT709,
+    colour: toneMap ? HDR10 : (options.colour ?? SDR_BT709),
     scan: options.interlaced === true ? "interlaced" : "progressive",
     width: options.size?.width ?? 1920,
     height: options.size?.height ?? 1080,
@@ -151,6 +160,16 @@ const pgsOnCpu = (width: number, height: number) => {
 
 const after = (args: ReadonlyArray<string>, flag: string): string | undefined =>
   args[args.indexOf(flag) + 1];
+
+/** The video filters of an 8-bit H.264 source's run on Quick Sync, in `colour`. */
+const qsvScale = (colour: Colour) =>
+  after(
+    hlsCommandArgs({
+      ...command(AudioPlan.Copy({ index: 1 }), "aac"),
+      video: encode("qsv", { colour }),
+    }),
+    "-vf",
+  );
 
 /** The video filters of a 10-bit HDR10 HEVC source's run on `domain`, libplacebo proven. */
 const placeboRun = (domain: "qsv" | "vaapi") =>
@@ -257,9 +276,30 @@ describe("hlsCommandArgs", () => {
     expect(after(args, "-c:v")).toBe("h264_qsv");
   });
 
+  it("states an SDR source's own colour on Quick Sync's scale, which would convert it", () => {
+    const bt601: Colour = {
+      signal: "sdr",
+      transfer: "smpte170m",
+      primaries: "smpte170m",
+      matrix: "smpte170m",
+      range: "limited",
+      mastering: "absent",
+    };
+
+    expect(qsvScale(bt601)).toBe(
+      "hwmap,format=qsv,vpp_qsv=w=1920:h=1080:format=nv12:out_color_matrix=smpte170m:out_color_primaries=smpte170m:out_color_transfer=smpte170m,fps=source_fps",
+    );
+    expect(qsvScale({ ...SDR_BT709, range: "full" })).toBe(
+      "hwmap,format=qsv,vpp_qsv=w=1920:h=1080:format=nv12:out_range=full,fps=source_fps",
+    );
+    expect(
+      qsvScale({ ...SDR_BT709, transfer: undefined, primaries: undefined, matrix: undefined }),
+    ).toBe("hwmap,format=qsv,vpp_qsv=w=1920:h=1080:format=nv12,fps=source_fps");
+  });
+
   it("tone-maps with libplacebo on a GPU that proved it, through CPU memory and back", () => {
     const placebo =
-      "hwdownload,format=p010le,libplacebo=format=nv12:colorspace=bt709:color_primaries=bt709:color_trc=bt709:range=tv:tonemapping=bt.2390:peak_detect=0:contrast_recovery=0,setparams=color_primaries=bt709:color_trc=bt709:colorspace=bt709:range=tv,sidedata=mode=delete:type=MASTERING_DISPLAY_METADATA,sidedata=mode=delete:type=CONTENT_LIGHT_LEVEL,sidedata=mode=delete:type=DYNAMIC_HDR_PLUS,sidedata=mode=delete:type=DOVI_METADATA,sidedata=mode=delete:type=DOVI_RPU_BUFFER";
+      "hwdownload,format=p010le,libplacebo=format=nv12:colorspace=bt709:color_primaries=bt709:color_trc=bt709:range=tv:tonemapping=bt.2390:peak_detect=0:contrast_recovery=0:apply_dolbyvision=0,setparams=color_primaries=bt709:color_trc=bt709:colorspace=bt709:range=tv,sidedata=mode=delete:type=MASTERING_DISPLAY_METADATA,sidedata=mode=delete:type=CONTENT_LIGHT_LEVEL,sidedata=mode=delete:type=DYNAMIC_HDR_PLUS,sidedata=mode=delete:type=DOVI_METADATA,sidedata=mode=delete:type=DOVI_RPU_BUFFER";
 
     expect(placeboRun("vaapi")).toBe(`scale_vaapi=w=1920:h=1080:format=p010,${placebo},hwupload`);
     expect(placeboRun("qsv")).toBe(

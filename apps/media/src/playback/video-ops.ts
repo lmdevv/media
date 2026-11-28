@@ -63,6 +63,8 @@ export type Signal = "sdr" | "pq" | "hlg" | "dovi";
 /** The colour a frame's samples are in, as rows read and write it. */
 export interface Colour {
   readonly signal: Signal;
+  /** The transfer, as ffprobe names it (`bt709`, `smpte170m`, `smpte2084`); none when unstated. */
+  readonly transfer: string | undefined;
   /** The primaries, as ffprobe names them (`bt709`, `bt2020`, `smpte170m`); none when unstated. */
   readonly primaries: string | undefined;
   /** The matrix, as ffprobe's `color_space` names it (`bt709`, `bt2020nc`); none when unstated. */
@@ -78,6 +80,7 @@ export interface Colour {
  */
 export const SDR_BT709: Colour = {
   signal: "sdr",
+  transfer: "bt709",
   primaries: "bt709",
   matrix: "bt709",
   range: "limited",

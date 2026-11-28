@@ -414,6 +414,16 @@ export const replan = (
 };
 
 /**
+ * The refusals of the encode rung: what `replan` answers when no chain this server proved plans,
+ * so a decision made before any evidence that ends in one of them must be made again from it.
+ */
+export const ENCODE_REFUSALS: ReadonlySet<UnsupportedReason> = new Set([
+  "no-transcode-target",
+  "hdr-tone-mapping-requires-hardware",
+  "dolby-vision-not-convertible",
+]);
+
+/**
  * Why `intent` cannot be planned for `video`: the subtitle alone, Dolby Vision whose picture only
  * its RPU gives, an HDR source no tone map this server proved takes, or no target at all.
  */

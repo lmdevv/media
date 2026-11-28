@@ -245,6 +245,8 @@ const prepareGenerated = async (name, fixture) => {
     ]);
     if (result.status !== 0) throw new Error(`generating ${name} failed: ${result.stderr.trim()}`);
     renameSync(`${file}.part`, file);
+    // A fetched sample left beside the fixture would be scanned as another version of its title.
+    for (const named of generate.fetch ?? []) rmSync(join(folder, named), { force: true });
     writeFileSync(join(folder, "movie.nfo"), nfo(generate));
     for (const path of [join(flags.state, "fixtures"), folder, file, join(folder, "movie.nfo")]) {
       chmodSync(path, path === file || path.endsWith(".nfo") ? 0o644 : 0o755);
@@ -447,12 +449,17 @@ const analyseProgressive = (obs, found, dir) => {
   return { output: idetOf(output), source: idetOf(source) };
 };
 
-const analysePicture = async (obs, found, params, dir) => {
+// The file whose pictures a cell's source frames are read from: the fixture's, or, for one whose own
+// picture no reference tone map reads right (Dolby Vision 5), another rendition of the same pictures.
+const picturesOf = async (found) => {
+  if (found.fixture.reference === undefined) return found.path;
+  const rendition = await resolveFixture(found.fixture.reference);
+  return rendition.skipped ? undefined : rendition.path;
+};
+
+const analysePicture = (obs, pictures, params, dir) => {
   const fetch = obs.fetches.seek;
-  if (!fetch?.ok) return undefined;
-  // A fixture whose own picture no reference reads right (Dolby Vision 5) names another rendition of the same pictures.
-  const rendition = found.fixture.reference === undefined ? found : await resolveFixture(found.fixture.reference);
-  if (rendition.skipped) return undefined;
+  if (!fetch?.ok || pictures === undefined) return undefined;
   const until = params.at + params.seconds;
   const output = tool("ffmpeg", [
     "-v",
@@ -479,7 +486,7 @@ const analysePicture = async (obs, found, params, dir) => {
     "-t",
     String(params.seconds),
     "-i",
-    rendition.path,
+    pictures,
     "-map",
     "0:v:0",
     "-vf",
@@ -530,7 +537,7 @@ const thumbnails = (where, args) => {
 // of the source from the search window before the span to the window after it on its own
 // timeline, through the reference tone map where the row maps HDR to SDR, judged frame by frame
 // within a frame of the source's rate. Thumbnails that could not be made leave the fetch unjudged.
-const analyseTiming = (obs, found, cell, dir) => {
+const analyseTiming = (obs, found, pictures, cell, dir) => {
   const timing = {};
   const lines = [];
   const spec = Matrix.COMMON_CHECKS.find((check) => check.check === "picture-time");
@@ -558,7 +565,7 @@ const analyseTiming = (obs, found, cell, dir) => {
       "-t",
       String(from + seconds + Matrix.TIMING_WINDOW + 1 - begin),
       "-i",
-      found.path,
+      pictures ?? found.path,
       "-vf",
       `${toneMap}${Matrix.THUMBNAIL.filter}`,
     ]);
@@ -703,10 +710,11 @@ const measure = async (cell, found, health, dir) => {
   obs.fetches.seek = obs.fetches.seek && readFetch(obs.fetches.seek, dir);
   obs.source = found.source;
   analyseSourceAudio(obs, found);
-  obs.analysis = { timing: analyseTiming(obs, found, cell, dir) };
+  const pictures = await picturesOf(found);
+  obs.analysis = { timing: analyseTiming(obs, found, pictures, cell, dir) };
   for (const spec of row.checks) {
     if (spec.check === "progressive") obs.analysis.idet = analyseProgressive(obs, found, dir);
-    if (spec.check === "picture") obs.analysis.picture = await analysePicture(obs, found, spec, dir);
+    if (spec.check === "picture") obs.analysis.picture = analysePicture(obs, pictures, spec, dir);
     if (spec.check === "colour") obs.analysis.colour = analyseColour(obs, found, spec, dir);
     if (spec.check === "burned-in") obs.analysis.burn = analyseBurn(obs, found, spec, dir);
     if (spec.check === "burned-text") obs.analysis.text = analyseText(obs, found, spec, dir);

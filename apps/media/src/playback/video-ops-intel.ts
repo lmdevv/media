@@ -47,24 +47,27 @@ import {
 } from "./video-ops.ts";
 
 /**
- * libplacebo's tone map to SDR BT.709 in limited range, NV12, as the reference the table of source
- * colours is judged against (`colour-patches.mjs` in verify-media): ITU-R BT.2390's EETF, with no
- * peak detection or contrast recovery, so a picture maps the same in every segment and after every
- * seek, and with libplacebo's perceptual gamut mapping. It applies a Dolby Vision RPU the frames
- * carry (`apply_dolbyvision`, on by default), which is the only way either ffmpeg build reads
- * profile 5's IPT-PQ-c2.
+ * libplacebo's tone map of `frame` to SDR BT.709 in limited range, NV12, as the reference the table
+ * of source colours is judged against (`colour-patches.mjs` in verify-media): ITU-R BT.2390's EETF,
+ * with no peak detection or contrast recovery, so a picture maps the same in every segment and
+ * after every seek, and with libplacebo's perceptual gamut mapping. It applies a Dolby Vision RPU
+ * to Dolby Vision's IPT-PQ-c2 alone (`apply_dolbyvision`), the only way either ffmpeg build reads
+ * profile 5; a base layer the table maps as what it is (7, 8.1, 8.4) maps as the CPU's and the
+ * GPU's own tone maps map it, with its RPU left unread.
  */
-const PLACEBO_SDR = filter(
-  "libplacebo",
-  ["format", "nv12"],
-  ["colorspace", "bt709"],
-  ["color_primaries", "bt709"],
-  ["color_trc", "bt709"],
-  ["range", "tv"],
-  ["tonemapping", "bt.2390"],
-  ["peak_detect", "0"],
-  ["contrast_recovery", "0"],
-);
+const placeboSdr = (frame: Frame): FilterCall =>
+  filter(
+    "libplacebo",
+    ["format", "nv12"],
+    ["colorspace", "bt709"],
+    ["color_primaries", "bt709"],
+    ["color_trc", "bt709"],
+    ["range", "tv"],
+    ["tonemapping", "bt.2390"],
+    ["peak_detect", "0"],
+    ["contrast_recovery", "0"],
+    ["apply_dolbyvision", frame.colour.signal === "dovi" ? "1" : "0"],
+  );
 
 /**
  * The transfer libplacebo maps from, what changes whether it works: PQ for HDR10's kin and for
@@ -75,7 +78,7 @@ const placeboTransfer = (frame: Frame): "pq" | "hlg" | undefined =>
   frame.colour.signal === "dovi" ? "pq" : toneMapTransfer(frame);
 
 /**
- * libplacebo's tone map (`PLACEBO_SDR`) for `domain`'s P010 PQ, HLG, and Dolby Vision surfaces: the
+ * libplacebo's tone map (`placeboSdr`) for `domain`'s P010 PQ, HLG, and Dolby Vision surfaces: the
  * frames are downloaded, libplacebo uploads them to a Vulkan device of its own, maps them, and
  * hands them back, and they are uploaded to the domain's device as NV12 with `upload`, tagged SDR
  * BT.709 (`TAG_SDR_BT709`) and without the source's HDR metadata (`STRIP_HDR_METADATA`). libplacebo
@@ -102,12 +105,12 @@ const placeboOn = (domain: GpuDomain, upload: ReadonlyArray<FilterCall>): OpImpl
   ],
   variant: (_, frame) => (frame.pixelFormat === "p010le" ? placeboTransfer(frame) : undefined),
   output: (_, frame) => ({ ...frame, colour: SDR_BT709, depth: 8, pixelFormat: "nv12" }),
-  render: () => ({
+  render: (_, frame) => ({
     ...NOTHING,
     filters: [
       filter("hwdownload"),
       filter("format", "p010le"),
-      PLACEBO_SDR,
+      placeboSdr(frame),
       TAG_SDR_BT709,
       ...STRIP_HDR_METADATA,
       ...upload,
@@ -309,7 +312,40 @@ const deinterlaceQsv: OpImpl<"Deinterlace"> = {
   probes: DEINTERLACE_PROBES,
 };
 
-/** `vpp_qsv` scaling; it fuses with a following tone map into one `vpp_qsv`. */
+/**
+ * The colour `vpp_qsv` must state as its output to leave SDR `frame` in its own: by default it
+ * converts samples to limited range and BT.709's matrix and primaries but leaves the frame's tags,
+ * so the samples no longer match them. On an Arc A380 under ffmpeg 7.1, full-range patches came
+ * out with black at 16, and BT.601's 75 % cyan 9 apart in CIEDE2000; stated as the source's, every
+ * patch matched (`out_color_matrix` alone left the primaries converted). Nothing for HDR frames,
+ * which a tone map states, or for BT.709 in limited range or a frame that states nothing, which
+ * keep main's arguments.
+ */
+const keptColour = (frame: Frame): FilterCall["args"] => {
+  const { colour } = frame;
+
+  const stated: ReadonlyArray<readonly [string, string | undefined]> = [
+    ["out_color_matrix", colour.matrix],
+    ["out_color_primaries", colour.primaries],
+    ["out_color_transfer", colour.transfer],
+  ];
+
+  const converted = stated.some(([, value]) => value !== undefined && value !== "bt709");
+
+  if (colour.signal !== "sdr" || (!converted && colour.range === "limited")) return [];
+
+  return [
+    ...stated.flatMap(([option, value]): FilterCall["args"] =>
+      value === undefined || !converted ? [] : [[option, value]],
+    ),
+    ...(colour.range === "full" ? [["out_range", "full"] as const] : []),
+  ];
+};
+
+/**
+ * `vpp_qsv` scaling, its output stated in an SDR source's own colour (`keptColour`); it fuses with
+ * a following tone map into one `vpp_qsv`, whose tone map then states BT.709.
+ */
 const scaleQsv: OpImpl<"Scale"> = {
   id: ImplId("scale.qsv"),
   op: "Scale",
@@ -324,7 +360,7 @@ const scaleQsv: OpImpl<"Scale"> = {
     depth: op.depth,
     pixelFormat: surfaceFormat(op.depth),
   }),
-  render: (op) => ({
+  render: (op, frame) => ({
     ...NOTHING,
     filters: [
       fusing(
@@ -332,6 +368,7 @@ const scaleQsv: OpImpl<"Scale"> = {
         ["w", String(op.width)],
         ["h", String(op.height)],
         ["format", surfaceName(op.depth)],
+        ...keptColour(frame),
       ),
     ],
   }),

@@ -52,6 +52,10 @@ export interface ColourDecision {
 
 const SDR = { dynamicRange: "sdr" } as const;
 
+/** What keeps an SDR source's own colour on Quick Sync's path, whose scale would convert it. */
+const QSV_KEEPS =
+  "Quick Sync's scale is told to output the source's colour, which it would otherwise convert under the source's tags";
+
 /**
  * How HDR reaches SDR: libplacebo's BT.2390 on Quick Sync's and VA-API's paths where Vulkan is
  * proven, the reference the table is judged against; else the GPU's own tone map, which renders
@@ -75,7 +79,7 @@ export const COLOUR_DECISIONS: Readonly<Record<SourceKind, ColourDecision>> = {
     example: SDR,
     dolbyVisionCopy: "none",
     signal: "sdr",
-    encode: "scaled and encoded with its matrix and primaries carried in the frames' tags",
+    encode: `scaled and encoded in its own matrix and primaries; ${QSV_KEEPS}`,
     why: "BT.601 is SD's own colour and every client reads its tags; converting would change nothing a viewer sees",
   },
   "sdr-bt2020": {
@@ -83,7 +87,7 @@ export const COLOUR_DECISIONS: Readonly<Record<SourceKind, ColourDecision>> = {
     example: SDR,
     dolbyVisionCopy: "none",
     signal: "sdr",
-    encode: "scaled and encoded with BT.2020 carried in the frames' tags",
+    encode: `scaled and encoded in BT.2020; ${QSV_KEEPS}`,
     why: "its transfer is SDR's, so nothing is tone-mapped; the tags say how to show it",
   },
   "sdr-full-range": {
@@ -91,7 +95,7 @@ export const COLOUR_DECISIONS: Readonly<Record<SourceKind, ColourDecision>> = {
     example: SDR,
     dolbyVisionCopy: "none",
     signal: "sdr",
-    encode: "scaled and encoded with its range carried in the frames' tags",
+    encode: `scaled and encoded in full range; ${QSV_KEEPS}`,
     why: "full range is legal in H.264, HEVC, and AV1, and players read the range flag",
   },
   hdr10: {
@@ -234,6 +238,7 @@ export const decisionOf = (video: VideoStream): ColourDecision => COLOUR_DECISIO
 /** The colour `video`'s decoded frames are in, as rows read it. */
 export const sourceColour = (video: VideoStream): Colour => ({
   signal: decisionOf(video).signal,
+  transfer: video.colour?.transfer,
   primaries: video.colour?.primaries,
   matrix: video.colour?.matrix,
   range: fullRange(video) ? "full" : "limited",

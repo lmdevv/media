@@ -4,6 +4,7 @@ import { type Colour, SDR_BT709, type Signal } from "../playback/video-ops.ts";
 /** HDR10: PQ over BT.2020 with mastering display metadata. */
 export const HDR10: Colour = {
   signal: "pq",
+  transfer: "smpte2084",
   primaries: "bt2020",
   matrix: "bt2020nc",
   range: "limited",
@@ -11,11 +12,12 @@ export const HDR10: Colour = {
 };
 
 /** HLG over BT.2020, which carries no mastering display metadata. */
-const HLG: Colour = { ...HDR10, signal: "hlg", mastering: "absent" };
+const HLG: Colour = { ...HDR10, signal: "hlg", transfer: "arib-std-b67", mastering: "absent" };
 
 /** Dolby Vision 5's IPT-PQ-c2, which no tag states. */
 export const DOLBY_VISION_IPT: Colour = {
   signal: "dovi",
+  transfer: undefined,
   primaries: undefined,
   matrix: undefined,
   range: "limited",
