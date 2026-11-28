@@ -177,10 +177,13 @@ Old movies' Convex project, its SDK client, and its command registry were delete
   `coverSizeFor` picks the size of the cell or at least 1.75 times it, and the web app's
   `webCoverSize` the size of the cell or one the browser shrinks sharply. The server bounds the cover's
   shorter side by it, but copies only the kinds of cover `COPIED_KINDS` lists
-  (`apps/media/src/music/cover-copy.ts`), each proven by a route test, from a walk of the whole
-  file, and only when the copy takes fewer bytes; every other cover, and any it cannot copy, is
-  served as stored, decided once per cover and size. At most 16 copies are under way at once; a
-  first request past that gets the stored cover, uncached.
+  (`apps/media/src/music/cover-copy.ts`), each proven by a route test, from one forward pass over
+  the whole file, which reads each byte at most once, and only when the copy takes fewer bytes.
+  Every other cover is served as stored: one over 16 MiB unread, and one whose pass takes over two
+  seconds this time only. A copy that is not smaller, or that ffmpeg exits with an error on, is
+  decided once per cover and size; a run that is killed or times out decides nothing. At most 16
+  covers have their kind told or their copy made at once; a first request past that gets the
+  stored cover at once, uncached, and reads nothing more of it.
 
 ## Rich metadata
 

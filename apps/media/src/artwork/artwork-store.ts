@@ -7,9 +7,11 @@ import {
   Context,
   Data,
   Duration,
+  Equal,
   Effect,
   Exit,
   FileSystem,
+  Hash,
   Layer,
   Option,
   Path,
@@ -62,15 +64,17 @@ export interface Interface {
   ) => Effect.Effect<ArtworkImage, ArtworkNotFound | ArtworkUnavailable>;
   /**
    * What to serve for a music cover the server holds asked at `size`: its copy, with the shorter
-   * side resized to `size`, since every cover is drawn as a square crop, and written as `format`,
-   * or the stored cover. `fingerprint` names the file's content; the copy is kept under it with the
-   * other resized artwork, within `CACHE_MAX_MB`.
+   * side resized to `size`, since every cover is drawn as a square crop, or the stored cover. A copy
+   * or a decision already on disk answers at once. Otherwise `plan`, which may tell the cover's
+   * kind, and the copy it calls for run as one job under `MAX_COVER_COPIES`. `fingerprint` names
+   * the file's content; the copy is kept under it with the other resized artwork, within
+   * `CACHE_MAX_MB`.
    */
   readonly coverCopy: (
     file: string,
     fingerprint: string,
     size: CoverSize,
-    format: CoverFormat,
+    plan: Effect.Effect<CopyPlan>,
   ) => Effect.Effect<CoverCopy>;
 }
 
@@ -119,9 +123,10 @@ class ArtworkDownloadTimedOut extends Schema.TaggedError<
 export type CoverFormat = "jpeg" | "png";
 
 /**
- * What the art route serves for a music cover at a size. `Stored` is decided once per cover and
- * size and remembered: the copy would not be smaller than the cover, or ffmpeg found an error in
- * the cover. `Busy` is for this request alone: `MAX_COVER_COPIES` copies are already under way.
+ * What the art route serves for a music cover at a size. `Stored` is for good: the cover's kind has
+ * no proven copy, the copy would not be smaller than the cover, or ffmpeg exited with an error on
+ * the cover. `Busy` is for this request alone: `MAX_COVER_COPIES` jobs are already under way, the
+ * cover's kind was not told in time, or the copy's run did not finish.
  */
 export type CoverCopy = Data.TaggedEnum<{
   Copy: { readonly image: ArtworkImage };
@@ -133,10 +138,48 @@ export type CoverCopy = Data.TaggedEnum<{
 export const CoverCopy = Data.taggedEnum<CoverCopy>();
 
 /**
- * How many distinct music cover copies may be under way at once, two encoding and the rest
- * waiting for an encoder. A first request past it gets the stored cover and makes no copy.
+ * What a music cover's kind says about its copy: the format to write it in, `none` to serve the
+ * stored cover for good, or `later` to serve it this time and decide again on a later request.
+ */
+export type CopyPlan = CoverFormat | "none" | "later";
+
+/**
+ * How many distinct music cover jobs may be under way at once, each telling a cover's kind when it
+ * is not known yet and making its copy, two encoding at a time and the rest waiting for an
+ * encoder. A first request past it gets the stored cover at once and starts no work.
  */
 const MAX_COVER_COPIES = 16;
+
+/**
+ * A request for a cover's copy at a size, equal to any other for the same file, content, and size
+ * whatever its plan, so concurrent requests share one job, run with the first one's plan.
+ */
+class CoverRequest implements Equal.Equal {
+  readonly file: string;
+  readonly fingerprint: string;
+  readonly size: CoverSize;
+  readonly plan: Effect.Effect<CopyPlan>;
+
+  constructor(file: string, fingerprint: string, size: CoverSize, plan: Effect.Effect<CopyPlan>) {
+    this.file = file;
+    this.fingerprint = fingerprint;
+    this.size = size;
+    this.plan = plan;
+  }
+
+  [Equal.symbol](that: Equal.Equal): boolean {
+    return (
+      that instanceof CoverRequest &&
+      that.file === this.file &&
+      that.fingerprint === this.fingerprint &&
+      that.size === this.size
+    );
+  }
+
+  [Hash.symbol](): number {
+    return Hash.string(`${this.file}\u0000${this.fingerprint}\u0000${String(this.size)}`);
+  }
+}
 
 /** The longer side's even rounding of the shorter side's `scaled` size, at most `longer`. */
 const evenLonger = (scaled: string, longer: string, shorter: string) =>
@@ -340,9 +383,12 @@ const make = Effect.gen(function* () {
   const underWay = yield* Ref.make(0);
 
   /**
-   * Encodes `file`'s copy to `target`, which it keeps only when it is smaller than the cover.
-   * Otherwise, and when ffmpeg finds an error in the cover, it deletes the output and writes the
-   * `marker` that answers later requests with the stored cover.
+   * Encodes `file`'s copy to `target`, which it keeps only when it is smaller than the cover. When
+   * it is not, or ffmpeg exits with an error on the cover, neither of which a retry changes, it
+   * deletes the output and writes the `marker` that answers later requests with the stored cover.
+   * A run that did not finish, killed, stopped by a signal, or never started, or a file system
+   * error writes no marker: the stored cover answers this request alone, and a later one tries
+   * again.
    */
   const encodeCover = Effect.fnUntraced(function* (
     file: string,
@@ -352,7 +398,7 @@ const make = Effect.gen(function* () {
   ): Effect.fn.Return<CoverCopy> {
     const temporary = `${target}.${(yield* Clock.currentTimeNanos).toString(36)}.part.${plan.extension}`;
 
-    const smaller = yield* Effect.gen(function* () {
+    const outcome = yield* Effect.gen(function* () {
       yield* fs.makeDirectory(path.dirname(target), { recursive: true });
       yield* resizes.withPermits(1)(
         tools.ffmpeg([
@@ -376,63 +422,91 @@ const make = Effect.gen(function* () {
       );
       const [copy, cover] = yield* Effect.all([fs.stat(temporary), fs.stat(file)]);
 
-      if (copy.size >= cover.size) return false;
+      if (copy.size >= cover.size) return "larger" as const;
       yield* fs.rename(temporary, target);
 
-      return true;
+      return "smaller" as const;
     }).pipe(
+      Effect.catchTag("MediaToolFailed", (failed) =>
+        Effect.logWarning("ArtworkStore.cover_copy_failed", failed).pipe(
+          // ffmpeg exits 255 when a signal stopped it, which says nothing about the cover.
+          Effect.as(
+            failed.exitCode === null || failed.exitCode === 255
+              ? ("unfinished" as const)
+              : ("rejected" as const),
+          ),
+        ),
+      ),
       Effect.catch((cause) =>
-        Effect.logWarning("ArtworkStore.cover_copy_failed", cause).pipe(Effect.as(false)),
+        Effect.logWarning("ArtworkStore.cover_copy_failed", cause).pipe(
+          Effect.as("unfinished" as const),
+        ),
       ),
     );
 
-    if (smaller) return CoverCopy.Copy({ image: { path: target, contentType: plan.contentType } });
+    if (outcome === "smaller") {
+      return CoverCopy.Copy({ image: { path: target, contentType: plan.contentType } });
+    }
+
     yield* fs.remove(temporary, { force: true }).pipe(Effect.ignore);
+
+    if (outcome === "unfinished") return CoverCopy.Busy();
     yield* fs.writeFile(marker, new Uint8Array(0)).pipe(Effect.ignore);
 
     return CoverCopy.Stored();
   });
 
   const cover = Effect.fn("ArtworkStore.cover")(function* (
-    file: string,
-    fingerprint: string,
-    size: CoverSize,
-    format: CoverFormat,
+    request: CoverRequest,
   ): Effect.fn.Return<CoverCopy> {
-    const plan = coverPlan(format, String(size));
-    const name = path.join(directory, `s${String(size)}`, hash(fingerprint));
-    const target = `${name}.${plan.extension}`;
+    const name = path.join(directory, `s${String(request.size)}`, hash(request.fingerprint));
+    const jpeg = coverPlan("jpeg", String(request.size));
+    const png = coverPlan("png", String(request.size));
 
-    if (yield* cached(target)) {
-      return CoverCopy.Copy({ image: { path: target, contentType: plan.contentType } });
+    if (yield* cached(`${name}.${jpeg.extension}`)) {
+      return CoverCopy.Copy({
+        image: { path: `${name}.${jpeg.extension}`, contentType: jpeg.contentType },
+      });
+    }
+
+    if (yield* cached(`${name}.${png.extension}`)) {
+      return CoverCopy.Copy({
+        image: { path: `${name}.${png.extension}`, contentType: png.contentType },
+      });
     }
 
     if (yield* cached(`${name}.stored`)) return CoverCopy.Stored();
 
-    const admitted = yield* Ref.modify(underWay, (copies) =>
-      copies < MAX_COVER_COPIES ? [true, copies + 1] : [false, copies],
+    const admitted = yield* Ref.modify(underWay, (jobs) =>
+      jobs < MAX_COVER_COPIES ? [true, jobs + 1] : [false, jobs],
     );
 
     if (!admitted) return CoverCopy.Busy();
 
-    return yield* encodeCover(file, target, `${name}.stored`, plan).pipe(
-      Effect.ensuring(Ref.update(underWay, (copies) => copies - 1)),
-    );
+    return yield* Effect.gen(function* () {
+      const decided = yield* request.plan;
+
+      if (decided === "none") return CoverCopy.Stored();
+
+      if (decided === "later") return CoverCopy.Busy();
+      const plan = coverPlan(decided, String(request.size));
+
+      return yield* encodeCover(request.file, `${name}.${plan.extension}`, `${name}.stored`, plan);
+    }).pipe(Effect.ensuring(Ref.update(underWay, (jobs) => jobs - 1)));
   });
 
-  // Concurrent requests for one copy share a single ffmpeg run and one place under the bound.
-  // Nothing outlives that run, so each later request finds the copy or the marker on disk again,
-  // or makes it again after the cache pruner removed it.
-  const covers = yield* Cache.makeWith(
-    ([file, fingerprint, size, format]: readonly [string, string, CoverSize, CoverFormat]) =>
-      cover(file, fingerprint, size, format),
-    { capacity: 2048, timeToLive: () => Duration.zero },
-  );
+  // Concurrent requests for one copy share a single job and one place under the bound. Nothing
+  // outlives that job, so each later request finds the copy or the marker on disk again, or makes
+  // it again after the cache pruner removed it.
+  const covers = yield* Cache.makeWith((request: CoverRequest) => cover(request), {
+    capacity: 2048,
+    timeToLive: () => Duration.zero,
+  });
 
   return Service.of({
     image: (key, width) => Cache.get(images, [key, width] as const),
-    coverCopy: (file, fingerprint, size, format) =>
-      Cache.get(covers, [file, fingerprint, size, format] as const),
+    coverCopy: (file, fingerprint, size, plan) =>
+      Cache.get(covers, new CoverRequest(file, fingerprint, size, plan)),
   });
 });
 

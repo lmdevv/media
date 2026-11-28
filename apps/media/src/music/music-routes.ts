@@ -22,6 +22,7 @@ import {
   Layer,
   Option,
   Path,
+  type PlatformError,
   Predicate,
   Redacted,
   Result,
@@ -32,11 +33,12 @@ import { HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/http";
 import * as ArtworkGate from "../artwork/artwork-gate.ts";
 import * as ArtworkStore from "../artwork/artwork-store.ts";
 import * as MediaConfig from "../media-config.ts";
+import { isNotFound } from "../platform/file-info.ts";
 import { realPathInsideApprovedRoots } from "../playback/file-resolver.ts";
 import * as PlaybackToken from "../playback/playback-grants.ts";
 import { artPath, imageContentType, isArtHash } from "./art-store.ts";
 import { contentTypeFor, isBrowserPlayable } from "./audio-format.ts";
-import { COPIED_KINDS, coverKind } from "./cover-copy.ts";
+import { type Classified, COPIED_KINDS, coverKind } from "./cover-copy.ts";
 import { isFragmentedProfile } from "./ffmpeg-args.ts";
 import * as Files from "./music-files.ts";
 import {
@@ -50,6 +52,13 @@ import * as TrackSources from "./track-sources.ts";
 import * as MusicTranscoder from "./transcoder.ts";
 
 const ART_CACHE_CONTROL = "public, max-age=31536000, immutable";
+
+/** What a cover's copy calls for, told by its kind. */
+const PLANS: Record<Classified, ArtworkStore.CopyPlan> = {
+  ...COPIED_KINDS,
+  unproven: "none",
+  undecided: "later",
+};
 
 const decodeProfile = Schema.decodeUnknownOption(MusicStreamProfile);
 
@@ -97,28 +106,50 @@ export const layer: Layer.Layer<
     const gate = yield* ArtworkGate.Service;
     const store = yield* ArtworkStore.Service;
 
-    // A cover's kind, by its content hash, which names the same bytes for good.
-    const kinds = yield* Cache.makeWith(
-      (hash: string) =>
-        Effect.gen(function* () {
-          const path = artPath(config.dataDir, hash);
-          const info = yield* Files.statPath(path);
-
-          return yield* coverKind(info.size, (offset, length) =>
-            Files.readAt(path, offset, length),
-          );
-        }),
-      {
-        capacity: 4096,
-        timeToLive: (exit) => (Exit.isSuccess(exit) ? Duration.infinity : Duration.zero),
-      },
-    );
-
     const sources = yield* TrackSources.Service;
 
     const transcoder = yield* MusicTranscoder.Service;
     const fs = yield* FileSystem.FileSystem;
     const paths = yield* Path.Path;
+
+    // A cover's kind, by its content hash, which names the same bytes for good, told in one
+    // forward pass over one open handle (`coverKind`). An `undecided` kind is told again later.
+    const kinds = yield* Cache.makeWith(
+      (hash: string) => {
+        const path = artPath(config.dataDir, hash);
+
+        const failed = (operation: string) => (cause: PlatformError.PlatformError) =>
+          new Files.FileError({ operation, path, missing: isNotFound(cause), cause });
+
+        return Effect.gen(function* () {
+          const file = yield* fs.open(path).pipe(Effect.mapError(failed("open")));
+          const info = yield* file.stat.pipe(Effect.mapError(failed("stat")));
+
+          return yield* coverKind(Number(info.size), (offset, length) =>
+            file
+              .readAlloc(length, { position: BigInt(offset) })
+              .pipe(
+                Effect.map(Option.getOrElse(() => new Uint8Array(0))),
+                Effect.mapError(failed("read")),
+              ),
+          );
+        }).pipe(Effect.scoped);
+      },
+      {
+        capacity: 4096,
+        timeToLive: (exit) =>
+          Exit.isSuccess(exit) && exit.value !== "undecided" ? Duration.infinity : Duration.zero,
+      },
+    );
+
+    /** Tells a cover's kind, which a request runs only once the store admitted its copy. */
+    const plan = (hash: string) =>
+      Cache.get(kinds, hash).pipe(
+        Effect.map((kind) => PLANS[kind]),
+        Effect.catchTag("FileError", (error) =>
+          Effect.logWarning("MusicRoutes.art_kind_unread", error).pipe(Effect.as("later" as const)),
+        ),
+      );
 
     /**
      * The services a request runs on, provided one by one. Never the layer's whole context: it
@@ -336,13 +367,19 @@ export const layer: Layer.Layer<
       const path = artPath(config.dataDir, hash);
       const size = width.success;
       const contentType = imageContentType(yield* Files.readHead(path, 16));
-      const kind = Option.isNone(size) ? "unproven" : yield* Cache.get(kinds, hash);
+      const known = Option.isNone(size) ? Option.none() : yield* Cache.getSuccess(kinds, hash);
 
-      // The art store names a cover by its content hash, so the hash alone names each copy.
+      // The art store names a cover by its content hash, so the hash alone names each copy. A
+      // cover whose kind is not known yet has it told under the store's bound on copies.
       const answer =
-        Option.isNone(size) || kind === "unproven"
+        Option.isNone(size) || (Option.isSome(known) && known.value === "unproven")
           ? undefined
-          : yield* store.coverCopy(path, `music-art:${hash}`, size.value, COPIED_KINDS[kind]);
+          : yield* store.coverCopy(
+              path,
+              `music-art:${hash}`,
+              size.value,
+              Option.isSome(known) ? Effect.succeed(PLANS[known.value]) : plan(hash),
+            );
 
       // Open before answering: the copy's bytes then survive a prune before the body ends, and a
       // copy pruned before this serves the stored cover.
@@ -368,7 +405,8 @@ export const layer: Layer.Layer<
         ? copied.value
         : yield* fileResponse(request, path, { contentType, sessionEnded: undefined });
 
-      // The stored cover served only because too many copies were under way is asked for again.
+      // The stored cover served only for want of a place under the bound, a kind told in time, or
+      // a finished run is asked for again.
       return HttpServerResponse.setHeader(
         response,
         "cache-control",

@@ -1,6 +1,6 @@
 import { crc32 } from "node:zlib";
 
-import { Effect } from "effect";
+import { Duration, Effect } from "effect";
 
 import type { CoverFormat } from "../artwork/artwork-store.ts";
 import type { FileError } from "./music-files.ts";
@@ -131,26 +131,77 @@ const R_G_B = [0x52, 0x47, 0x42];
 /** Reads up to `length` bytes of a cover from `offset`, fewer past its end. */
 export type ReadCover = (offset: number, length: number) => Effect.Effect<Uint8Array, FileError>;
 
-/** How much of a cover one read takes. */
-const BLOCK = 64 * 1024;
+/** How many bytes telling a cover's kind reads at a time, at least. */
+export const READ_BLOCK = 64 * 1024;
 
 /**
- * `read` a block at a time: a range inside the block in hand comes from it, and any other starts a
- * new block, so a walk reads each part of the file about once and holds one block.
+ * The largest cover the art route reads to tell its kind, 16 MiB. Covers that taggers embed and
+ * stores sell, 3000x3000 JPEGs among them, take a few megabytes; this bounds one pass to 256 block
+ * reads and the largest segment or chunk it holds whole. A larger file is `unproven` without being
+ * read, and served as stored, which always looks right.
  */
-const blocks = (read: ReadCover): ReadCover => {
+export const MAX_COVER_BYTES = 16 * 1024 * 1024;
+
+/**
+ * How long telling a cover's kind may take. One pass over `MAX_COVER_BYTES` from a local disk takes
+ * tens of milliseconds; a walk still going after this is `undecided`.
+ */
+const CLASSIFY_WITHIN = Duration.seconds(2);
+
+/** A cover read in one forward pass. */
+interface Forward {
+  /** Up to `length` bytes from `offset`, which is at or past every offset asked before. */
+  readonly at: ReadCover;
+  /** The bytes from `offset` to the end of the block in hand, reading the next block if none are. */
+  readonly rest: (offset: number) => Effect.Effect<Uint8Array, FileError>;
+}
+
+/**
+ * `read` in one forward pass: each read starts where the last one ended, or further on past a
+ * skipped range, so a walk reads each byte of the file at most once, in order. It holds one block,
+ * or two across a block's end, or one segment or chunk it checks whole.
+ */
+const forward = (size: number, read: ReadCover): Forward => {
   let start = 0;
   let block: Uint8Array = new Uint8Array(0);
 
-  return (offset, length) =>
-    offset >= start && offset + length <= start + block.length
-      ? Effect.succeed(block.subarray(offset - start, offset - start + length))
-      : Effect.map(read(offset, Math.max(length, BLOCK)), (bytes) => {
-          start = offset;
-          block = bytes;
+  const fill = Effect.fnUntraced(function* (
+    offset: number,
+    length: number,
+  ): Effect.fn.Return<void, FileError> {
+    if (offset + length <= start + block.length) return;
 
-          return bytes.subarray(0, length);
-        });
+    if (offset >= start + block.length) {
+      start = offset;
+      block = new Uint8Array(0);
+    } else {
+      block = block.subarray(offset - start);
+      start = offset;
+    }
+
+    while (start + block.length < Math.min(offset + length, size)) {
+      const from = start + block.length;
+      const more = yield* read(from, Math.max(READ_BLOCK, offset + length - from));
+
+      if (more.length === 0) return;
+      const joined = new Uint8Array(block.length + more.length);
+
+      joined.set(block);
+      joined.set(more, block.length);
+      block = joined;
+    }
+  });
+
+  return {
+    at: (offset, length) =>
+      Effect.map(fill(offset, length), () =>
+        block.subarray(offset - start, Math.min(offset - start + length, block.length)),
+      ),
+    rest: (offset) =>
+      Effect.map(fill(offset, offset < start + block.length ? 0 : 1), () =>
+        block.subarray(offset - start),
+      ),
+  };
 };
 
 /** The kind a JPEG's frame and segments before its first scan describe. */
@@ -187,23 +238,26 @@ const BETWEEN_SCANS = new Set([0xc4, 0xdb, 0xdd, 0xfe]);
  * undefined at the end of the file without one.
  */
 const nextMarker = Effect.fnUntraced(function* (
-  at: ReadCover,
+  cover: Forward,
   from: number,
 ): Effect.fn.Return<number | undefined, FileError> {
   let position = from;
 
   for (;;) {
-    const block = yield* at(position, BLOCK);
-    const found = block.indexOf(0xff);
+    const bytes = yield* cover.rest(position);
 
-    if (block.length < 2) return undefined;
+    if (bytes.length === 0) return undefined;
+    const found = bytes.indexOf(0xff);
 
-    if (found === -1 || found === block.length - 1) {
-      position += Math.max(found, block.length - 1);
+    if (found === -1) {
+      position += bytes.length;
       continue;
     }
 
-    const next = block[found + 1] ?? 0;
+    const pair = yield* cover.at(position + found, 2);
+
+    if (pair.length < 2) return undefined;
+    const next = pair[1] ?? 0;
 
     // A stuffed 0xFF, a restart marker, or a fill byte belongs to the coded data.
     if (next === 0x00 || (next >= 0xd0 && next <= 0xd7) || next === 0xff) {
@@ -224,8 +278,9 @@ const nextMarker = Effect.fnUntraced(function* (
  */
 const jpegKind = Effect.fnUntraced(function* (
   size: number,
-  at: ReadCover,
+  cover: Forward,
 ): Effect.fn.Return<CoverKind, FileError> {
+  const { at } = cover;
   let offset = 2;
   let frame: Frame | undefined;
   let orientation: number | undefined;
@@ -317,7 +372,7 @@ const jpegKind = Effect.fnUntraced(function* (
 
   // The coded data, and only tables, a comment, or another scan until the end of image.
   for (;;) {
-    const marked = yield* nextMarker(at, offset);
+    const marked = yield* nextMarker(cover, offset);
 
     if (marked === undefined) return "unproven";
     const head = yield* at(marked, 4);
@@ -441,21 +496,42 @@ const pngKind = Effect.fnUntraced(function* (
 });
 
 /**
- * The kind of the cover `read` gives, `size` bytes long: one of `COPIED_KINDS` when a walk of the
- * whole file shows it as one, or `unproven`, served as stored.
+ * What telling a cover's kind gives: its kind, or `undecided` when the walk took longer than
+ * `CLASSIFY_WITHIN`, served as stored this time and told again on a later request.
  */
-export const coverKind = Effect.fnUntraced(function* (
+export type Classified = CoverKind | "undecided";
+
+const walk = Effect.fnUntraced(function* (
   size: number,
   read: ReadCover,
 ): Effect.fn.Return<CoverKind, FileError> {
-  const at = blocks(read);
-  const head = yield* at(0, 8);
+  const cover = forward(size, read);
+  const head = yield* cover.at(0, 8);
 
   if (PNG_SIGNATURE.every((byte, index) => head[index] === byte)) {
-    return yield* pngKind(size, at);
+    return yield* pngKind(size, cover.at);
   }
 
-  if (head[0] === 0xff && head[1] === 0xd8) return yield* jpegKind(size, at);
+  if (head[0] === 0xff && head[1] === 0xd8) return yield* jpegKind(size, cover);
 
   return "unproven";
 });
+
+/**
+ * The kind of the cover `read` gives, `size` bytes long: one of `COPIED_KINDS` when one forward pass
+ * over the whole file shows it as one, or `unproven`, served as stored. A cover over
+ * `MAX_COVER_BYTES` is `unproven` unread; a pass longer than `CLASSIFY_WITHIN` is `undecided`.
+ *
+ * The pass reads at most `size` bytes, in order, each at most once, in about `size / READ_BLOCK`
+ * reads, plus one for each range of a PNG it skips, and scans them once: its cost grows with the
+ * file's size alone.
+ */
+export const coverKind = (size: number, read: ReadCover): Effect.Effect<Classified, FileError> =>
+  size > MAX_COVER_BYTES
+    ? Effect.succeed("unproven")
+    : walk(size, read).pipe(
+        Effect.timeoutOrElse({
+          duration: CLASSIFY_WITHIN,
+          orElse: () => Effect.succeed("undecided" as const),
+        }),
+      );

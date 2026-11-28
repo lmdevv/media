@@ -963,8 +963,8 @@ describe("music cover art", { timeout: 120_000 }, () => {
     const slowest = Math.max(...stored.map(({ answeredMs }) => answeredMs));
 
     // Sixteen covers had their kinds told and copies made, never more at once. The rest read
-    // nothing but their first bytes and were served at once, unkept, while the copies, each
-    // taking over a second, were still being made.
+    // nothing but their first bytes and were served at once, unkept: within a few hundred
+    // milliseconds alone, about a second beside the rest of the suite, 13.6 s or more at 496adedc.
     expect(
       {
         statuses: served.map(({ status }) => status),
@@ -972,7 +972,7 @@ describe("music cover art", { timeout: 120_000 }, () => {
         told: opens.counts.opened,
         mostAtOnce: opens.counts.most <= bound,
         stored: stored.map(({ cacheControl }) => cacheControl),
-        storedAtOnce: slowest < 1_000,
+        storedAtOnce: slowest < 3_000,
       },
       `the slowest stored cover was answered after ${String(Math.round(slowest))} ms`,
     ).toEqual({
