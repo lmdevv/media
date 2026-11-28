@@ -24,6 +24,8 @@ import {
   type ClipName,
   encodeRowId,
   type GpuDomain,
+  hdrTarget,
+  type HdrRange,
   ImplId,
   implOf,
   Op,
@@ -87,6 +89,8 @@ interface Chain {
   readonly includes?: ReadonlyArray<string>;
   /** What it encodes to; H.264 when absent. */
   readonly output?: OutputCodec;
+  /** The HDR it keeps, as HEVC Main 10, in place of `output`. */
+  readonly keep?: HdrRange;
 }
 
 /** Chains that between them use every row the table has on each domain. */
@@ -143,6 +147,8 @@ const chainsOn = (domain: GpuDomain): ReadonlyArray<Chain> => [
   { name: `${domain}: AV1`, clip: "av1-8", domain },
   { name: `${domain}: VP9`, clip: "vp9-10", domain },
   { name: `${domain}: H.264 encoded to HEVC`, clip: "h264-8", domain, output: "hevc" },
+  { name: `${domain}: HDR10 kept as HEVC Main 10`, clip: "hevc-pq", domain, keep: "hdr10" },
+  { name: `${domain}: HLG kept as HEVC Main 10`, clip: "hevc-hlg", domain, keep: "hlg" },
   { name: `${domain}: HEVC Main 10 encoded to AV1`, clip: "hevc-10", domain, output: "av1" },
   {
     // VA-API's MPEG-2 decoder crashes in a share of runs on an Arc A380, so it may be set aside.
@@ -177,6 +183,8 @@ const CPU_CHAINS: ReadonlyArray<Chain> = [
   { name: "cpu: an image subtitle burned in", clip: "h264-8", domain: "cpu", burn: "image" },
   { name: "cpu: a text subtitle drawn with libass", clip: "h264-8", domain: "cpu", burn: "text" },
   { name: "cpu: H.264 encoded to HEVC", clip: "h264-8", domain: "cpu", output: "hevc" },
+  { name: "cpu: HDR10 kept as HEVC Main 10", clip: "hevc-pq", domain: "cpu", keep: "hdr10" },
+  { name: "cpu: HLG kept as HEVC Main 10", clip: "hevc-hlg", domain: "cpu", keep: "hlg" },
   { name: "cpu: H.264 encoded to AV1", clip: "h264-8", domain: "cpu", output: "av1" },
   { name: "cpu: interlaced MPEG-2 deinterlaced", clip: "mpeg2-8-interlaced", domain: "cpu" },
   {
@@ -189,7 +197,7 @@ const CPU_CHAINS: ReadonlyArray<Chain> = [
 ];
 
 const intentOf = (chain: Chain): VideoIntent => ({
-  targets: [sdrTarget(chain.output ?? "h264")],
+  targets: [chain.keep === undefined ? sdrTarget(chain.output ?? "h264") : hdrTarget(chain.keep)],
   frameRate: undefined,
   bounds: { width: 320, height: 180 },
   cpuEncodeBounds: { width: 1920, height: 1080 },
@@ -407,6 +415,21 @@ describe.runIf(hasQsv || hasVaapi)("TranscodeCapabilities on this machine's GPU"
           );
 
           yield* Console.log(`encoders: ${encoders.join(", ")}`);
+
+          // HEVC's HDR encodes are a key per transfer, so an encoder that cannot write 10-bit HDR
+          // loses only those keys; every one verified ran in a real chain above.
+          const hdrEncoders = (["cpu", ...domains] as const).flatMap((domain) =>
+            ["pq", "hlg"].map((transfer) => {
+              const key = capabilityKey(
+                encodeRowId(domain, "hevc"),
+                `10/${domain === "cpu" ? "crf" : "cbr"}/${transfer}`,
+              );
+
+              return `${key} ${Inventory.capabilityOf(inventory, key).status}`;
+            }),
+          );
+
+          yield* Console.log(`HDR encoders: ${hdrEncoders.join(", ")}`);
 
           // Each deinterlacer is a row of its own per depth, and every one verified ran above.
           const deinterlacers = (["cpu", ...domains] as const).flatMap((domain) =>

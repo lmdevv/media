@@ -313,8 +313,10 @@ const softwareLayout = (depth: number): "yuv420p" | "yuv420p10le" =>
  * The software encoder of `codec`, a row of its own: a quality target under a VBV cap, from any
  * layout and depth of the target's signal, converted to 4:2:0 at the target's depth: 8-bit SDR, or
  * for HEVC, Main 10 in the source's own HDR10 or HLG, its HDR10 static metadata kept and any
- * HDR10+ or Dolby Vision metadata dropped (`STRIP_DYNAMIC_METADATA`), which libx265 would
- * otherwise write. Every forced keyframe is an IDR frame (H.264, HEVC) or a key frame (AV1).
+ * HDR10+ or Dolby Vision metadata dropped from its frames (`STRIP_DYNAMIC_METADATA`): libx265 under
+ * ffmpeg 7.1 and 9 wrote neither from Apple's HDR10+ sample or a Dolby Vision 8.1 stream, and the
+ * stream claims none whatever a build's encoder does with it. Every forced keyframe is an IDR frame
+ * (H.264, HEVC) or a key frame (AV1).
  */
 const encodeCpu = (codec: OutputCodec): OpImpl<"Encode"> => {
   const encoder = SOFTWARE_ENCODERS[codec];
