@@ -17,6 +17,7 @@ import {
   replan,
   VideoPlan,
 } from "./playback-decision.ts";
+import { hlsCommand } from "./transcode-command.ts";
 import { summaryOf } from "./transcode-diagnostics.ts";
 import { encodeDomain } from "./video-pipeline.ts";
 import { type CapabilityKey, type GpuDomain, ImplId, Op } from "./video-ops.ts";
@@ -193,6 +194,39 @@ const delivery = (plan: PlaybackPlan) => {
 /** What a replanned encode delivers, as a Quick Sync stream's plan. */
 const deliver = (video: Encoded) =>
   delivery(PlaybackPlan.Hls({ mode: "transcode-qsv", video, audio: AudioPlan.None() }));
+
+/** The video filters and encoder of the HDR10 source's run on `domain`, capped to 1080 lines. */
+const argsOn = (domain: "qsv" | "vaapi" | "cpu") => {
+  const video = encodedOf(
+    decide(
+      domain === "cpu" ? [] : [domain],
+      probe(SOURCES.hdr10),
+      domain === "cpu" ? hevcOnly : iphone,
+      CAPPED,
+    ),
+  );
+
+  const args = hlsCommand({
+    input: "/media/Film (2021).mkv",
+    sourceStart: 0,
+    from: 0,
+    videoIndex: 0,
+    videoCodec: "hevc",
+    video,
+    audio: AudioPlan.Copy({ index: 1 }),
+    audioCodec: "aac",
+    copiedAudioEnd: undefined,
+    segmentStarts: [0, 4],
+    files: {},
+    previousStart: undefined,
+    outputDirectory: "/tmp/stream/1",
+  }).args;
+
+  return {
+    filters: args[args.indexOf("-vf") + 1],
+    encoder: args.slice(args.indexOf("-c:v"), args.indexOf("-force_key_frames")),
+  };
+};
 
 describe("the HDR target", () => {
   it("keeps the source's HDR10 or HLG, as its base layer, on each GPU and the CPU", () => {
@@ -430,6 +464,83 @@ describe("the HDR target", () => {
         "mp4a.40.2",
       ]);
     }
+  });
+
+  it("renders each path's HDR chain: Main 10 at the stated level, in the source's colour, no tone map", () => {
+    expect(argsOn("qsv")).toStrictEqual({
+      filters:
+        "hwmap,format=qsv,vpp_qsv=w=1920:h=1080:format=p010:out_color_matrix=bt2020nc:out_color_primaries=bt2020:out_color_transfer=smpte2084,fps=source_fps",
+      encoder: [
+        "-c:v",
+        "hevc_qsv",
+        "-preset",
+        "veryfast",
+        "-profile:v",
+        "main10",
+        "-tier",
+        "main",
+        "-level",
+        "40",
+        "-b:v",
+        "6000000",
+        "-maxrate",
+        "6000000",
+        "-bufsize",
+        "12000000",
+        "-forced_idr",
+        "1",
+        "-tag:v",
+        "hvc1",
+      ],
+    });
+    expect(argsOn("vaapi")).toStrictEqual({
+      filters: "scale_vaapi=w=1920:h=1080:format=p010",
+      encoder: [
+        "-c:v",
+        "hevc_vaapi",
+        "-profile:v",
+        "main10",
+        "-level",
+        "120",
+        "-b:v",
+        "6000000",
+        "-maxrate",
+        "6000000",
+        "-bufsize",
+        "12000000",
+        "-tag:v",
+        "hvc1",
+      ],
+    });
+    expect(argsOn("cpu")).toStrictEqual({
+      filters: [
+        "scale=1920:1080:flags=bicubic",
+        "format=yuv420p10le",
+        "sidedata=mode=delete:type=DYNAMIC_HDR_PLUS",
+        "sidedata=mode=delete:type=DOVI_METADATA",
+        "sidedata=mode=delete:type=DOVI_RPU_BUFFER",
+      ].join(","),
+      encoder: [
+        "-c:v",
+        "libx265",
+        "-preset",
+        "superfast",
+        "-profile:v",
+        "main10",
+        "-crf",
+        "23",
+        "-maxrate",
+        "6000000",
+        "-bufsize",
+        "12000000",
+        "-forced-idr",
+        "1",
+        "-x265-params",
+        "log-level=error:open-gop=0:level-idc=40",
+        "-tag:v",
+        "hvc1",
+      ],
+    });
   });
 
   it("is served as a multivariant playlist of one variant that states its range", () => {

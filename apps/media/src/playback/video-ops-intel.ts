@@ -718,7 +718,10 @@ const NO_LEVEL = (): ReadonlyArray<string> => [];
 
 /**
  * Quick Sync's encoders; `forced_idr` makes each forced keyframe an IDR frame. oneVPL takes HEVC's
- * and AV1's level as its tenths (21 for 2.1).
+ * and AV1's level as its tenths (21 for 2.1). `hevc_qsv` writes the High tier at any level of 4 or
+ * more unless told the Main tier, under ffmpeg 7.1 and 9 alike (1080p HDR10 at level 4.0 came out
+ * `hvc1.2.4.H120`), so an HDR encode, whose level the multivariant playlist names in the Main tier
+ * (`hevcCodecString`), states it.
  */
 const encodeQsv = encodesOn("qsv", {
   h264: {
@@ -730,7 +733,13 @@ const encodeQsv = encodesOn("qsv", {
   hevc: {
     name: "hevc_qsv",
     constraints: "90",
-    before: (depth) => ["-preset", "veryfast", "-profile:v", hevcProfile(depth)],
+    before: (depth) => [
+      "-preset",
+      "veryfast",
+      "-profile:v",
+      hevcProfile(depth),
+      ...(depth > 8 ? ["-tier", "main"] : []),
+    ],
     after: ["-forced_idr", "1"],
     level: (level) => ["-level", String(level.tenths)],
   },
