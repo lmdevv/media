@@ -154,6 +154,34 @@ const startResult = v.object({
               v.literal("unknown"),
             ),
           ),
+          colour: v.optional(
+            v.object({
+              transfer: v.optional(v.string()),
+              primaries: v.optional(v.string()),
+              matrix: v.optional(v.string()),
+              range: v.optional(v.union(v.literal("limited"), v.literal("full"))),
+              chromaLocation: v.optional(v.string()),
+              mastering: v.optional(
+                v.object({
+                  minLuminance: v.number(),
+                  maxLuminance: v.number(),
+                  primaries: v.optional(
+                    v.object({
+                      red: v.object({ x: v.number(), y: v.number() }),
+                      green: v.object({ x: v.number(), y: v.number() }),
+                      blue: v.object({ x: v.number(), y: v.number() }),
+                      whitePoint: v.object({ x: v.number(), y: v.number() }),
+                    }),
+                  ),
+                }),
+              ),
+              contentLight: v.optional(v.object({ maxCll: v.number(), maxFall: v.number() })),
+            }),
+          ),
+          dolbyVision: v.optional(
+            v.object({ profile: v.number(), level: v.number(), compatibility: v.number() }),
+          ),
+          dolbyVisionRpu: v.optional(v.literal(true)),
         }),
       ),
       audio: v.array(

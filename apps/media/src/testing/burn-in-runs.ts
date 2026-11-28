@@ -10,7 +10,7 @@ import * as MediaTools from "../media/media-tools.ts";
 import { AudioPlan, VideoPlan } from "../playback/playback-decision.ts";
 import { hlsCommand } from "../playback/transcode-command.ts";
 import { candidateKeys, type DomainBinding, planVideo } from "../playback/video-pipeline.ts";
-import { type GpuDomain, Op, sdrTarget, type Size } from "../playback/video-ops.ts";
+import { type GpuDomain, Op, SDR_BT709, sdrTarget, type Size } from "../playback/video-ops.ts";
 
 /** The render node a GPU path runs on. */
 const DEVICE = process.env["QSV_DEVICE"] ?? "/dev/dri/renderD128";
@@ -29,7 +29,7 @@ export const burnPlan = (
     codec: "h264",
     pixelFormat: "yuv420p",
     depth: 8,
-    colour: "sdr",
+    colour: SDR_BT709,
     scan: "progressive",
     ...size,
   } as const;
@@ -48,7 +48,7 @@ export const burnPlan = (
         frame: {
           memory: "cpu",
           device: undefined,
-          colour: "sdr",
+          colour: SDR_BT709,
           depth: 8,
           pixelFormat: "pal8",
           scan: "progressive",

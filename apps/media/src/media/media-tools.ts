@@ -71,8 +71,9 @@ export interface Interface {
     options?: RunOptions,
   ) => Effect.Effect<string, MediaToolFailed>;
   /**
-   * Runs ffmpeg to completion and returns the start of what it logged to standard error, paths
-   * replaced, such as the driver a hardware device opened with; times out as `ffprobe` does.
+   * Runs ffmpeg to completion and returns the start of what it logged to standard error (16 KiB),
+   * paths replaced, such as the driver a hardware device opened with or the Vulkan device it picked;
+   * times out as `ffprobe` does.
    */
   readonly ffmpegLog: (
     args: ReadonlyArray<string>,
@@ -103,6 +104,12 @@ export class Service extends Context.Service<Service, Interface>()("@media/serve
 const STDERR_TAIL = 4096;
 
 const STDERR_HEAD = 2048;
+
+/**
+ * How much of standard error's start `ffmpegLog` returns: enough for a verbose log of opening
+ * VA-API, Quick Sync, and a Vulkan device derived from them, as far as the Vulkan device it picked.
+ */
+const LOG_HEAD = 16_384;
 
 /**
  * Starts a tool so it dies with the server, even by SIGKILL. util-linux `setpriv` sets the
@@ -167,6 +174,7 @@ const make = Effect.gen(function* () {
     args: ReadonlyArray<string>,
     background: boolean = false,
     piped: { readonly onStdout: ((text: string) => void) | undefined } | null = null,
+    headBytes: number = STDERR_HEAD,
   ) {
     const failed = (
       exitCode: number | null,
@@ -182,7 +190,7 @@ const make = Effect.gen(function* () {
       env,
       background,
       stderrTail: STDERR_TAIL,
-      stderrHead: STDERR_HEAD,
+      stderrHead: headBytes,
       stderrRedactions: pathsIn(args),
       stopSignal: "SIGKILL",
       forceKillAfter: "2 seconds",
@@ -244,7 +252,14 @@ const make = Effect.gen(function* () {
       args: ReadonlyArray<string>,
       options: RunOptions = {},
     ) {
-      const running = yield* spawn(tool, args, background);
+      const running = yield* spawn(
+        tool,
+        args,
+        background,
+        null,
+        read === "stderr" ? LOG_HEAD : STDERR_HEAD,
+      );
+
       const timeout = options.timeout ?? (background ? undefined : config.probeTimeout);
 
       const finished =

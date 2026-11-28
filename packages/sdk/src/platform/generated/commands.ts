@@ -3014,6 +3014,15 @@ const movies_files_list = query({
           videoProfile: Schema.Union([Schema.String, Schema.Null]),
           videoLevel: Schema.Union([Schema.Finite, Schema.Null]),
           videoBitDepth: Schema.Union([Schema.Finite, Schema.Null]),
+          dolbyVision: Schema.optionalKey(
+            Schema.Struct({
+              profile: Schema.Finite,
+              level: Schema.Finite,
+              compatibility: Schema.Finite,
+            }),
+          ),
+          dolbyVisionRpu: Schema.optionalKey(Schema.Literal(true)),
+          videoTransfer: Schema.optionalKey(Schema.String),
           audioCodec: Schema.Union([Schema.String, Schema.Null]),
           audioChannels: Schema.Union([Schema.Finite, Schema.Null]),
           audioTracks: Schema.Finite,
@@ -3722,6 +3731,42 @@ const movies_play_start = mutation({
                 Schema.Literal("unknown"),
               ]),
             ),
+            colour: Schema.optionalKey(
+              Schema.Struct({
+                transfer: Schema.optionalKey(Schema.String),
+                primaries: Schema.optionalKey(Schema.String),
+                matrix: Schema.optionalKey(Schema.String),
+                range: Schema.optionalKey(
+                  Schema.Union([Schema.Literal("limited"), Schema.Literal("full")]),
+                ),
+                chromaLocation: Schema.optionalKey(Schema.String),
+                mastering: Schema.optionalKey(
+                  Schema.Struct({
+                    minLuminance: Schema.Finite,
+                    maxLuminance: Schema.Finite,
+                    primaries: Schema.optionalKey(
+                      Schema.Struct({
+                        red: Schema.Struct({ x: Schema.Finite, y: Schema.Finite }),
+                        green: Schema.Struct({ x: Schema.Finite, y: Schema.Finite }),
+                        blue: Schema.Struct({ x: Schema.Finite, y: Schema.Finite }),
+                        whitePoint: Schema.Struct({ x: Schema.Finite, y: Schema.Finite }),
+                      }),
+                    ),
+                  }),
+                ),
+                contentLight: Schema.optionalKey(
+                  Schema.Struct({ maxCll: Schema.Finite, maxFall: Schema.Finite }),
+                ),
+              }),
+            ),
+            dolbyVision: Schema.optionalKey(
+              Schema.Struct({
+                profile: Schema.Finite,
+                level: Schema.Finite,
+                compatibility: Schema.Finite,
+              }),
+            ),
+            dolbyVisionRpu: Schema.optionalKey(Schema.Literal(true)),
           }),
         ),
         audio: Schema.Array(
@@ -3894,6 +3939,15 @@ const movies_playback_get = query({
         videoProfile: Schema.Union([Schema.String, Schema.Null]),
         videoLevel: Schema.Union([Schema.Finite, Schema.Null]),
         videoBitDepth: Schema.Union([Schema.Finite, Schema.Null]),
+        dolbyVision: Schema.optionalKey(
+          Schema.Struct({
+            profile: Schema.Finite,
+            level: Schema.Finite,
+            compatibility: Schema.Finite,
+          }),
+        ),
+        dolbyVisionRpu: Schema.optionalKey(Schema.Literal(true)),
+        videoTransfer: Schema.optionalKey(Schema.String),
         audioCodec: Schema.Union([Schema.String, Schema.Null]),
         audioChannels: Schema.Union([Schema.Finite, Schema.Null]),
         audioTracks: Schema.Finite,
@@ -4228,6 +4282,42 @@ const movies_titles_get = query({
                   Schema.Literal("unknown"),
                 ]),
               ),
+              colour: Schema.optionalKey(
+                Schema.Struct({
+                  transfer: Schema.optionalKey(Schema.String),
+                  primaries: Schema.optionalKey(Schema.String),
+                  matrix: Schema.optionalKey(Schema.String),
+                  range: Schema.optionalKey(
+                    Schema.Union([Schema.Literal("limited"), Schema.Literal("full")]),
+                  ),
+                  chromaLocation: Schema.optionalKey(Schema.String),
+                  mastering: Schema.optionalKey(
+                    Schema.Struct({
+                      minLuminance: Schema.Finite,
+                      maxLuminance: Schema.Finite,
+                      primaries: Schema.optionalKey(
+                        Schema.Struct({
+                          red: Schema.Struct({ x: Schema.Finite, y: Schema.Finite }),
+                          green: Schema.Struct({ x: Schema.Finite, y: Schema.Finite }),
+                          blue: Schema.Struct({ x: Schema.Finite, y: Schema.Finite }),
+                          whitePoint: Schema.Struct({ x: Schema.Finite, y: Schema.Finite }),
+                        }),
+                      ),
+                    }),
+                  ),
+                  contentLight: Schema.optionalKey(
+                    Schema.Struct({ maxCll: Schema.Finite, maxFall: Schema.Finite }),
+                  ),
+                }),
+              ),
+              dolbyVision: Schema.optionalKey(
+                Schema.Struct({
+                  profile: Schema.Finite,
+                  level: Schema.Finite,
+                  compatibility: Schema.Finite,
+                }),
+              ),
+              dolbyVisionRpu: Schema.optionalKey(Schema.Literal(true)),
             }),
           ),
           audio: Schema.Array(
@@ -4309,6 +4399,15 @@ const movies_titles_get = query({
         videoProfile: Schema.Union([Schema.String, Schema.Null]),
         videoLevel: Schema.Union([Schema.Finite, Schema.Null]),
         videoBitDepth: Schema.Union([Schema.Finite, Schema.Null]),
+        dolbyVision: Schema.optionalKey(
+          Schema.Struct({
+            profile: Schema.Finite,
+            level: Schema.Finite,
+            compatibility: Schema.Finite,
+          }),
+        ),
+        dolbyVisionRpu: Schema.optionalKey(Schema.Literal(true)),
+        videoTransfer: Schema.optionalKey(Schema.String),
         audioCodec: Schema.Union([Schema.String, Schema.Null]),
         audioChannels: Schema.Union([Schema.Finite, Schema.Null]),
         audioTracks: Schema.Finite,
@@ -4409,6 +4508,15 @@ const movies_titles_home = query({
             videoProfile: Schema.Union([Schema.String, Schema.Null]),
             videoLevel: Schema.Union([Schema.Finite, Schema.Null]),
             videoBitDepth: Schema.Union([Schema.Finite, Schema.Null]),
+            dolbyVision: Schema.optionalKey(
+              Schema.Struct({
+                profile: Schema.Finite,
+                level: Schema.Finite,
+                compatibility: Schema.Finite,
+              }),
+            ),
+            dolbyVisionRpu: Schema.optionalKey(Schema.Literal(true)),
+            videoTransfer: Schema.optionalKey(Schema.String),
             audioCodec: Schema.Union([Schema.String, Schema.Null]),
             audioChannels: Schema.Union([Schema.Finite, Schema.Null]),
             audioTracks: Schema.Finite,
@@ -4754,6 +4862,15 @@ const movies_titles_versions = query({
       videoProfile: Schema.Union([Schema.String, Schema.Null]),
       videoLevel: Schema.Union([Schema.Finite, Schema.Null]),
       videoBitDepth: Schema.Union([Schema.Finite, Schema.Null]),
+      dolbyVision: Schema.optionalKey(
+        Schema.Struct({
+          profile: Schema.Finite,
+          level: Schema.Finite,
+          compatibility: Schema.Finite,
+        }),
+      ),
+      dolbyVisionRpu: Schema.optionalKey(Schema.Literal(true)),
+      videoTransfer: Schema.optionalKey(Schema.String),
       audioCodec: Schema.Union([Schema.String, Schema.Null]),
       audioChannels: Schema.Union([Schema.Finite, Schema.Null]),
       audioTracks: Schema.Finite,

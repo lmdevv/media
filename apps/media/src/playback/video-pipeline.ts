@@ -13,6 +13,7 @@ import { Data, Result } from "effect";
 import type { VideoStream } from "../media/media-probe.ts";
 import { fitLevel, statedLevel } from "./output-levels.ts";
 import { PROBE_CLIPS } from "./probe-clips.ts";
+import { sourceColour } from "./source-colours.ts";
 import { CPU_ROWS } from "./video-ops-cpu.ts";
 import { INTEL_ROWS, QSV, VAAPI } from "./video-ops-intel.ts";
 import {
@@ -24,10 +25,12 @@ import {
   type ClipName,
   type Domain,
   type DomainSpec,
+  dynamicRangeOf,
   type Frame,
   type GpuDomain,
   ImplId,
   implOf,
+  keepsUp,
   Op,
   type OpName,
   type OutputCodec,
@@ -71,6 +74,8 @@ export interface Step {
   readonly op: Op;
   /** The domain the row runs in. */
   readonly on: Domain;
+  /** The render node of the domain it runs in; none on the CPU. */
+  readonly device: string | undefined;
   /** The inventory key of what this step exercises. */
   readonly capability: CapabilityKey;
   readonly needs: ReadonlyArray<BuildFeature>;
@@ -188,10 +193,27 @@ export interface VideoOutput extends Size {
   readonly dynamicRange: DynamicRange;
 }
 
-/** A chosen pipeline and what it produces. */
+/**
+ * Why a step runs a fallback row (`Row.fallbackFor`) rather than the row it stands in for:
+ * `excluded`, that row is set aside for this stream; `unsuited`, it does not take the step's
+ * frames; `unproven`, it has no evidence on a bound device; `slower`, it does not keep up with the
+ * source at the step's output height (`keepsUp`).
+ */
+type InsteadReason = "excluded" | "unsuited" | "unproven" | "slower";
+
+/** A step of a chosen pipeline that runs a fallback row, by its place, and why. */
+export interface Instead {
+  readonly step: number;
+  /** The row the step's row stands in for. */
+  readonly of: ImplId;
+  readonly reason: InsteadReason;
+}
+
+/** A chosen pipeline, what it produces, and the steps that run a fallback row. */
 export interface PlannedVideo {
   readonly pipeline: VideoPipeline;
   readonly output: VideoOutput;
+  readonly instead: ReadonlyArray<Instead>;
 }
 
 /**
@@ -226,12 +248,15 @@ const scanOf = (video: VideoStream): Scan => {
     : "progressive";
 };
 
-/** The source of `video` as rows see it; the one mapping from ffprobe. */
+/**
+ * The source of `video` as rows see it; the one mapping from ffprobe. Its colour is what the table
+ * of source colours decides its decoded frames carry (`source-colours.ts`).
+ */
 export const sourceOf = (video: VideoStream): SourceVideo => ({
   codec: video.codec,
   pixelFormat: video.pixelFormat ?? (video.bitDepth > 8 ? "yuv420p10le" : "yuv420p"),
   depth: video.bitDepth,
-  colour: video.dynamicRange,
+  colour: sourceColour(video),
   scan: scanOf(video),
   width: video.width,
   height: video.height,
@@ -316,6 +341,7 @@ const build = (
       impl: entry.id,
       op,
       on: entry.on,
+      device: entry.on === "cpu" ? undefined : deviceOf(entry.on),
       capability: key,
       needs,
       input: frame,
@@ -519,23 +545,102 @@ const candidates = (
   );
 };
 
+/** Whether `entry` can do `step`'s operation on its frames: its key verified, not set aside. */
+const canDo = (entry: Row, step: Step, snapshot: CapabilitySnapshot): boolean => {
+  const use = entry.use(step.op, step.input);
+
+  if (use === undefined || snapshot.excluded.has(entry.id)) return false;
+
+  const bound =
+    entry.on === "cpu" || snapshot.domains.some((binding) => binding.domain === entry.on);
+
+  return bound && snapshot.verified.has(capabilityKey(entry.id, use.variant));
+};
+
+/**
+ * Why `step`, run by a fallback row, does not run the row it stands in for (`InsteadReason`); none
+ * for a step whose row stands in for nothing.
+ */
+const insteadOf = (
+  step: Step,
+  snapshot: CapabilitySnapshot,
+  frameRate: number | undefined,
+): Omit<Instead, "step"> | undefined => {
+  const preferredId = rowById.get(step.impl)?.fallbackFor;
+  const preferred = preferredId === undefined ? undefined : rowById.get(preferredId);
+
+  if (preferredId === undefined || preferred === undefined) return undefined;
+
+  if (snapshot.excluded.has(preferredId)) return { of: preferredId, reason: "excluded" };
+
+  if (preferred.use(step.op, step.input) === undefined) {
+    return { of: preferredId, reason: "unsuited" };
+  }
+
+  if (!canDo(preferred, step, snapshot)) return { of: preferredId, reason: "unproven" };
+
+  return keepsUp(preferred, step.output.height, frameRate)
+    ? undefined
+    : { of: preferredId, reason: "slower" };
+};
+
+/** The rows that stand in for `id` (`Row.fallbackFor`). */
+const fallbacksOf = (id: ImplId): ReadonlyArray<Row> =>
+  VIDEO_OPS.filter((entry) => entry.fallbackFor === id);
+
+/**
+ * Whether `step` runs a row other than the one the table prefers for it: a fallback row
+ * (`Row.fallbackFor`) where the row it stands in for can do the step and keeps up with the source
+ * at its output's height (`keepsUp`), or a preferred row that does not keep up where a fallback can
+ * do the step.
+ */
+const misplaced = (
+  step: Step,
+  snapshot: CapabilitySnapshot,
+  frameRate: number | undefined,
+): boolean => {
+  const entry = rowById.get(step.impl);
+
+  if (entry === undefined) return false;
+  const preferred = entry.fallbackFor === undefined ? undefined : rowById.get(entry.fallbackFor);
+
+  if (preferred !== undefined) {
+    return canDo(preferred, step, snapshot) && keepsUp(preferred, step.output.height, frameRate);
+  }
+
+  return (
+    !keepsUp(entry, step.output.height, frameRate) &&
+    fallbacksOf(entry.id).some((fallback) => canDo(fallback, step, snapshot))
+  );
+};
+
 /**
  * How much a chain costs, compared in order: an encode on the CPU, the target's place in the
- * intent's order, CPU work, moves between memories, then the snapshot's domain preference.
+ * intent's order, rows run where the table prefers another (`misplaced`), CPU work, moves between
+ * memories with the moves rows make inside themselves (`Row.transfers`), then the snapshot's domain
+ * preference.
  */
 const costOf = (
   steps: ReadonlyArray<Step>,
   candidate: Candidate,
   snapshot: CapabilitySnapshot,
+  frameRate: number | undefined,
 ): ReadonlyArray<number> => {
   const gpu = steps.find((step) => step.on !== "cpu")?.on;
   const rank = snapshot.domains.findIndex((binding) => binding.domain === gpu);
 
+  const moves = steps.reduce(
+    (total, step) =>
+      total + (Op.$is("Move")(step.op) ? 1 : 0) + (rowById.get(step.impl)?.transfers?.count ?? 0),
+    0,
+  );
+
   return [
     candidate.encode.on === "cpu" ? 1 : 0,
     candidate.rank,
+    steps.filter((step) => misplaced(step, snapshot, frameRate)).length,
     steps.filter((step) => step.on === "cpu" && !Op.$is("Move")(step.op)).length,
-    steps.filter((step) => Op.$is("Move")(step.op)).length,
+    moves,
     rank === -1 ? snapshot.domains.length : rank,
   ];
 };
@@ -571,7 +676,7 @@ const cheapest = (
     if (Result.isFailure(built)) {
       first ??= built.failure;
     } else {
-      const cost = costOf(built.success, candidate, snapshot);
+      const cost = costOf(built.success, candidate, snapshot, intent.frameRate);
 
       if (best === undefined || cheaper(cost, best.cost)) {
         best = { candidate, steps: built.success, cost };
@@ -624,8 +729,13 @@ export const planVideo = (
       width: last.output.width,
       height: last.output.height,
       bitrate: last.op.bitrate,
-      dynamicRange: last.output.colour,
+      dynamicRange: dynamicRangeOf(last.output.colour),
     },
+    instead: pipeline.success.steps.flatMap((step, index) => {
+      const why = insteadOf(step, snapshot, intent.frameRate);
+
+      return why === undefined ? [] : [{ step: index, ...why }];
+    }),
   });
 };
 
@@ -845,7 +955,7 @@ const COMMON_OUTPUT: OutputCodec = "h264";
 const common = (step: Step): boolean =>
   step.input.depth === 8 &&
   step.output.depth === 8 &&
-  step.output.colour === "sdr" &&
+  step.output.colour.signal === "sdr" &&
   Op.$match(step.op, {
     Decode: ({ codec }) => COMMON_CODECS.has(codec),
     Deinterlace: () => false,

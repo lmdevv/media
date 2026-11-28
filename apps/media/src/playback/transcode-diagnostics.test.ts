@@ -21,6 +21,7 @@ import {
   type VideoIntent,
 } from "./video-pipeline.ts";
 import { type Burn, capabilityKey, ImplId, Op, sdrTarget, type SourceVideo } from "./video-ops.ts";
+import { SDR_BT709 } from "../testing/colours.ts";
 
 const AT = 1_760_000_000_000;
 
@@ -94,7 +95,7 @@ describe("the stage summary", () => {
       codec: "mpeg2video",
       pixelFormat: "yuv420p",
       depth: 8,
-      colour: "sdr",
+      colour: SDR_BT709,
       scan: "interlaced",
       width: 720,
       height: 576,
@@ -126,7 +127,7 @@ describe("the stage summary", () => {
 
       if (Result.isFailure(planned)) throw new Error(JSON.stringify(planned.failure));
 
-      return summaryOf(VideoPlan.Encode({ intent, ...planned.success }), [], 1).stages;
+      return summaryOf(VideoPlan.Encode({ intent, ...planned.success }), [], 1, undefined).stages;
     };
 
     assert.deepStrictEqual(stagesWith([]).slice(0, 2), [
@@ -145,7 +146,7 @@ describe("the stage summary", () => {
       codec: "h264",
       pixelFormat: "yuv420p",
       depth: 8,
-      colour: "sdr",
+      colour: SDR_BT709,
       scan: "progressive",
       width: 1920,
       height: 1080,
@@ -159,7 +160,7 @@ describe("the stage summary", () => {
         frame: {
           memory: "cpu",
           device: undefined,
-          colour: "sdr",
+          colour: SDR_BT709,
           depth: 8,
           pixelFormat: "pal8",
           scan: "progressive",
@@ -197,7 +198,7 @@ describe("the stage summary", () => {
 
       if (Result.isFailure(planned)) throw new Error(JSON.stringify(planned.failure));
 
-      return summaryOf(VideoPlan.Encode({ intent, ...planned.success }), [], 1).stages;
+      return summaryOf(VideoPlan.Encode({ intent, ...planned.success }), [], 1, undefined).stages;
     };
 
     assert.deepStrictEqual(stagesOf(image, [])[2], {

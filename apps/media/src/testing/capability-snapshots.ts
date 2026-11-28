@@ -11,6 +11,7 @@ import {
   type GpuDomain,
   Op,
   OUTPUT_CODECS,
+  SDR_BT709,
   sdrTarget,
 } from "../playback/video-ops.ts";
 
@@ -49,7 +50,7 @@ export const verifiedFor = (
         frame: {
           memory: "cpu",
           device: undefined,
-          colour: "sdr",
+          colour: SDR_BT709,
           depth: 8,
           pixelFormat: "pal8",
           scan: "progressive",

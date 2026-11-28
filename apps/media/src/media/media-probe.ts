@@ -1,17 +1,18 @@
 import { extname } from "node:path";
 
 import { BITMAP_SUBTITLE_FORMATS, Container, DynamicRange } from "@media/contracts/media-playback";
-import { FieldOrder } from "@media/contracts/models/catalog";
-import { Effect, Schema } from "effect";
+import { DolbyVision, FieldOrder, VideoColour } from "@media/contracts/models/catalog";
+import { Effect, Schema, type Types } from "effect";
 
 import * as MediaTools from "./media-tools.ts";
 
 /**
  * Which revision of this reader a probe comes from. A probe stored by an older one lacks what this
- * one reads (field order; the peak frame rate, where it kept the average), so a scan reads its
- * file again even when the file is unchanged.
+ * one reads (field order; the peak frame rate, where it kept the average; the colour, HDR static
+ * metadata, HDR10+, and the Dolby Vision configuration), so a scan reads its file again even when
+ * the file is unchanged.
  */
-export const PROBE_REVISION = 2;
+export const PROBE_REVISION = 3;
 
 /** The main video stream of a file. */
 export const VideoStream = Schema.Struct({
@@ -39,6 +40,24 @@ export const VideoStream = Schema.Struct({
    * the next scan replaces.
    */
   fieldOrder: Schema.optional(FieldOrder),
+  /**
+   * The stream's colour: transfer, primaries, matrix, range, chroma siting, and HDR10 static
+   * metadata, from the container and the first picture. Absent in a probe stored before colours
+   * were read, which the next scan replaces.
+   */
+  colour: Schema.optional(VideoColour),
+  /**
+   * HDR10+: the first picture carries SMPTE 2094-40 dynamic metadata over an HDR10 stream, which
+   * `dynamicRange` names `hdr10`.
+   */
+  hdr10Plus: Schema.optional(Schema.Literal(true)),
+  /** A Dolby Vision stream's profile, level, and base layer compatibility id. */
+  dolbyVision: Schema.optional(DolbyVision),
+  /**
+   * The first picture carries a Dolby Vision RPU, which says what profile 5's samples mean. Read
+   * from the first picture alone: a file whose later pictures lose it cannot be told at scan time.
+   */
+  dolbyVisionRpu: Schema.optional(Schema.Literal(true)),
 });
 
 /** The main video stream of a file. */
@@ -117,6 +136,8 @@ class MediaProbeInvalid extends Schema.TaggedError<
   }
 }
 
+const invalid = (cause: unknown) => new MediaProbeInvalid({ cause });
+
 const Disposition = Schema.Struct({
   default: Schema.optionalKey(Schema.Int),
   forced: Schema.optionalKey(Schema.Int),
@@ -131,6 +152,43 @@ const Tags = Schema.Struct({
   DURATION: Schema.optionalKey(Schema.String),
 });
 
+/**
+ * One item of a stream's or a frame's side data: its type, and the fields this reader takes from
+ * the mastering display, content light level, and Dolby Vision configuration items.
+ */
+const SideData = Schema.Struct({
+  side_data_type: Schema.optionalKey(Schema.String),
+  red_x: Schema.optionalKey(Schema.String),
+  red_y: Schema.optionalKey(Schema.String),
+  green_x: Schema.optionalKey(Schema.String),
+  green_y: Schema.optionalKey(Schema.String),
+  blue_x: Schema.optionalKey(Schema.String),
+  blue_y: Schema.optionalKey(Schema.String),
+  white_point_x: Schema.optionalKey(Schema.String),
+  white_point_y: Schema.optionalKey(Schema.String),
+  min_luminance: Schema.optionalKey(Schema.String),
+  max_luminance: Schema.optionalKey(Schema.String),
+  max_content: Schema.optionalKey(Schema.Int),
+  max_average: Schema.optionalKey(Schema.Int),
+  dv_profile: Schema.optionalKey(Schema.Int),
+  dv_level: Schema.optionalKey(Schema.Int),
+  dv_bl_signal_compatibility_id: Schema.optionalKey(Schema.Int),
+});
+
+type SideData = typeof SideData.Type;
+
+/** The picture stream's first decoded picture, as `-read_intervals %+#1` reads it. */
+const FfprobeFrame = Schema.Struct({
+  stream_index: Schema.optionalKey(Schema.Int),
+  color_transfer: Schema.optionalKey(Schema.String),
+  color_primaries: Schema.optionalKey(Schema.String),
+  color_space: Schema.optionalKey(Schema.String),
+  color_range: Schema.optionalKey(Schema.String),
+  side_data_list: Schema.optionalKey(Schema.Array(SideData)),
+});
+
+type FfprobeFrame = typeof FfprobeFrame.Type;
+
 const FfprobeStream = Schema.Struct({
   index: Schema.Int,
   codec_type: Schema.optionalKey(Schema.String),
@@ -144,10 +202,12 @@ const FfprobeStream = Schema.Struct({
   avg_frame_rate: Schema.optionalKey(Schema.String),
   r_frame_rate: Schema.optionalKey(Schema.String),
   color_transfer: Schema.optionalKey(Schema.String),
+  color_primaries: Schema.optionalKey(Schema.String),
+  color_space: Schema.optionalKey(Schema.String),
+  color_range: Schema.optionalKey(Schema.String),
+  chroma_location: Schema.optionalKey(Schema.String),
   field_order: Schema.optionalKey(Schema.String),
-  side_data_list: Schema.optionalKey(
-    Schema.Array(Schema.Struct({ side_data_type: Schema.optionalKey(Schema.String) })),
-  ),
+  side_data_list: Schema.optionalKey(Schema.Array(SideData)),
   channels: Schema.optionalKey(Schema.Int),
   channel_layout: Schema.optionalKey(Schema.String),
   sample_rate: Schema.optionalKey(Schema.String),
@@ -176,9 +236,16 @@ const FfprobeOutput = Schema.Struct({
   }),
   streams: Schema.Array(FfprobeStream),
   chapters: Schema.optionalKey(Schema.Array(FfprobeChapter)),
+  frames: Schema.optionalKey(Schema.Array(FfprobeFrame)),
 });
 
+type FfprobeOutput = typeof FfprobeOutput.Type;
+
 const decodeFfprobeOutput = Schema.decodeUnknownEffect(Schema.fromJsonString(FfprobeOutput));
+
+const decodeFfprobeFrames = Schema.decodeUnknownEffect(
+  Schema.fromJsonString(Schema.Struct({ frames: Schema.optionalKey(Schema.Array(FfprobeFrame)) })),
+);
 
 const finiteOr = (text: string | undefined, fallback: number): number => {
   const value = text === undefined ? Number.NaN : Number(text);
@@ -230,16 +297,136 @@ const bitDepthOf = (stream: FfprobeStream): number => {
   return match?.[1] === undefined ? 8 : Number(match[1]);
 };
 
-const dynamicRangeOf = (stream: FfprobeStream): DynamicRange => {
-  const dolbyVision = (stream.side_data_list ?? []).some((data) =>
-    (data.side_data_type ?? "").toLowerCase().includes("dovi"),
-  );
+/** Side data items of `type`, matched as ffprobe names them, in any case. */
+const ofKind = (items: ReadonlyArray<SideData>, type: string): SideData | undefined =>
+  items.find((item) => (item.side_data_type ?? "").toLowerCase().includes(type));
 
-  if (dolbyVision) return "dolby-vision";
+/** Whether the first picture carries a Dolby Vision RPU, raw or as the metadata parsed from it. */
+const carriesRpu = (frame: FfprobeFrame | undefined): boolean =>
+  ofKind(frame?.side_data_list ?? [], "dolby vision") !== undefined;
 
-  if (stream.color_transfer === "smpte2084") return "hdr10";
+/**
+ * The stream's dynamic range: Dolby Vision for a configuration record or an RPU in the first
+ * picture (a stream with no record still needs its RPU read), else by transfer.
+ */
+const dynamicRangeOf = (
+  stream: FfprobeStream,
+  frame: FfprobeFrame | undefined,
+  transfer: string | undefined,
+): DynamicRange => {
+  if (ofKind(stream.side_data_list ?? [], "dovi") !== undefined || carriesRpu(frame)) {
+    return "dolby-vision";
+  }
 
-  return stream.color_transfer === "arib-std-b67" ? "hlg" : "sdr";
+  if (transfer === "smpte2084") return "hdr10";
+
+  return transfer === "arib-std-b67" ? "hlg" : "sdr";
+};
+
+/** A rational ffprobe prints as `num/den`, or a plain number. */
+const rationalOf = (text: string | undefined): number | undefined => {
+  const [numerator = "", denominator = "1"] = (text ?? "").split("/");
+  const value = Number(numerator) / Number(denominator);
+
+  return Number.isFinite(value) ? value : undefined;
+};
+
+/** A colour property ffprobe states, without its words for none. */
+const stated = (value: string | undefined): string | undefined =>
+  value === undefined || value === "unknown" || value === "reserved" ? undefined : value;
+
+const RANGES: ReadonlyMap<string, "limited" | "full"> = new Map([
+  ["tv", "limited"],
+  ["mpeg", "limited"],
+  ["pc", "full"],
+  ["jpeg", "full"],
+]);
+
+/** A chromaticity from ffprobe's rationals, when both lie within the CIE 1931 diagram's bounds. */
+const chromaticityOf = (
+  x: string | undefined,
+  y: string | undefined,
+): { readonly x: number; readonly y: number } | undefined => {
+  const [cx, cy] = [rationalOf(x), rationalOf(y)];
+
+  return cx === undefined || cy === undefined || cx < 0 || cx > 1 || cy <= 0 || cy > 1
+    ? undefined
+    : { x: cx, y: cy };
+};
+
+type Mastering = NonNullable<VideoColour["mastering"]>;
+
+/**
+ * A mastering display's luminances, when they make sense (the minimum not negative and below the
+ * maximum), with its primaries and white point when the item gives all four.
+ */
+const masteringOf = (item: SideData | undefined): Mastering | undefined => {
+  const minLuminance = rationalOf(item?.min_luminance);
+  const maxLuminance = rationalOf(item?.max_luminance);
+
+  if (minLuminance === undefined || maxLuminance === undefined) return undefined;
+
+  if (minLuminance < 0 || maxLuminance <= minLuminance) return undefined;
+  const red = chromaticityOf(item?.red_x, item?.red_y);
+  const green = chromaticityOf(item?.green_x, item?.green_y);
+  const blue = chromaticityOf(item?.blue_x, item?.blue_y);
+  const whitePoint = chromaticityOf(item?.white_point_x, item?.white_point_y);
+
+  return red === undefined || green === undefined || blue === undefined || whitePoint === undefined
+    ? { minLuminance, maxLuminance }
+    : { minLuminance, maxLuminance, primaries: { red, green, blue, whitePoint } };
+};
+
+/**
+ * The stream's colour, from the stream's own tags and side data and its first picture's, which
+ * carry HEVC's mastering display and content light level SEI that MP4 keeps nowhere else. The
+ * JPEG-range layouts (`yuvj420p`) are full range whatever the tag says.
+ */
+const colourOf = (stream: FfprobeStream, frame: FfprobeFrame | undefined): VideoColour => {
+  const items = [...(stream.side_data_list ?? []), ...(frame?.side_data_list ?? [])];
+  const mastering = masteringOf(ofKind(items, "mastering display"));
+  const light = ofKind(items, "content light level");
+
+  const range = (stream.pix_fmt ?? "").startsWith("yuvj")
+    ? "full"
+    : RANGES.get(stated(stream.color_range) ?? stated(frame?.color_range) ?? "");
+
+  const transfer = stated(stream.color_transfer) ?? stated(frame?.color_transfer);
+  const primaries = stated(stream.color_primaries) ?? stated(frame?.color_primaries);
+  const matrix = stated(stream.color_space) ?? stated(frame?.color_space);
+  const chromaLocation = stated(stream.chroma_location);
+  const colour: Types.Mutable<VideoColour> = {};
+
+  if (transfer !== undefined) colour.transfer = transfer;
+
+  if (primaries !== undefined) colour.primaries = primaries;
+
+  if (matrix !== undefined) colour.matrix = matrix;
+
+  if (range !== undefined) colour.range = range;
+
+  if (chromaLocation !== undefined) colour.chromaLocation = chromaLocation;
+
+  if (mastering !== undefined) colour.mastering = mastering;
+
+  if (light?.max_content !== undefined && light.max_average !== undefined) {
+    colour.contentLight = { maxCll: light.max_content, maxFall: light.max_average };
+  }
+
+  return colour;
+};
+
+/** The Dolby Vision configuration record in the stream's side data. */
+const dolbyVisionOf = (stream: FfprobeStream): DolbyVision | undefined => {
+  const record = ofKind(stream.side_data_list ?? [], "dovi configuration");
+
+  return record?.dv_profile === undefined
+    ? undefined
+    : {
+        profile: record.dv_profile,
+        level: record.dv_level ?? 0,
+        compatibility: record.dv_bl_signal_compatibility_id ?? 0,
+      };
 };
 
 /**
@@ -282,10 +469,19 @@ const nonBlank = (value: string | undefined): string | undefined => {
   return trimmed === "" || trimmed === "unknown" ? undefined : trimmed;
 };
 
-const toVideo = (stream: FfprobeStream): VideoStream | undefined => {
+const toVideo = (
+  stream: FfprobeStream,
+  frame: FfprobeFrame | undefined,
+): VideoStream | undefined => {
   const frameRate = peakFrameRateOf(stream);
 
   if (stream.width === undefined || stream.height === undefined) return undefined;
+  const colour = colourOf(stream, frame);
+  const dynamicRange = dynamicRangeOf(stream, frame, colour.transfer);
+  const dolbyVision = dolbyVisionOf(stream);
+
+  const hdr10Plus =
+    dynamicRange === "hdr10" && ofKind(frame?.side_data_list ?? [], "2094-40") !== undefined;
 
   return {
     index: stream.index,
@@ -297,8 +493,12 @@ const toVideo = (stream: FfprobeStream): VideoStream | undefined => {
     width: stream.width,
     height: stream.height,
     frameRate,
-    dynamicRange: dynamicRangeOf(stream),
+    dynamicRange,
     fieldOrder: fieldOrderOf(stream),
+    colour,
+    hdr10Plus: hdr10Plus ? true : undefined,
+    dolbyVision,
+    dolbyVisionRpu: carriesRpu(frame) ? true : undefined,
   };
 };
 
@@ -380,23 +580,30 @@ const toChapters = (
     .toSorted((left, right) => left.startSeconds - right.startSeconds);
 
 /**
- * Translates ffprobe's `-show_format -show_streams -show_chapters` JSON for the file at `path` into a
- * `MediaProbe`. Cover art stored as a video stream is ignored.
+ * The stream that holds the film's picture: the first video stream with a size that is not cover
+ * art.
  */
-export const parseFfprobeJson = Effect.fn("MediaProbe.parse")(function* (
-  json: string,
-  path: string,
-) {
-  const output = yield* decodeFfprobeOutput(json).pipe(
-    Effect.mapError((cause) => new MediaProbeInvalid({ cause })),
+const pictureStream = (output: FfprobeOutput): FfprobeStream | undefined =>
+  output.streams.find(
+    (stream) =>
+      stream.codec_type === "video" &&
+      !flag(stream.disposition?.attached_pic) &&
+      stream.width !== undefined &&
+      stream.height !== undefined,
   );
 
+/** The probe of the file at `path` from ffprobe's decoded `output`. */
+const probeOf = (output: FfprobeOutput, path: string): MediaProbe => {
   const ofType = (type: string) => output.streams.filter((stream) => stream.codec_type === type);
+  const picture = pictureStream(output);
 
-  const video = ofType("video")
-    .filter((stream) => !flag(stream.disposition?.attached_pic))
-    .map(toVideo)
-    .find((stream) => stream !== undefined);
+  const video =
+    picture === undefined
+      ? undefined
+      : toVideo(
+          picture,
+          output.frames?.find((frame) => frame.stream_index === picture.index),
+        );
 
   const bitRate = Math.trunc(finiteOr(output.format.bit_rate, 0));
   const durationSeconds = finiteOr(output.format.duration, 0);
@@ -415,22 +622,78 @@ export const parseFfprobeJson = Effect.fn("MediaProbe.parse")(function* (
   };
 
   return probe;
+};
+
+/**
+ * Translates ffprobe's `-show_format -show_streams -show_chapters` JSON for the file at `path`, with
+ * the picture stream's first picture (`frames`, as `FRAME_ENTRIES` reads it), into a `MediaProbe`.
+ * Cover art stored as a video stream is ignored.
+ */
+export const parseFfprobeJson = Effect.fn("MediaProbe.parse")(function* (
+  json: string,
+  path: string,
+) {
+  const output = yield* decodeFfprobeOutput(json).pipe(Effect.mapError(invalid));
+
+  return probeOf(output, path);
 });
 
-/** Probes the file at `path` with ffprobe. */
+/**
+ * What the probe reads from the picture stream's first decoded picture: its colour tags, and the
+ * types and values of the side data the colour needs, since HEVC carries mastering display, content
+ * light level, and HDR10+ metadata in SEI messages that MP4 keeps nowhere else.
+ */
+const FRAME_ENTRIES = [
+  "frame=stream_index,color_range,color_space,color_primaries,color_transfer",
+  "frame_side_data=side_data_type,red_x,red_y,green_x,green_y,blue_x,blue_y,white_point_x,white_point_y,min_luminance,max_luminance,max_content,max_average",
+].join(":");
+
+/**
+ * Probes the file at `path` with ffprobe: its format, streams, and chapters, and the first picture
+ * of its first video stream that is not cover art (`V:0`, as `pictureStream` picks it) with its
+ * `FRAME_ENTRIES`, in two runs side by side. One run cannot do both: `-read_intervals %+#1` stops
+ * after the first packet of the streams a run reads, so a file whose first packet is audio would
+ * give no picture, and `-select_streams` would hide the other streams. Side by side, a probe on a
+ * slow mount takes as long as one run: on a source answering each read 40 ms late, 0.95 s for the
+ * streams, 0.95 s for the picture, 0.95 s for both. The picture run reads the header and then
+ * packets up to the stream's first, which the tools' timeout bounds for a file whose video starts
+ * far in.
+ */
 export const probeFile = Effect.fn("MediaProbe.probeFile")(function* (path: string) {
   const tools = yield* MediaTools.Service;
 
-  const json = yield* tools.ffprobe([
-    "-v",
-    "error",
-    "-print_format",
-    "json",
-    "-show_format",
-    "-show_streams",
-    "-show_chapters",
-    path,
-  ]);
+  const [output, { frames }] = yield* Effect.all(
+    [
+      tools
+        .ffprobe([
+          "-v",
+          "error",
+          "-print_format",
+          "json",
+          "-show_format",
+          "-show_streams",
+          "-show_chapters",
+          path,
+        ])
+        .pipe(Effect.flatMap((json) => decodeFfprobeOutput(json).pipe(Effect.mapError(invalid)))),
+      tools
+        .ffprobe([
+          "-v",
+          "error",
+          "-print_format",
+          "json",
+          "-select_streams",
+          "V:0",
+          "-read_intervals",
+          "%+#1",
+          "-show_entries",
+          FRAME_ENTRIES,
+          path,
+        ])
+        .pipe(Effect.flatMap((json) => decodeFfprobeFrames(json).pipe(Effect.mapError(invalid)))),
+    ],
+    { concurrency: 2 },
+  );
 
-  return yield* parseFfprobeJson(json, path);
+  return probeOf({ ...output, frames: frames ?? [] }, path);
 });

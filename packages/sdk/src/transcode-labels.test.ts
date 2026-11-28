@@ -50,6 +50,30 @@ describe("TranscodeLabels", () => {
     expect(stageLabel({ op: "deinterlace", domain: "qsv", impl: "deinterlace.qsv" })).toBe(
       "Deinterlace · QSV",
     );
+    expect(
+      stageLabel({
+        op: "tonemap",
+        domain: "qsv",
+        impl: "tonemap.qsv",
+        insteadOf: { impl: "tonemap.qsv.placebo", reason: "slower" },
+      }),
+    ).toBe("Tone map · QSV (tonemap.qsv.placebo too slow at this size)");
+    expect(
+      stageLabel({
+        op: "tonemap",
+        domain: "vaapi",
+        impl: "tonemap.vaapi",
+        insteadOf: { impl: "tonemap.vaapi.placebo", reason: "unproven" },
+      }),
+    ).toBe("Tone map · VA-API (tonemap.vaapi.placebo not proven here)");
+    expect(
+      stageLabel({
+        op: "tonemap",
+        domain: "qsv",
+        impl: "tonemap.qsv",
+        insteadOf: { impl: "tonemap.qsv.placebo", reason: "later-reason" },
+      }),
+    ).toBe("Tone map · QSV (tonemap.qsv.placebo later-reason)");
     expect(stageLabel({ op: "denoise", domain: "nvenc", impl: "denoise.nvenc" })).toBe(
       "denoise · NVENC",
     );

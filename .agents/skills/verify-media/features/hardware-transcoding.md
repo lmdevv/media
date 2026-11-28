@@ -15,7 +15,33 @@ the evidence of where it ran.
 - `hw-scale` scales the 818-line H.264 version down to a 480-line quality cap, and
   `scale-variable-rate` a generated phone-style MP4 (4 s at 60 fps, then 12 s at 15 fps) down to
   240 lines, through to its last segment.
-- `hw-hdr-to-sdr` maps the HDR10 HEVC version to BT.709 SDR for an SDR browser.
+- `hw-hdr-to-sdr` maps the HDR10 HEVC version to BT.709 SDR for an SDR browser, and each kind of
+  HDR source the table of source colours decides for (`apps/media/src/playback/source-colours.ts`):
+  generated colour patches in HDR10 (`hdr-to-sdr-patches`) and HLG (`hdr-to-sdr-hlg`), and Dolby
+  Vision 8.1 and 8.4 (the HDR10 and HLG patches re-encoded with the RPUs of fetched samples, an
+  iPhone's recording for 8.4),
+  7 (one picture with its enhancement layer), and 5 (Apple's HLS example), the last fetched (below).
+  Quick Sync's and VA-API's paths map with libplacebo (BT.2390, on a Vulkan device derived from the
+  render node's) where it is proven and keeps up at the output's height (`PLACEBO_THROUGHPUT` in
+  `video-ops-intel.ts`), else with the GPU's own tone map; Dolby Vision 5 keeps libplacebo at any
+  size. The CPU maps with zscale and Hable, and refuses Dolby Vision 5
+  (`dolby-vision-not-convertible`), which only libplacebo reads. libplacebo's probe fails when
+  ffmpeg opens a Vulkan device that is not a GPU's (`software`, `virtual`, or unknown in its
+  verbose log), and reads its picture back in colour: the HDR probe clips are patches, and the
+  grays must stay neutral and in order and each primary its own hue.
+- Where libplacebo keeps up: it must sustain 2.5 times the source's frame rate at the output's
+  height (the rate a variable-rate file peaks at; 60 for an unknown rate), by the Arc A380's
+  figures, the lower of ffmpeg 7.1 and 9. Every card is held to the Arc's figures, measured on no
+  other card. The tallest output it maps:
+
+  | Source rate | Quick Sync | VA-API |
+  | --- | --- | --- |
+  | 23.976, 24, 25 | 1080 lines | 1440 lines |
+  | 30 | 1080 lines | 1080 lines |
+  | 50 | 720 lines | 480 lines |
+  | 60, or unknown | 480 lines | none (Intel's own; HLG on the CPU) |
+- `scale-bt601`, `scale-bt2020`, and `scale-full-range` scale SDR patches in BT.601, BT.2020, and
+  full range to 720 lines: their colour is carried, tags and pixels as the source's.
 - `hw-burn-in` draws the DVD (image) subtitle track into the picture: on a GPU path with the GPU's
   overlay (`overlay_qsv`, `overlay_vaapi`), the subtitle's frames decoded on the CPU and uploaded,
   the picture never leaving the device. `subtitle-burn-in-pgs` does the same with a generated PGS
@@ -27,9 +53,7 @@ the evidence of where it ran.
   codec (H.264 under a 4 Mb/s cap, since an H.264 browser plays the source as it is).
 - `hw-hybrid` runs one stage of a GPU path on the CPU where the device can't do it, as the service
   plans from what it proved: `hybrid-cpu-decode` decodes generated 10-bit H.264, which Intel media
-  engines don't decode, on the CPU and scales and encodes on the GPU; `hybrid-cpu-tone-map` maps
-  generated HLG HEVC on the CPU between VA-API's decode and encode, since VA-API's tone map needs
-  mastering display metadata HLG lacks.
+  engines don't decode, on the CPU and scales and encodes on the GPU.
 - `hw-path` shows where each stage ran: the ffmpeg arguments inside the container, that ffmpeg's
   GPU engine time, the encoder's fingerprint in the bytes, the negotiated mode, and the service's
   `Stream.mode_changed` records.
@@ -146,7 +170,7 @@ Preconditions:
     a spread of 42.9 (the HDR10 version through the reference tone map; 59.9 in the others). It is
     a plain start at that position, on the 4 s segment grid, and no row's seek. Position 0 stays
     covered by the rows whose generated fixtures are pictured from their first frame (spreads 49 to
-    63): `decode`, `hybrid-cpu-decode`, `hybrid-cpu-tone-map`, and `scale-variable-rate`.
+    63): `decode`, `hybrid-cpu-decode`, `scale-variable-rate`, and the colour patch rows.
   - Left alone, ffmpeg 7.1's Quick Sync filters hold a first picture for 41 frames (Matroska,
     1.7 s) to 666 (the Feature Test's MP4, 27.7 s) with every timestamp right, which the other
     checks pass.
@@ -189,8 +213,44 @@ Preconditions:
   `/api/health` reports the first of them with a verified encoder, so it reads `none` until the
   probes finish and when the device can't encode. The cells, not the health line, say whether the
   GPU did the work.
-- The hdr-to-sdr bounds compare the picture with a software Hable tone map of the same frames: a
-  different tone curve passes, and a black, washed-out, blown-out, or tinted picture fails.
+- The hdr-to-sdr bounds (`picture`) compare the picture with a software Hable tone map of the same
+  frames: a different tone curve passes, and a black, washed-out, blown-out, or tinted picture
+  fails. Dolby Vision 5's row reads that reference from Apple's HDR10+ rendition of the same
+  pictures (`dv5-apple-hdr10plus`), since read as HDR10 its own IPT samples are green and purple.
+- `colour` reads a fetch's picture a second after the seek, converted to BT.709 R'G'B' by its own
+  tags, and compares 32 patches (`colour-patches.mjs`, `patches.tsv` beside the cell) with what they
+  should be. For HDR the reference is libplacebo's BT.2390 (constant, no contrast recovery,
+  perceptual gamut mapping) of the generated fixture, read once on Mesa's lavapipe with nixpkgs'
+  ffmpeg-full 9.0.2 (libplacebo 7.387) and kept in `REFERENCES`, so it runs on no path under test; for SDR it is the source's own picture. A dark
+  gray's luma must lie within 8 codes (3 for SDR) and every other patch within 10 in CIEDE2000 (3
+  for SDR); grays stay neutral (a* and b* within 3), and neighbouring grays the reference tells
+  apart by 4 codes stay 2 apart, so crushed shadows and clipped highlights fail. CIEDE2000 hardly
+  tells a crushed black from a right one, hence luma for dark grays; for dark colours it is the
+  measure, as a few codes of a minor channel move luma far more than the colour (dark red at luma
+  10 against 19 is 0.9 in CIEDE2000).
+  - The reference depends on libplacebo's version: the image's (7.349, ffmpeg 7.1.5) rendering
+    the same frames on lavapipe lies within 4.6 (HDR10, bright green) and 5.0 (HLG, bright blue)
+    of `REFERENCES`, dark grays within 5.4 luma. A tone map near the bound passes against one and
+    fails against the other: the CPU's Hable oversaturates bright saturated HLG, 9.5 from
+    `REFERENCES` and 14.8 from the 7.1 rendering.
+  - Measured on ffmpeg 7.1 and 9 alike: the CPU's Hable lies within 6.5 (HDR10) and 9.6 (HLG) of the
+    reference; Intel's own tone map, Quick Sync's and VA-API's identical, maps 0.5 cd/m² to luma 3
+    where 16 is right and 100 cd/m² to 130 where 174 is (up to 18 in the mid-tones), and passes on
+    HLG (9.6); libplacebo on the GPU is the reference itself.
+  - Remake `REFERENCES` after changing the patches or the fixtures' encode: run each fixture through
+    `libplacebo=format=yuv420p:colorspace=bt709:color_primaries=bt709:color_trc=bt709:range=tv:tonemapping=bt.2390:peak_detect=0:contrast_recovery=0`
+    with ffmpeg-full 9.0.2 on lavapipe (`VK_ICD_FILENAMES` naming Mesa's `lvp_icd`, and
+    `-init_hw_device vulkan=vk:0 -filter_hw_device vk`, since libplacebo picks no CPU device itself)
+    and read the patches back with
+    `node colour-patches.mjs read`.
+- `hdr-metadata` fails a stream or first picture that carries any side data but the encoder's own
+  unregistered SEI (`SDR_SIDE_DATA`): mastering display, content light level, HDR10+, Dolby Vision,
+  an ambient viewing environment, or a kind not met yet; `sdr-tags` also wants limited range; `source-tags`
+  wants an SDR source's transfer, primaries, matrix, and range carried.
+- Fetched samples (`SAMPLES`: FFmpeg's test suite, which states no licence for them, and Apple's
+  HLS example, published for testing players) are downloaded by the runner into
+  `~/.cache/lar-verify-media/samples` by SHA-256, checked, copied into the fixture's folder for the
+  side's ffmpeg, and never committed. A side without the network marks their rows `SKIPPED`.
 - The `progressive` check reads `idet=intl_thres=1.5`. At `idet`'s default threshold, Quick
   Sync's motion-adaptive output, with no combing left, reads 49-62 % interlaced on long spans of
   the Feature Test; at 1.5 it reads 0 % and the source still 52 %.

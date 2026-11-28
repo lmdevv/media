@@ -12,8 +12,9 @@ import type {
   TranscodeSummary,
 } from "@media/contracts/media-playback";
 import type { EvidenceReason, TranscodingReport } from "@media/contracts/server-functions";
+import { dolbyVisionBase } from "@media/contracts/direct-play";
 import { EpochMillis } from "@media/contracts/units";
-import { Option } from "effect";
+import { Option, type Types } from "effect";
 
 import type { VideoStream } from "../media/media-probe.ts";
 import {
@@ -24,8 +25,9 @@ import {
   type ProbeOutcome,
 } from "./capability-inventory.ts";
 import { VideoPlan } from "./playback-decision.ts";
+import { kindOf } from "./source-colours.ts";
 import { Diagnosis } from "./transcode-recovery.ts";
-import { rowOf, type Step } from "./video-pipeline.ts";
+import { type Instead, rowOf, type Step } from "./video-pipeline.ts";
 import { implOf, Op } from "./video-ops.ts";
 
 /** What a failure that was not the video's points at, as the recovery classifier names it. */
@@ -66,12 +68,16 @@ const opName = (op: Op): string =>
 type Stage = TranscodeSummary["stages"][number];
 
 /**
- * Where a step's frames came from and went: a move's memories; for an overlay on a GPU, the CPU
- * memory its image subtitle was decoded and scaled in and the device it was drawn on, while the
- * picture stayed there; none for any other step.
+ * Where a step's frames came from and went: a move's memories; for a row that takes its frames
+ * elsewhere and back (`Row.transfers`), their memory and that device, as libplacebo's tone map
+ * uploads to Vulkan; for an overlay on a GPU, the CPU memory its image subtitle was decoded and
+ * scaled in and the device it was drawn on, while the picture stayed there; none for any other step.
  */
 const movedBy = (step: Step): Stage["move"] => {
   if (Op.$is("Move")(step.op)) return { from: step.input.memory, to: step.output.memory };
+  const transfers = rowOf(step.impl)?.transfers;
+
+  if (transfers !== undefined) return { from: step.input.memory, to: transfers.device };
 
   if (Op.$is("BurnImage")(step.op) && step.op.subtitle.frame.memory !== step.on) {
     return { from: step.op.subtitle.frame.memory, to: step.on };
@@ -80,11 +86,17 @@ const movedBy = (step: Step): Stage["move"] => {
   return undefined;
 };
 
-const stageOf = (step: Step): Stage => {
-  const stage = { op: opName(step.op), domain: step.on, impl: step.impl };
+/** `step`, the `index`th of its chain, as a stage, with why it runs a fallback row (`instead`). */
+const stageOf = (step: Step, index: number, instead: ReadonlyArray<Instead>): Stage => {
+  const stage: Types.Mutable<Stage> = { op: opName(step.op), domain: step.on, impl: step.impl };
   const move = movedBy(step);
+  const why = instead.find((entry) => entry.step === index);
 
-  return move === undefined ? stage : { ...stage, move };
+  if (move !== undefined) stage.move = move;
+
+  if (why !== undefined) stage.insteadOf = { impl: why.of, reason: why.reason };
+
+  return stage;
 };
 
 /** A change of a stream's chain as the stream keeps it. */
@@ -102,17 +114,24 @@ const causeCode = (cause: string): string =>
   cause.replaceAll(/(?<=[a-z])(?=[A-Z])/gu, "-").toLowerCase();
 
 /**
- * The summary of generation `generation`, which runs `video`: its stages in order, moves included,
- * none for a copy, and the changes up to it, oldest first.
+ * The summary of generation `generation`, which runs `video` from `source`: the source's kind of
+ * colour, the stages in order, moves included, none for a copy, and the changes up to it, oldest
+ * first.
  */
 export const summaryOf = (
   video: VideoPlan,
   changes: ReadonlyArray<ChangeRecord>,
   generation: number,
+  source: VideoStream | undefined,
 ): TranscodeSummary => ({
+  ...Option.match(Option.fromUndefinedOr(source), {
+    onNone: () => ({}),
+    onSome: (stream) => ({ source: kindOf(stream) }),
+  }),
   stages: VideoPlan.$match(video, {
     Copy: () => [],
-    Encode: ({ pipeline }) => pipeline.steps.map(stageOf),
+    Encode: ({ pipeline, instead }) =>
+      pipeline.steps.map((step, index) => stageOf(step, index, instead)),
   }),
   changes: changes.flatMap((change) =>
     change.generation > generation
@@ -129,14 +148,20 @@ export const summaryOf = (
   ),
 });
 
-/** The video a plan delivers from `source`: the source itself when copied, else the encode's. */
+/**
+ * The video a plan delivers from `source`: the source itself when copied, in the range the copy
+ * delivers (a Dolby Vision copy without its record is its base layer), else the encode's.
+ */
 export const deliveredVideo = (video: VideoPlan, source: VideoStream): DeliveredVideo =>
   VideoPlan.$match(video, {
-    Copy: () => ({
+    Copy: ({ dolbyVision }) => ({
       codec: source.codec,
       width: source.width,
       height: source.height,
-      dynamicRange: source.dynamicRange,
+      dynamicRange:
+        dolbyVision === "base"
+          ? (dolbyVisionBase(source) ?? source.dynamicRange)
+          : source.dynamicRange,
     }),
     Encode: ({ output }) => ({
       codec: output.codec,

@@ -148,7 +148,12 @@ const decodeStream = Schema.decodeUnknownSync(NegotiateResponse);
 
 const NegotiateBody = Schema.Struct({
   capabilities: Schema.Struct({
-    videoCodecs: Schema.Array(Schema.Struct({ codec: Schema.String })),
+    videoCodecs: Schema.Array(
+      Schema.Struct({
+        codec: Schema.String,
+        dynamicRanges: Schema.optional(Schema.Array(Schema.String)),
+      }),
+    ),
   }),
   startSeconds: Schema.Finite,
   audioStreamIndex: Schema.optional(Schema.Int),
@@ -181,6 +186,21 @@ const transcode = (base: string, name: string, codec: string, startSeconds = 0) 
       stages: [{ op: "encode", domain: "qsv", impl: `encode.qsv.${codec}` }],
       changes: [],
     },
+    subtitles: [],
+    expiresAt: 4_102_444_800_000,
+  });
+
+/** A Dolby Vision 5 copy of the file, as the service answers a client that declares it. */
+const dolbyVisionCopy = (base: string, name: string, startSeconds = 0) =>
+  decodeStream({
+    mode: "remux",
+    url: playlistOf(base, name),
+    streamId: idOf(name),
+    generation: 1,
+    startSeconds,
+    durationSeconds: 1500,
+    video: { codec: "hevc", width: 1920, height: 1080, dynamicRange: "dolby-vision" },
+    transcode: { source: "dolby-vision-5", stages: [], changes: [] },
     subtitles: [],
     expiresAt: 4_102_444_800_000,
   });
@@ -336,6 +356,66 @@ const failTwice = async (videos: ReadonlyArray<TestVideo>, from: number): Promis
   await eventually(() => videos.length > from + 1);
   videos[from + 1]?.fireStatus("error", "Cannot Decode");
 };
+
+/** The dynamic ranges a negotiation said the device plays HEVC in. */
+const hevcRangesOf = (negotiation: typeof NegotiateBody.Type | undefined): ReadonlyArray<string> =>
+  negotiation?.capabilities.videoCodecs.find((support) => support.codec === "hevc")
+    ?.dynamicRanges ?? [];
+
+describe("PlayerController after a Dolby Vision stream fails", () => {
+  it("negotiates once more without Dolby Vision, keeping HEVC, and plays what the service sends", async () => {
+    const service = await mediaService((base) => [
+      { stream: dolbyVisionCopy(base, "dovi-1") },
+      { stream: transcode(base, "hevc-1", "hevc") },
+    ]);
+
+    const { controller, videos } = playing(service.base);
+
+    // AVPlayer on a device without a Dolby Vision decoder answers the copy "Cannot Decode".
+    await failTwice(videos, 0);
+    await eventually(() => videos.length === 3);
+
+    expect(videos[2]?.uri).toBe(playlistOf(service.base, "hevc-1"));
+    videos[2]?.fireStatus("readyToPlay");
+    controller.showedFrame();
+
+    expect(controller.getSnapshot().phase).toStrictEqual(PlayerPhase.Playing());
+    expect(service.negotiations.map(codecsOf)).toStrictEqual([
+      ["h264", "hevc"],
+      ["h264", "hevc"],
+    ]);
+    expect(service.negotiations.map(hevcRangesOf)).toStrictEqual([
+      ["hdr10", "hlg", "dolby-vision"],
+      ["hdr10", "hlg"],
+    ]);
+    controller.dispose();
+  });
+
+  it("ignores the answer to the negotiation without Dolby Vision once the viewer seeked", async () => {
+    const service = await mediaService((base) => [
+      { stream: dolbyVisionCopy(base, "dovi-1") },
+      { stream: transcode(base, "hevc-stale", "hevc"), delayMs: 300 },
+      { stream: transcode(base, "hevc-1", "hevc", 600) },
+    ]);
+
+    const { controller, videos } = playing(service.base);
+
+    await failTwice(videos, 0);
+    await eventually(() => service.negotiations.length === 2);
+    controller.seek(600_000);
+    await eventually(() => videos.length === 3);
+
+    expect(videos.map((video) => video.uri)).not.toContain(playlistOf(service.base, "hevc-stale"));
+    expect(videos[2]?.uri).toBe(playlistOf(service.base, "hevc-1"));
+    expect(service.stops).toContain(idOf("hevc-stale"));
+    expect(service.negotiations.map(hevcRangesOf)).toStrictEqual([
+      ["hdr10", "hlg", "dolby-vision"],
+      ["hdr10", "hlg"],
+      ["hdr10", "hlg"],
+    ]);
+    controller.dispose();
+  });
+});
 
 describe("PlayerController after an HEVC stream fails", () => {
   it("negotiates once more without HEVC, plays the H.264 stream, and keeps HEVC off for the playback", async () => {

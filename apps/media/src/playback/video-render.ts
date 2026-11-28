@@ -10,7 +10,7 @@
  * text, and the rendering records which steps own each name, so a failed run's log reads back to
  * steps.
  */
-import { Predicate } from "effect";
+import { Predicate, type Types } from "effect";
 
 import type { LogOwners } from "./transcode-recovery.ts";
 import {
@@ -19,6 +19,7 @@ import {
   leavesUntrustedDurations,
   ProbeInput,
   RATE_FILTER,
+  rowOf,
   type Step,
   type VideoPipeline,
 } from "./video-pipeline.ts";
@@ -29,6 +30,7 @@ import {
   type GpuDomain,
   Op,
   type OptionValue,
+  type Rendering,
   type RunFile,
 } from "./video-ops.ts";
 
@@ -192,15 +194,91 @@ const restated = (
 const namesOf = (step: Step, prefix: "decoder:" | "encoder:"): ReadonlyArray<string> =>
   step.needs.flatMap((need) => (need.startsWith(prefix) ? [need.slice(prefix.length)] : []));
 
-const deviceArgs = (pipeline: VideoPipeline): ReadonlyArray<string> => {
-  const frame = pipeline.steps
-    .flatMap((step) => [step.input, step.output])
-    .find((candidate) => candidate.memory !== "cpu" && candidate.device !== undefined);
+/** Whether a step of `steps` runs on Vulkan, which a chain then opens on its domain's GPU. */
+const onVulkan = (steps: ReadonlyArray<Step>): boolean =>
+  steps.some((step) => rowOf(step.impl)?.transfers?.device === "vulkan");
 
-  if (frame === undefined || frame.memory === "cpu" || frame.device === undefined) return [];
-  const domain: GpuDomain = frame.memory;
+/**
+ * The GPU domain `steps` run on and its render node: the first step that runs on one, or the first
+ * frame held in one.
+ */
+const domainOf = (
+  steps: ReadonlyArray<Step>,
+): { readonly domain: GpuDomain; readonly device: string } | undefined => {
+  for (const step of steps) {
+    if (step.on !== "cpu" && step.device !== undefined)
+      return { domain: step.on, device: step.device };
 
-  return DOMAINS[domain].deviceArgs(frame.device);
+    for (const frame of [step.input, step.output]) {
+      if (frame.memory !== "cpu" && frame.device !== undefined) {
+        return { domain: frame.memory, device: frame.device };
+      }
+    }
+  }
+
+  return undefined;
+};
+
+/**
+ * The device arguments of `steps`: their domain's, with a Vulkan device derived from it when a
+ * step runs on Vulkan (`DomainSpec.vulkanArgs`).
+ */
+const deviceArgs = (steps: ReadonlyArray<Step>): ReadonlyArray<string> => {
+  const bound = domainOf(steps);
+
+  if (bound === undefined) return [];
+
+  return onVulkan(steps)
+    ? DOMAINS[bound.domain].vulkanArgs(bound.device)
+    : DOMAINS[bound.domain].deviceArgs(bound.device);
+};
+
+/**
+ * `call` naming `domain`'s device where it would take the run's filter device, which is Vulkan in a
+ * chain that runs a step there: an upload or a map that names no device of its own.
+ */
+const naming =
+  (domain: GpuDomain) =>
+  (call: FilterCall): FilterCall =>
+    (call.name === "hwupload" || call.name === "hwmap") &&
+    !call.args.some((arg) => !Predicate.isString(arg) && arg[0] === "derive_device")
+      ? { ...call, args: [["derive_device", domain], ...call.args] }
+      : call;
+
+/**
+ * `steps` with their uploads and maps naming their domain's device (`naming`) when a step runs on
+ * Vulkan; otherwise as they are.
+ */
+const pinned = (steps: ReadonlyArray<Step>): ReadonlyArray<Step> => {
+  const bound = domainOf(steps);
+
+  if (bound === undefined || !onVulkan(steps)) return steps;
+  const name = naming(bound.domain);
+
+  return steps.map((step) => ({ ...step, rendering: renamed(step.rendering, name) }));
+};
+
+/** `rendering` with `name` applied to every filter call in it, its side's included. */
+const renamed = (rendering: Rendering, name: (call: FilterCall) => FilterCall): Rendering => {
+  const result: Types.Mutable<Rendering> = {
+    ...rendering,
+    filters: rendering.filters.map(name),
+  };
+
+  const { side } = rendering;
+
+  if (side !== undefined) {
+    const named: Types.Mutable<NonNullable<Rendering["side"]>> = {
+      ...side,
+      calls: side.calls.map(name),
+    };
+
+    if (side.picture !== undefined) named.picture = side.picture.map(name);
+
+    result.side = named;
+  }
+
+  return result;
 };
 
 /**
@@ -209,7 +287,7 @@ const deviceArgs = (pipeline: VideoPipeline): ReadonlyArray<string> => {
  */
 export const renderVideo = (pipeline: VideoPipeline, options: RenderOptions): RenderedVideo => {
   if (!isAssembled(pipeline)) throw new Error("Only a pipeline assemble returned can be rendered");
-  const { steps } = pipeline;
+  const steps = pinned(pipeline.steps);
 
   if (options.files.subtitle === undefined && steps.some((step) => Op.$is("BurnText")(step.op))) {
     throw new Error("A text subtitle is drawn only from the ASS file its run names");
@@ -273,7 +351,7 @@ export const renderVideo = (pipeline: VideoPipeline, options: RenderOptions): Re
   const encodeStep = steps[encoder];
 
   return {
-    input: [...deviceArgs(pipeline), ...steps.flatMap((step) => step.rendering.input)],
+    input: [...deviceArgs(steps), ...steps.flatMap((step) => step.rendering.input)],
     graph,
     output: steps.flatMap((step) => step.rendering.output),
     owners: {
@@ -308,9 +386,37 @@ export const graphArgs = (
 export interface ProbeExtras {
   /** The files its filters read, such as the probe's own ASS script. */
   readonly files: RunFiles;
-  /** Where its first output picture goes, in 8-bit gray, for a probe that reads one back. */
-  readonly readback: string | undefined;
+  /**
+   * Where its first output picture goes, for a probe that reads one back, and in what layout: 8-bit
+   * gray, or 8-bit R'G'B' for a picture whose colour is judged.
+   */
+  readonly readback: { readonly path: string; readonly pixelFormat: "gray" | "rgb24" } | undefined;
 }
+
+/**
+ * The ffmpeg arguments that open `pipeline`'s devices and nothing else, logging at the verbose
+ * level, where ffmpeg names the Vulkan device it picked (`Device 0 selected: ... (discrete)`);
+ * undefined for a chain with no step on Vulkan.
+ */
+export const vulkanDeviceArgs = (pipeline: VideoPipeline): ReadonlyArray<string> | undefined =>
+  onVulkan(pipeline.steps)
+    ? [
+        "-hide_banner",
+        "-nostdin",
+        "-v",
+        "verbose",
+        ...deviceArgs(pipeline.steps),
+        "-f",
+        "lavfi",
+        "-i",
+        "nullsrc=size=16x16:duration=0.1",
+        "-frames:v",
+        "1",
+        "-f",
+        "null",
+        "-",
+      ]
+    : undefined;
 
 /**
  * The ffmpeg arguments that run `pipeline` reading `path`: the whole of a generated clip, or a real
@@ -360,7 +466,16 @@ export const probeCommandArgs = (
     "-dn",
     ...(extras.readback === undefined
       ? ["-f", "null", "-"]
-      : ["-frames:v", "1", "-pix_fmt", "gray", "-f", "rawvideo", "-y", extras.readback]),
+      : [
+          "-frames:v",
+          "1",
+          "-pix_fmt",
+          extras.readback.pixelFormat,
+          "-f",
+          "rawvideo",
+          "-y",
+          extras.readback.path,
+        ]),
   ];
 };
 

@@ -139,10 +139,14 @@ const findTitle = Effect.fn("Stream.findTitle")(function* (connection: Connectio
 const decodeStarted = Schema.decodeUnknownEffect(StartedPlayback);
 
 /**
- * Where an HLS stream's video is made, for people: `stages: Decode · QSV, Encode · QSV`, then a
- * line per change of the chain with its generation, cause, what it kept off, and its reason.
+ * Where an HLS stream's video is made, for people: `source: Dolby Vision 8.1`, `stages: Decode ·
+ * QSV, Encode · QSV`, then a line per change of the chain with its generation, cause, what it kept
+ * off, and its reason.
  */
 const transcodeLines = (transcode: TranscodeSummary): ReadonlyArray<string> => [
+  ...(transcode.source === undefined
+    ? []
+    : [`source: ${TranscodeLabels.sourceLabel(transcode.source)}`]),
   ...(transcode.stages.length === 0
     ? []
     : [`stages: ${transcode.stages.map(TranscodeLabels.stageLabel).join(", ")}`]),

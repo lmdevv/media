@@ -23,6 +23,18 @@ export const hdrLabel = (hdr: HdrFormat): string | null =>
     Match.exhaustive,
   );
 
+/**
+ * A Dolby Vision stream's profile as players name it: `5`, `7`, or for profile 8 its base layer's
+ * compatibility after a dot, `8.1` (HDR10), `8.2` (SDR), `8.4` (HLG).
+ */
+export const dolbyVisionProfile = (config: {
+  readonly profile: number;
+  readonly compatibility: number;
+}): string =>
+  config.profile === 8 || config.profile === 10
+    ? `${String(config.profile)}.${String(config.compatibility)}`
+    : String(config.profile);
+
 const CODECS: ReadonlyMap<string, string> = new Map([
   ["hevc", "HEVC"],
   ["h265", "HEVC"],

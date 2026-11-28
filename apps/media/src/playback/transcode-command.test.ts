@@ -10,7 +10,33 @@ import {
   planVideo,
   type VideoIntent,
 } from "./video-pipeline.ts";
-import { ImplId, Op, type OutputCodec, sdrTarget, type SourceVideo } from "./video-ops.ts";
+import {
+  type Colour,
+  ImplId,
+  Op,
+  type OutputCodec,
+  sdrTarget,
+  type SourceVideo,
+} from "./video-ops.ts";
+import { HDR10, SDR_BT709 } from "../testing/colours.ts";
+
+/** The side data every tone map removes from its SDR frames, as its filters name the types. */
+const STRIPPED = [
+  "MASTERING_DISPLAY_METADATA",
+  "CONTENT_LIGHT_LEVEL",
+  "DYNAMIC_HDR_PLUS",
+  "DYNAMIC_HDR_VIVID",
+  "DOVI_METADATA",
+  "DOVI_RPU_BUFFER",
+  "AMBIENT_VIEWING_ENVIRONMENT",
+  "ICC_PROFILE",
+]
+  .map((type) => `sidedata=mode=delete:type=${type}`)
+  .join(",");
+
+/** The dynamic HDR metadata every tone map removes before it maps. */
+const DYNAMIC =
+  "sidedata=mode=delete:type=DYNAMIC_HDR_PLUS,sidedata=mode=delete:type=DYNAMIC_HDR_VIVID";
 
 const hlsCommandArgs = (command: HlsCommand): ReadonlyArray<string> => hlsCommand(command).args;
 
@@ -20,7 +46,7 @@ const command = (audio: AudioPlan, audioCodec: string): HlsCommand => ({
   from: 1.4,
   videoIndex: 0,
   videoCodec: "h264",
-  video: VideoPlan.Copy(),
+  video: VideoPlan.Copy({ dolbyVision: "none" }),
   audio,
   audioCodec,
   copiedAudioEnd: undefined,
@@ -55,15 +81,20 @@ interface EncodeOptions {
    * 1920x1080.
    */
   readonly size?: { readonly width: number; readonly height: number };
+  /** The device proved libplacebo's tone map too, which a chain then prefers to its own. */
+  readonly placebo?: boolean;
+  /** The source's frames a second; unknown, held to 60, when absent. */
+  readonly frameRate?: number;
+  /** An SDR source's colour, in place of BT.709 in limited range. */
+  readonly colour?: Colour;
 }
 
 const DEVICES = { qsv: "/dev/dri/renderD128", vaapi: "/dev/dri/renderD129" } as const;
 
 /**
  * The plan a 1920x1080 source (or one of `size`) gets on `domain` (and the CPU) when the device
- * verified everything:
- * an 8 Mbit/s H.264 encode at its size, or `output` at its share of that, tone-mapped from HDR10
- * when asked.
+ * verified everything but libplacebo's tone map, unless asked: an 8 Mbit/s H.264 encode at its
+ * size, or `output` at its share of that, tone-mapped from HDR10 when asked.
  */
 const encode = (domain: "qsv" | "vaapi" | "software", options: EncodeOptions) => {
   const depth = options.bitDepth ?? 8;
@@ -73,7 +104,7 @@ const encode = (domain: "qsv" | "vaapi" | "software", options: EncodeOptions) =>
     codec: options.codec ?? "h264",
     pixelFormat: depth > 8 ? "yuv420p10le" : "yuv420p",
     depth,
-    colour: toneMap ? "hdr10" : "sdr",
+    colour: toneMap ? HDR10 : (options.colour ?? SDR_BT709),
     scan: options.interlaced === true ? "interlaced" : "progressive",
     width: options.size?.width ?? 1920,
     height: options.size?.height ?? 1080,
@@ -81,7 +112,7 @@ const encode = (domain: "qsv" | "vaapi" | "software", options: EncodeOptions) =>
 
   const intent: VideoIntent = {
     targets: [{ ...sdrTarget(options.output ?? "h264"), level: options.level }],
-    frameRate: undefined,
+    frameRate: options.frameRate,
     bounds: options.size ?? { width: 1920, height: 1080 },
     cpuEncodeBounds: { width: 1920, height: 1080 },
     maxBitrate: undefined,
@@ -104,7 +135,7 @@ const encode = (domain: "qsv" | "vaapi" | "software", options: EncodeOptions) =>
                 frame: {
                   memory: "cpu",
                   device: undefined,
-                  colour: "sdr",
+                  colour: SDR_BT709,
                   depth: 8,
                   pixelFormat: "pal8",
                   scan: "progressive",
@@ -122,7 +153,9 @@ const encode = (domain: "qsv" | "vaapi" | "software", options: EncodeOptions) =>
 
   const planned = planVideo(source, intent, {
     domains,
-    verified: new Set(keys.keys()),
+    verified: new Set(
+      [...keys.keys()].filter((key) => options.placebo === true || !key.includes(".placebo:")),
+    ),
     excluded: new Set((options.without ?? []).map(ImplId)),
   });
 
@@ -147,6 +180,34 @@ const pgsOnCpu = (width: number, height: number) => {
 
 const after = (args: ReadonlyArray<string>, flag: string): string | undefined =>
   args[args.indexOf(flag) + 1];
+
+/** The video filters of an 8-bit H.264 source's run on Quick Sync, in `colour`. */
+const qsvScale = (colour: Colour) =>
+  after(
+    hlsCommandArgs({
+      ...command(AudioPlan.Copy({ index: 1 }), "aac"),
+      video: encode("qsv", { colour }),
+    }),
+    "-vf",
+  );
+
+/** The video filters of a 10-bit HDR10 HEVC source's run on `domain`, libplacebo proven. */
+/** The arguments of a 10-bit HDR10 HEVC source's run on `domain`, libplacebo proven, at 24 fps. */
+const placeboArgs = (domain: "qsv" | "vaapi") =>
+  hlsCommandArgs({
+    ...command(AudioPlan.Copy({ index: 1 }), "aac"),
+    videoCodec: "hevc",
+    video: encode(domain, {
+      codec: "hevc",
+      bitDepth: 10,
+      toneMap: true,
+      placebo: true,
+      frameRate: 24,
+    }),
+  });
+
+/** The video filters of that run. */
+const placeboRun = (domain: "qsv" | "vaapi") => after(placeboArgs(domain), "-vf");
 
 const inputs = (args: ReadonlyArray<string>): ReadonlyArray<string> =>
   args.slice(
@@ -242,6 +303,57 @@ describe("hlsCommandArgs", () => {
     expect(after(args, "-c:v")).toBe("h264_qsv");
   });
 
+  it("states an SDR source's own colour on Quick Sync's scale, which would convert it", () => {
+    const bt601: Colour = {
+      signal: "sdr",
+      transfer: "smpte170m",
+      primaries: "smpte170m",
+      matrix: "smpte170m",
+      range: "limited",
+      mastering: "absent",
+    };
+
+    expect(qsvScale(bt601)).toBe(
+      "hwmap,format=qsv,vpp_qsv=w=1920:h=1080:format=nv12:out_color_matrix=smpte170m:out_color_primaries=smpte170m:out_color_transfer=smpte170m,fps=source_fps",
+    );
+    expect(qsvScale({ ...SDR_BT709, range: "full" })).toBe(
+      "hwmap,format=qsv,vpp_qsv=w=1920:h=1080:format=nv12:out_range=full,fps=source_fps",
+    );
+    expect(
+      qsvScale({ ...SDR_BT709, transfer: undefined, primaries: undefined, matrix: undefined }),
+    ).toBe("hwmap,format=qsv,vpp_qsv=w=1920:h=1080:format=nv12,fps=source_fps");
+  });
+
+  it("tone-maps with libplacebo on a GPU that proved it, through CPU memory and back", () => {
+    // The planner's moves to and from the CPU, then libplacebo's own upload to a Vulkan device
+    // derived from the run's and download back; dynamic metadata and a base layer's RPU go first.
+    const placebo = [
+      "hwdownload",
+      "format=p010le",
+      DYNAMIC,
+      "sidedata=mode=delete:type=DOVI_METADATA,sidedata=mode=delete:type=DOVI_RPU_BUFFER",
+      "libplacebo=format=nv12:colorspace=bt709:color_primaries=bt709:color_trc=bt709:range=tv:tonemapping=bt.2390:peak_detect=0:contrast_recovery=0:apply_dolbyvision=0",
+      "format=nv12",
+      "setparams=color_primaries=bt709:color_trc=bt709:colorspace=bt709:range=tv",
+      STRIPPED,
+    ].join(",");
+
+    // The run's filter device is Vulkan, derived from the render node's device, so libplacebo runs
+    // on that GPU; the uploads and maps name the path's own device.
+    expect(placeboRun("vaapi")).toBe(
+      `scale_vaapi=w=1920:h=1080:format=p010,${placebo},format=nv12,hwupload=derive_device=vaapi`,
+    );
+    expect(placeboRun("qsv")).toBe(
+      `hwmap=derive_device=qsv,format=qsv,vpp_qsv=w=1920:h=1080:format=p010,${placebo},fps=source_fps,format=nv12,hwupload=derive_device=qsv:extra_hw_frames=64,format=qsv`,
+    );
+    expect(placeboArgs("vaapi").join(" ")).toContain(
+      "-init_hw_device vulkan=vk@va -filter_hw_device vk",
+    );
+    expect(placeboArgs("qsv").join(" ")).toContain(
+      "-init_hw_device qsv=hw@va -init_hw_device vulkan=vk@hw -filter_hw_device vk",
+    );
+  });
+
   it("encodes on VA-API, decoding, scaling in 10 bits, then tone-mapping on the GPU", () => {
     const args = hlsCommandArgs({
       ...command(AudioPlan.Copy({ index: 1 }), "aac"),
@@ -262,7 +374,7 @@ describe("hlsCommandArgs", () => {
       "va",
     ]);
     expect(after(args, "-vf")).toBe(
-      "scale_vaapi=w=1920:h=1080:format=p010,tonemap_vaapi=format=nv12:p=bt709:t=bt709:m=bt709,setparams=color_primaries=bt709:color_trc=bt709:colorspace=bt709:range=tv",
+      `scale_vaapi=w=1920:h=1080:format=p010,${DYNAMIC},tonemap_vaapi=format=nv12:p=bt709:t=bt709:m=bt709,setparams=color_primaries=bt709:color_trc=bt709:colorspace=bt709:range=tv,${STRIPPED}`,
     );
     expect(args.slice(args.indexOf("-c:v"), args.indexOf("-force_key_frames"))).toStrictEqual([
       "-c:v",
@@ -293,9 +405,8 @@ describe("hlsCommandArgs", () => {
           "hwmap",
           "format=qsv",
           "vpp_qsv=w=1920:h=1080:format=nv12:tonemap=1:out_color_matrix=bt709:out_color_primaries=bt709:out_color_transfer=bt709",
-          "setparams=color_primaries=bt709:color_trc=bt709:colorspace=bt709",
-          "sidedata=mode=delete:type=MASTERING_DISPLAY_METADATA",
-          "sidedata=mode=delete:type=CONTENT_LIGHT_LEVEL",
+          "setparams=color_primaries=bt709:color_trc=bt709:colorspace=bt709:range=tv",
+          STRIPPED,
           "fps=source_fps",
         ].join(","),
       );
@@ -332,7 +443,7 @@ describe("hlsCommandArgs", () => {
     // It is the scale's, then the tone map's, then the overlay's, so a failure in it reads back to
     // that step; with the overlay on the CPU, the scale's again, before the download.
     expect(scaled.owners?.filters.get("Parsed_fps_3")).toStrictEqual([1]);
-    expect(toneMapped.owners?.filters.get("Parsed_fps_6")).toStrictEqual([2]);
+    expect(toneMapped.owners?.filters.get("Parsed_fps_12")).toStrictEqual([2]);
     expect(after(burned.args, "-filter_complex")?.split(";")[2]).toContain("fps=source_fps[video]");
     expect(burned.owners?.filters.get("Parsed_fps_7")).toStrictEqual([2]);
     expect(after(burnedOnCpu.args, "-filter_complex")?.split(";")[2]).not.toContain("fps=");
@@ -434,7 +545,7 @@ describe("hlsCommandArgs", () => {
     });
 
     expect(after(args, "-vf")).toBe(
-      "scale=1920:1080:flags=bicubic,zscale=t=linear:npl=100,format=gbrpf32le,zscale=p=bt709,tonemap=tonemap=hable:desat=0,zscale=t=bt709:m=bt709:r=tv,format=yuv420p",
+      `scale=1920:1080:flags=bicubic,${DYNAMIC},zscale=t=linear:npl=100,format=gbrpf32le,zscale=p=bt709,tonemap=tonemap=hable:desat=0,zscale=t=bt709:m=bt709:r=tv,setparams=color_primaries=bt709:color_trc=bt709:colorspace=bt709:range=tv,${STRIPPED},format=yuv420p`,
     );
     expect(after(args, "-c:v")).toBe("libx264");
   });
@@ -552,9 +663,9 @@ describe("hlsCommandArgs", () => {
     expect(vaapi).toContain("-hwaccel");
     expect(after(vaapi, "-filter_complex")).toBe(
       [
-        "[0:0]scale_vaapi=w=1920:h=1080:format=p010,tonemap_vaapi=format=nv12:p=bt709:t=bt709:m=bt709,setparams=color_primaries=bt709:color_trc=bt709:colorspace=bt709:range=tv,setparams=color_primaries=unknown[picture]",
+        `[0:0]scale_vaapi=w=1920:h=1080:format=p010,${DYNAMIC},tonemap_vaapi=format=nv12:p=bt709:t=bt709:m=bt709,setparams=color_primaries=bt709:color_trc=bt709:colorspace=bt709:range=tv,${STRIPPED},setparams=color_primaries=unknown[picture]`,
         "[0:3]scale=1920:1080,format=bgra,hwupload[subtitle]",
-        "[picture][subtitle]overlay_vaapi=x=0:y=0:w=1920:h=1080:eof_action=pass:repeatlast=0[video]",
+        "[picture][subtitle]overlay_vaapi=x=0:y=0:w=1920:h=1080:eof_action=pass:repeatlast=0,setparams=color_primaries=bt709[video]",
       ].join(";"),
     );
 
@@ -587,7 +698,7 @@ describe("hlsCommandArgs", () => {
 
     expect(after(vaapi, "-filter_complex")).toBe(
       [
-        "[0:0]scale_vaapi=w=1920:h=1080:format=p010,tonemap_vaapi=format=nv12:p=bt709:t=bt709:m=bt709,setparams=color_primaries=bt709:color_trc=bt709:colorspace=bt709:range=tv,hwdownload,format=nv12[picture]",
+        `[0:0]scale_vaapi=w=1920:h=1080:format=p010,${DYNAMIC},tonemap_vaapi=format=nv12:p=bt709:t=bt709:m=bt709,setparams=color_primaries=bt709:color_trc=bt709:colorspace=bt709:range=tv,${STRIPPED},hwdownload,format=nv12[picture]`,
         `[0:3]${pgsOnCpu(1920, 1080)}[subtitle]`,
         "[picture][subtitle]overlay=x=(main_w-overlay_w)/2:y=(main_h-overlay_h)/2:eof_action=pass:repeatlast=0,format=nv12,hwupload[video]",
       ].join(";"),
@@ -770,7 +881,7 @@ describe("hlsCommandArgs", () => {
     expect(vaapi.indexOf("-hwaccel")).toBeLessThan(vaapi.indexOf("-i"));
     expect(vaapi.indexOf("-canvas_size")).toBeLessThan(vaapi.indexOf("-i"));
     expect(after(vaapi, "-filter_complex")).toContain(
-      "[0:0]trim=start=61.400000,scale_vaapi=w=1920:h=1080:format=p010,tonemap_vaapi=",
+      `[0:0]trim=start=61.400000,scale_vaapi=w=1920:h=1080:format=p010,${DYNAMIC},tonemap_vaapi=`,
     );
 
     const qsv = hlsCommandArgs({
@@ -1102,7 +1213,7 @@ const mp4 = (video: VideoPlan) =>
 
 describe("mp4CommandArgs", () => {
   it("copies the whole file into an MP4 with its index first, from the start", () => {
-    const args = mp4(VideoPlan.Copy());
+    const args = mp4(VideoPlan.Copy({ dolbyVision: "none" }));
 
     expect(args).not.toContain("-ss");
     expect(args).not.toContain("-copyts");

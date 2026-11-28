@@ -22,6 +22,29 @@ const h264Mp4: DirectPlayFile = {
   audio: { codec: "aac", channels: 2 },
 };
 
+/**
+ * A 4K HEVC Main 10 MP4 in `dynamicRange`, stating PQ, with Dolby Vision's configuration and an RPU
+ * on its first picture when given.
+ */
+const uhd = (
+  dynamicRange: "hdr10" | "hlg" | "dolby-vision",
+  dolbyVision?: { readonly profile: number; readonly compatibility: number },
+) => ({
+  container: "mp4",
+  video: {
+    codec: "hevc",
+    profile: "Main 10",
+    bitDepth: 10,
+    width: 3840,
+    height: 2160,
+    dynamicRange,
+    dolbyVision,
+    dolbyVisionRpu: dolbyVision === undefined ? undefined : (true as const),
+    colour: { transfer: dynamicRange === "hlg" ? "arib-std-b67" : "smpte2084" },
+  },
+  audio: { codec: "eac3", channels: 6 },
+});
+
 describe("IOS_CAPABILITIES", () => {
   it("is what the negotiation schema accepts", () => {
     expect(Schema.decodeSync(ClientCapabilities)(IOS_CAPABILITIES)).toStrictEqual(IOS_CAPABILITIES);
@@ -39,22 +62,13 @@ describe("IOS_CAPABILITIES", () => {
   });
 
   it("plays HEVC Main 10 in HDR10, HLG, and Dolby Vision up to 4K", () => {
-    for (const dynamicRange of ["hdr10", "hlg", "dolby-vision"] as const) {
-      expect(
-        playsDirectly(IOS_CAPABILITIES, {
-          container: "mp4",
-          video: {
-            codec: "hevc",
-            profile: "Main 10",
-            bitDepth: 10,
-            width: 3840,
-            height: 2160,
-            dynamicRange,
-          },
-          audio: { codec: "eac3", channels: 6 },
-        }),
-      ).toBe(true);
-    }
+    expect(playsDirectly(IOS_CAPABILITIES, uhd("hdr10"))).toBe(true);
+    expect(playsDirectly(IOS_CAPABILITIES, uhd("hlg"))).toBe(true);
+    expect(
+      playsDirectly(IOS_CAPABILITIES, uhd("dolby-vision", { profile: 8, compatibility: 1 })),
+    ).toBe(true);
+    // Dolby Vision whose configuration was not read says nothing a player can rely on.
+    expect(playsDirectly(IOS_CAPABILITIES, uhd("dolby-vision"))).toBe(false);
   });
 
   it("transcodes what AVPlayer cannot decode", () => {

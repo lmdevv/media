@@ -184,8 +184,9 @@ the driver libva detects.
   `HARDWARE_ACCELERATION=vaapi`; `VAAPI_DEVICE` picks another render node.
 - NixOS: `hardwareAcceleration = "vaapi"` enables `hardware.graphics` with `intel-media-driver`
   (Mesa provides AMD's driver); `vaapiDevice` picks the node.
-- `auto` tries Quick Sync first, then VA-API, then software. HDR is tone-mapped on the GPU
-  (`tonemap_vaapi`, Intel); a GPU that cannot fails over to software, which tone-maps with
+- `auto` tries Quick Sync first, then VA-API, then software. HDR is tone-mapped on the GPU, with
+  libplacebo on Vulkan where Mesa's Vulkan driver works, else with the GPU's own tone map
+  (`tonemap_vaapi`); a GPU that can do neither fails over to software, which tone-maps with
   `zscale` when the ffmpeg build has it.
 - Check a host by hand with the same pipeline the service runs (the render node may differ):
   `ffmpeg -init_hw_device vaapi=va:/dev/dri/renderD128 -filter_hw_device va -hwaccel vaapi

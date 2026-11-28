@@ -35,7 +35,7 @@ import {
 import * as MediaConfig from "../media-config.ts";
 import * as MediaTools from "../media/media-tools.ts";
 import * as Inventory from "./capability-inventory.ts";
-import { PROBE_CLIPS, PROBE_SCRIPT, readbackVerdict } from "./probe-clips.ts";
+import { PROBE_CLIPS, PROBE_SCRIPT, readbackPixelFormat, readbackVerdict } from "./probe-clips.ts";
 import {
   attribute,
   Attribution,
@@ -62,7 +62,7 @@ import {
   type VideoIntent,
   type VideoPipeline,
 } from "./video-pipeline.ts";
-import { probeCommandArgs, probedFrames } from "./video-render.ts";
+import { probeCommandArgs, probedFrames, vulkanDeviceArgs } from "./video-render.ts";
 import {
   type BuildFeature,
   type CapabilityKey,
@@ -71,6 +71,8 @@ import {
   type GpuDomain,
   type ImplId,
   implOf,
+  SHADER_CACHE_OPTION,
+  shaderCacheFiles,
   type SourceVideo,
 } from "./video-ops.ts";
 
@@ -165,6 +167,29 @@ const NOT_RUN: ReadonlySet<number> = new Set([126, 127]);
 const DEVICE_FAILED =
   /Device creation failed|for option 'init_hw_device'|Failed to (?:open|initialise) VAAPI/u;
 
+/**
+ * The Vulkan device ffmpeg opened, as it logs it at the verbose level:
+ * `Device 0 selected: Intel(R) Arc(tm) A380 Graphics (DG2) (discrete) (0x56a5)`.
+ */
+const VULKAN_SELECTED = /Device \d+ selected: (.+) \((\w+)\) \(0x[0-9a-f]+\)/u;
+
+/** The Vulkan device types a GPU row may run on; a CPU (`software`), virtual, or unknown one fails. */
+const GPU_VULKAN: ReadonlySet<string> = new Set(["discrete", "integrated"]);
+
+/**
+ * Why the Vulkan device `log` names cannot run a GPU row, or undefined when it is a GPU: ffmpeg's
+ * derivation from the render node's device falls back to its first device when the node gives it
+ * neither a PCI id nor a known vendor, and that can be a software one such as llvmpipe.
+ */
+const vulkanRefusal = (log: string): string | undefined => {
+  const selected = VULKAN_SELECTED.exec(log);
+
+  if (selected === null) return "ffmpeg named no Vulkan device";
+  const [, name = "", type = ""] = selected;
+
+  return GPU_VULKAN.has(type) ? undefined : `Vulkan opened ${name}, a ${type} device`;
+};
+
 /** What ffmpeg writes when a signal, not the stage, ended it. */
 const ENDED_BY_SIGNAL = /received signal \d+|system signals, hard exiting/u;
 
@@ -213,13 +238,20 @@ const probeOutcome = (
     : "rejected";
 };
 
-/** Every component a build listing shows: codecs ffmpeg decodes, decoders, encoders, filters, hardware accelerations. */
+/**
+ * Every component a build listing shows: codecs ffmpeg decodes, decoders, encoders, filters,
+ * hardware accelerations, and the libplacebo options a row reads when present (`placebo`, the
+ * filter's help, empty without it).
+ */
 const featuresOf = (
   codecs: string,
   filters: string,
   hwaccels: string,
+  placebo: string,
 ): ReadonlySet<BuildFeature> => {
   const features = new Set<BuildFeature>();
+
+  if (/^\s+shader_cache\s/mu.test(placebo)) features.add(SHADER_CACHE_OPTION);
 
   for (const line of codecs.split("\n")) {
     const codec = /^ ([D.])([E.])[VAS.D.][I.][L.][S.]\s+(\S+)\s/u.exec(line);
@@ -458,6 +490,10 @@ const make = Effect.gen(function* () {
       tools.ffmpeg(["-hide_banner", "-codecs"]),
       tools.ffmpeg(["-hide_banner", "-filters"]),
       tools.ffmpeg(["-hide_banner", "-hwaccels"]),
+      // A build without libplacebo has no help for it, which takes nothing from the listing.
+      tools
+        .ffmpeg(["-hide_banner", "-h", "filter=libplacebo"])
+        .pipe(Effect.orElseSucceed(() => "")),
     ]).pipe(Effect.result);
 
     if (Result.isFailure(listed)) {
@@ -466,12 +502,12 @@ const make = Effect.gen(function* () {
       return Option.none<Inventory.BuildIdentity>();
     }
 
-    const [version, codecs, filters, hwaccels] = listed.success;
+    const [version, codecs, filters, hwaccels, placebo] = listed.success;
 
     const build: Inventory.BuildIdentity = {
       version: firstLine(version),
       kernel: Option.getOrElse(yield* readTrimmed("/proc/sys/kernel/osrelease"), () => ""),
-      features: featuresOf(codecs, filters, hwaccels),
+      features: featuresOf(codecs, filters, hwaccels, placebo),
       at: yield* now,
     };
 
@@ -651,33 +687,65 @@ const make = Effect.gen(function* () {
     const script = path.join(clipFolder, "probe-script.ass");
 
     const readback =
-      plan.readback === undefined ? undefined : path.join(clipFolder, "readback.gray");
+      plan.readback === undefined
+        ? undefined
+        : {
+            path: path.join(clipFolder, "readback.raw"),
+            pixelFormat: readbackPixelFormat(plan.readback),
+          };
 
     const args = probeCommandArgs(plan.pipeline, plan.input, input.value.file, input.value.stream, {
-      files: { subtitle: script },
+      // libplacebo's probe compiles the shaders a stream then finds in the same cache.
+      files: {
+        subtitle: script,
+        ...shaderCacheFiles(
+          Option.getOrUndefined((yield* Ref.get(inventory)).build)?.features,
+          config.dataDir,
+        ),
+      },
       readback,
     });
 
     const run = priority === "warmup" ? tools.ffmpegInBackground : tools.ffmpeg;
     const started = yield* now;
     let probed: Probed | undefined;
+    const vulkan = vulkanDeviceArgs(plan.pipeline);
+
+    // A chain on Vulkan runs only on a GPU's: the device ffmpeg opens decides, not the one asked for.
+    if (vulkan !== undefined) {
+      const picked = yield* queue.withPermits(1)(
+        tools.ffmpegLog(vulkan, { timeout: probeTimeout }).pipe(Effect.result),
+      );
+
+      const refusal = Result.isSuccess(picked) ? vulkanRefusal(picked.success) : undefined;
+
+      if (refusal !== undefined) {
+        return Option.some<Probed>({
+          outcome: "rejected",
+          detail: refusal,
+          millis: (yield* now) - started,
+        });
+      }
+    }
 
     for (let attempt = 0; attempt < plan.runs && probed?.outcome !== "rejected"; attempt += 1) {
       const { result, shown } = yield* queue.withPermits(1)(
         Effect.gen(function* () {
-          if (readback !== undefined) yield* fs.remove(readback).pipe(Effect.ignore);
+          if (readback !== undefined) yield* fs.remove(readback.path).pipe(Effect.ignore);
 
           if (plan.readback === "glyph")
             yield* fs.writeFileString(script, PROBE_SCRIPT).pipe(Effect.ignore);
           const ran = yield* run(args, { timeout: probeTimeout }).pipe(Effect.result);
 
-          // A subtitle row that ran must also have drawn as it should: the picture tells.
+          // A row that ran must also have drawn as it should: the picture read back tells.
           const read =
             plan.readback === undefined || readback === undefined || probeOutcome(ran) !== "passed"
               ? undefined
               : readbackVerdict(
                   plan.readback,
-                  yield* fs.readFile(readback).pipe(Effect.orElseSucceed(() => new Uint8Array())),
+                  yield* fs
+                    .readFile(readback.path)
+                    .pipe(Effect.orElseSucceed(() => new Uint8Array())),
                 );
 
           return { result: ran, shown: read };
@@ -692,7 +760,7 @@ const make = Effect.gen(function* () {
           ? outcome === "passed"
             ? ""
             : shown?.passed === false
-              ? `the picture read back shows no subtitle drawn as it must be: ${shown.detail}`
+              ? `the picture read back is not what the row must draw: ${shown.detail}`
               : "no frames came out"
           : outcome === "crashed"
             ? `ffmpeg died of ${result.failure.signal ?? "a signal"}`

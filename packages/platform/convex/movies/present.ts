@@ -79,6 +79,23 @@ export const presentMediaFile = (file: Doc<"mediaFiles">): MediaFile => ({
 const defaultAudio = (file: Doc<"mediaFiles">) =>
   file.probe.audio.find((track) => track.default) ?? file.probe.audio[0];
 
+/** A video stream's Dolby Vision record, RPU flag, and stated transfer, the ones it has. */
+const dolbyVisionOf = (
+  video: Doc<"mediaFiles">["probe"]["video"][number] | undefined,
+): Pick<MediaVersion, "dolbyVision" | "dolbyVisionRpu" | "videoTransfer"> => {
+  const fields: {
+    -readonly [Key in "dolbyVision" | "dolbyVisionRpu" | "videoTransfer"]?: MediaVersion[Key];
+  } = {};
+
+  if (video?.dolbyVision !== undefined) fields.dolbyVision = video.dolbyVision;
+
+  if (video?.dolbyVisionRpu === true) fields.dolbyVisionRpu = true;
+
+  if (video?.colour?.transfer !== undefined) fields.videoTransfer = video.colour.transfer;
+
+  return fields;
+};
+
 /** A file on disk as a version to choose, `lastPlayed` when the caller's progress names it. */
 export const presentVersion = (
   file: Doc<"mediaFiles">,
@@ -97,6 +114,7 @@ export const presentVersion = (
     videoProfile: video?.profile ?? null,
     videoLevel: video?.level ?? null,
     videoBitDepth: video?.bitDepth ?? null,
+    ...dolbyVisionOf(video),
     audioCodec: audio?.codec ?? null,
     audioChannels: audio?.channels ?? null,
     audioTracks: file.probe.audio.length,
@@ -230,6 +248,9 @@ const directPlayFile = (file: Doc<"mediaFiles">): DirectPlayFile => {
             width: video.width,
             height: video.height,
             dynamicRange: dynamicRangeOf(video.hdr),
+            dolbyVision: video.dolbyVision,
+            dolbyVisionRpu: video.dolbyVisionRpu,
+            colour: video.colour,
           },
     audio: audio === undefined ? undefined : { codec: audio.codec, channels: audio.channels },
   };

@@ -273,14 +273,14 @@ describe("output codec", () => {
     expect(everywhere(probe("mkv", hevc, [aac]), safari)).toStrictEqual(
       PlaybackPlan.Hls({
         mode: "remux",
-        video: VideoPlan.Copy(),
+        video: VideoPlan.Copy({ dolbyVision: "none" }),
         audio: AudioPlan.Copy({ index: 1 }),
       }),
     );
     expect(everywhere(probe("mkv", h264, [audio(1, "dts", 6, true)]), safari)).toStrictEqual(
       PlaybackPlan.Hls({
         mode: "audio-transcode",
-        video: VideoPlan.Copy(),
+        video: VideoPlan.Copy({ dolbyVision: "none" }),
         audio: AudioPlan.Aac({ index: 1 }),
       }),
     );
@@ -370,7 +370,7 @@ describe("decidePlayback", () => {
     expect(software(probe("mkv", h264, [aac]), chrome)).toStrictEqual(
       PlaybackPlan.Hls({
         mode: "remux",
-        video: VideoPlan.Copy(),
+        video: VideoPlan.Copy({ dolbyVision: "none" }),
         audio: AudioPlan.Copy({ index: 1 }),
       }),
     );
@@ -382,7 +382,7 @@ describe("decidePlayback", () => {
     expect(software(twoTracks, chrome, { audioIndex: 3 })).toStrictEqual(
       PlaybackPlan.Hls({
         mode: "remux",
-        video: VideoPlan.Copy(),
+        video: VideoPlan.Copy({ dolbyVision: "none" }),
         audio: AudioPlan.Copy({ index: 3 }),
       }),
     );
@@ -392,7 +392,7 @@ describe("decidePlayback", () => {
     expect(software(probe("mkv", h264, [eac3]), chrome)).toStrictEqual(
       PlaybackPlan.Hls({
         mode: "audio-transcode",
-        video: VideoPlan.Copy(),
+        video: VideoPlan.Copy({ dolbyVision: "none" }),
         audio: AudioPlan.Aac({ index: 2 }),
       }),
     );
@@ -407,14 +407,14 @@ describe("decidePlayback", () => {
     expect(everywhere(probe("mkv", interlaced, [aac]), chrome)).toStrictEqual(
       PlaybackPlan.Hls({
         mode: "remux",
-        video: VideoPlan.Copy(),
+        video: VideoPlan.Copy({ dolbyVision: "none" }),
         audio: AudioPlan.Copy({ index: 1 }),
       }),
     );
     expect(everywhere(probe("mkv", interlaced, [eac3]), chrome)).toStrictEqual(
       PlaybackPlan.Hls({
         mode: "audio-transcode",
-        video: VideoPlan.Copy(),
+        video: VideoPlan.Copy({ dolbyVision: "none" }),
         audio: AudioPlan.Aac({ index: 2 }),
       }),
     );
@@ -469,10 +469,36 @@ describe("decidePlayback", () => {
       },
       audio: AudioPlan.Copy({ index: 1 }),
     });
+    // At 2160 lines libplacebo does not keep up with a source of unknown rate, held to 60 frames a
+    // second, so Quick Sync's own tone map is the cheaper choice.
     expect(impls(plan)).toStrictEqual([
       "decode.qsv",
       "scale.qsv",
       "tonemap.qsv",
+      "encode.qsv.h264",
+    ]);
+
+    // A 24 fps film capped at 1080 lines keeps libplacebo, which takes its frames in CPU memory:
+    // the plan moves them there and back.
+    const film = probe(
+      "mkv",
+      video("hevc", {
+        profile: "Main 10",
+        bitDepth: 10,
+        width: 3840,
+        height: 2160,
+        dynamicRange: "hdr10",
+        frameRate: 24,
+      }),
+      [aac],
+    );
+
+    expect(impls(hardware(film, chrome, { quality: { maxHeight: 1080 } }))).toStrictEqual([
+      "decode.qsv",
+      "scale.qsv",
+      "move.qsv>cpu",
+      "tonemap.qsv.placebo",
+      "move.cpu>qsv",
       "encode.qsv.h264",
     ]);
   });

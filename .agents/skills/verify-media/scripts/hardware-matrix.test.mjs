@@ -38,6 +38,7 @@ import {
   soundFrom,
   renderGrid,
   ROWS,
+  sdrSideDataFaults,
   segmentsCovering,
   sessionRecords,
   STAGES,
@@ -116,6 +117,17 @@ describe("the table", () => {
         assert.ok(field in capabilities, `${name} has ${field}`);
       }
     }
+  });
+});
+
+describe("side data on an SDR stream", () => {
+  test("passes what describes the picture or comes from the encoder, and fails HDR, viewing, and unknown kinds", () => {
+    assert.deepEqual(sdrSideDataFaults(["H.26[45] User Data Unregistered SEI message", "Stereo 3D", "Stereo 3D", "CPB properties"]), []);
+    assert.deepEqual(sdrSideDataFaults(["Stereo 3D", "Mastering display metadata", "Ambient viewing environment", "LCEVC NAL data"]), [
+      "Mastering display metadata (HDR10's mastering display)",
+      "Ambient viewing environment (the viewing conditions, on a frame)",
+      "LCEVC NAL data (on neither list: look at it)",
+    ]);
   });
 });
 
@@ -320,6 +332,7 @@ const healthy = (cell) => {
       { index: 2, start: from + 2, duration: 2, bytes: 800_000 },
     ],
     media: { codec: "h264", profile: "High", width: 1920, height: 818, bitDepth: 8, transfer: "bt709", primaries: "bt709", space: "bt709" },
+    sideData: { stream: [], frame: [] },
     frames: frames(from, 96),
     audio: { start: from, codec: "aac", sampleRate: "48000" },
     sourceAudio: { codec: "aac", sampleRate: "48000", packets: sounding(from - 3, from + 3) },

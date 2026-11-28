@@ -567,7 +567,10 @@ const runFrom = Effect.fn("HlsTiming.runFrom")(function* (
       from,
       videoIndex: probe.video?.index ?? 0,
       videoCodec: probe.video?.codec ?? "h264",
-      video: testCase.video === "copy" ? VideoPlan.Copy() : encodedOn(probe, testCase.video),
+      video:
+        testCase.video === "copy"
+          ? VideoPlan.Copy({ dolbyVision: "none" })
+          : encodedOn(probe, testCase.video),
       audio:
         testCase.audio === "copy"
           ? AudioPlan.Copy({ index: audioIndex })

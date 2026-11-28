@@ -94,7 +94,7 @@ import {
   usesGpu,
   type VideoIntent,
 } from "./video-pipeline.ts";
-import type { ImplId } from "./video-ops.ts";
+import { type ImplId, shaderCacheFiles } from "./video-ops.ts";
 
 /** What a negotiation starts a stream with. */
 export interface StartRequest {
@@ -2134,7 +2134,14 @@ const make = Effect.gen(function* () {
           { quickStart },
         );
 
-    const files = yield* prepareBurn(stream, request, plan);
+    // libplacebo keeps its compiled shaders where the next run finds them, on a build whose filter
+    // has the option (`shaderCacheFiles`).
+    const build = Option.getOrUndefined((yield* capabilities.inventory).build);
+
+    const files = {
+      ...(yield* prepareBurn(stream, request, plan)),
+      ...shaderCacheFiles(build?.features, config.dataDir),
+    };
 
     const run = yield* claimRun(
       stream,
@@ -2281,7 +2288,12 @@ const make = Effect.gen(function* () {
       generation: generation.number,
       mode,
       video,
-      transcode: summaryOf(video, yield* Ref.get(session.changes), generation.number),
+      transcode: summaryOf(
+        video,
+        yield* Ref.get(session.changes),
+        generation.number,
+        file.probe.video,
+      ),
       segmentIndex,
     } satisfies StartedStream;
   });
@@ -2465,7 +2477,12 @@ const make = Effect.gen(function* () {
           plan: session.plan,
           mode: modeOf(covering.video, session.audio),
           video: deliveredVideo(covering.video, source),
-          transcode: summaryOf(covering.video, yield* Ref.get(session.changes), covering.number),
+          transcode: summaryOf(
+            covering.video,
+            yield* Ref.get(session.changes),
+            covering.number,
+            source,
+          ),
         } satisfies MovedStream;
       }),
     );

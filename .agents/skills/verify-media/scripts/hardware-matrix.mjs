@@ -9,6 +9,7 @@
 // flow.
 
 import { blockFont } from "./block-font.mjs";
+import { HDR_PATCHES, hdrPattern, judgePatches, REFERENCES, SDR_PATCHES, sdrPattern } from "./colour-patches.mjs";
 import { pgsStream } from "./pgs.mjs";
 
 /** The stages of the video pipeline, in the grid's order. */
@@ -50,8 +51,8 @@ const FEATURE_TEST = "/media/library/Movies/[movies] Feature Test (2010)/[movies
  * each of its versions is pictured, the dimmest at a gray-level spread of 42.9 (the HDR10 version
  * through the reference tone map; 59.9 in the others), over four times the margin of 10. It is on
  * the 4 s segment grid, and no row's seek. Position 0 stays covered by the rows whose generated
- * fixtures are pictured from their first frame: decode, hybrid-cpu-decode, hybrid-cpu-tone-map, and
- * scale-variable-rate.
+ * fixtures are pictured from their first frame: decode, hybrid-cpu-decode, scale-variable-rate, and
+ * the colour patch rows.
  */
 export const FEATURE_TEST_START = 36;
 
@@ -86,6 +87,83 @@ export const STYLED_SCRIPT = [
   "Dialogue: 0,0:00:00.50,0:00:29.50,Caption,,0,0,0,,{\\an5\\pos(1440,560)\\frz15\\1c&H00FFFF&}Positioned",
   "",
 ].join("\n");
+
+/** HDR10 static metadata for the generated HDR10 fixtures: BT.2020 mastering, 0.005 to 1000 cd/m², MaxCLL 1000, MaxFALL 400. */
+const HDR10_X265 =
+  "hdr10=1:repeat-headers=1:master-display=G(13250,34500)B(7500,3000)R(34000,16000)WP(15635,16450)L(10000000,50):max-cll=1000,400";
+
+/** The patches over a moving testsrc2 band: the HDR pattern in linear BT.2020 light, to `transfer` at zscale's `npl`. */
+const hdrPatchGraph = (transfer, npl) =>
+  [
+    "[0:v]setparams=color_primaries=bt2020:color_trc=linear:colorspace=gbr[p]",
+    `[1:v]zscale=tin=bt709:pin=bt709:min=bt709:rin=full:t=linear:p=bt2020,format=gbrpf32le[s]`,
+    `[p][s]vstack,zscale=tin=linear:pin=bt2020:min=gbr:t=${transfer}:p=bt2020:m=bt2020nc:r=tv:npl=${npl},format=yuv420p10le[v]`,
+  ].join(";");
+
+/** The SDR patches over a moving testsrc2 band, converted by `zscale` options to the fixture's colour. */
+const sdrPatchGraph = (convert, layout) =>
+  `[0:v]format=gbrp[a];[1:v]format=gbrp[b];[a][b]vstack,setparams=color_primaries=bt709:color_trc=bt709:colorspace=gbr:range=pc,zscale=${convert},format=${layout}[v]`;
+
+/** The pattern's inputs (`/out/<raw>`), a testsrc2 band, and a tone: 30 s at 24 fps. */
+const patchInputs = (raw, layout) => [
+  ["-f", "rawvideo", "-pix_fmt", layout, "-s", "1920x640", "-framerate", "24", "-stream_loop", "-1", "-i", `/out/${raw}`],
+  ["-f", "lavfi", "-i", "testsrc2=size=1920x440:rate=24:duration=30"],
+  ["-f", "lavfi", "-i", "sine=frequency=440:sample_rate=48000:duration=30"],
+].flat();
+
+/** A patch fixture's video encode and its tone, with the GOP the other generated fixtures use. */
+const patchEncode = (encoder, params, tags) => [
+  ["-map", "[v]", "-map", "2:a", "-t", "30", ...encoder],
+  params,
+  [...tags, "-c:a", "aac", "-b:a", "128k"],
+].flat();
+
+const X265_GOP = "keyint=48:min-keyint=48:scenecut=0:log-level=error";
+
+const sdrPatches = (title, about, convert, layout, encoder, tags) => ({
+  about,
+  colour: "source",
+  generate: {
+    title,
+    year: 2026,
+    file: `${title} (2026).mkv`,
+    files: { "sdr.raw": () => sdrPattern() },
+    args: [...patchInputs("sdr.raw", "rgb24"), "-filter_complex", sdrPatchGraph(convert, layout), ...patchEncode(encoder, [], tags)],
+  },
+});
+
+/**
+ * Samples a fixture is made from that cannot be generated, fetched by the runner into a cache
+ * outside the repository, checked against their SHA-256, and never committed: Dolby Vision
+ * streams. FFmpeg's test suite (fate-suite.ffmpeg.org) states no licence for its samples; Apple's
+ * HLS examples (devstreaming-cdn.apple.com) are published for testing HLS players, with no licence
+ * to redistribute. `parts` are fetched and joined in order, as an HLS rendition's init segment and
+ * fragments make one MP4.
+ */
+const FATE = "https://fate-suite.ffmpeg.org";
+
+const APPLE_DV =
+  "https://devstreaming-cdn.apple.com/videos/streaming/examples/adv_dv_atmos/Job2dae5735-d6ca-48ca-91be-0ec0bead535c-107702578-hls_bundle_hdrhls765_dolbyvision";
+
+const APPLE_HDR10PLUS =
+  "https://devstreaming-cdn.apple.com/videos/streaming/examples/adv_dv_atmos/Job8208634a-0add-4223-9782-600c14a70339-139240443-hls_bundle_hdrhls765_hdr10plus";
+
+export const SAMPLES = {
+  "dv84.mov": { parts: [`${FATE}/hevc/dv84.mov`], sha256: "aaa9289a9755eaebd9962204f24a6acf8a19ff104657a3a79b6b1fa672993721" },
+  "dovi-p81.mp4": { parts: [`${FATE}/mov/dovi-p81.mp4`], sha256: "3313278f3dc49b0b3680ec7c3d72622ec0a770faff9721c5842aaf899d5471c5" },
+  "dovi-p7.mp4": { parts: [`${FATE}/mov/dovi-p7-hvce.mp4`], sha256: "67baddaf158bc96c0c7955ca8894e92632df5ccca85bc68733f92f5f9fa7caaa" },
+  "hdr10plus.mp4": {
+    parts: [`${APPLE_HDR10PLUS}/fileSequence0.mp4`, ...[1, 2, 3, 4, 5, 6].map((n) => `${APPLE_HDR10PLUS}/fileSequence${n}.m4s`)],
+    sha256: "c7d7c6db0aaa707a0598722b3d1d3e0150dcbbb70974766512784176599e5fe6",
+  },
+  "dv5.mp4": {
+    parts: [`${APPLE_DV}/fileSequence0.mp4`, ...[1, 2, 3, 4, 5, 6].map((n) => `${APPLE_DV}/fileSequence${n}.m4s`)],
+    sha256: "ddc0b5ea902becebf2179a8f25770bc0f0a84d666f5e0ee0da9d7c77f87758d7",
+  },
+};
+
+/** A tone for a fetched sample, which has none or one the rows would not negotiate. */
+const tone = (seconds) => ["-f", "lavfi", "-i", `sine=frequency=440:sample_rate=48000:duration=${seconds}`];
 
 /**
  * What the cells play. A `library` fixture is a version of a demo library title; a `generate`
@@ -145,23 +223,6 @@ export const FIXTURES = {
       ].flat(),
     },
   },
-  "hlg-hevc": {
-    about: "HEVC Main 10 HLG (BT.2020), 1920x1080 at 24 fps, 30 s of testsrc2 with a tone, generated: HLG carries no mastering display metadata, which VA-API's tone map needs",
-    generate: {
-      title: "Verify Fixture HEVC HLG",
-      year: 2026,
-      file: "Verify Fixture HEVC HLG (2026).mkv",
-      args: [
-        ["-f", "lavfi", "-i", "testsrc2=size=1920x1080:rate=24:duration=30"],
-        ["-f", "lavfi", "-i", "sine=frequency=440:sample_rate=48000:duration=30"],
-        ["-map", "0:v", "-map", "1:a"],
-        ["-vf", "format=yuv420p10le,setparams=color_primaries=bt2020:color_trc=arib-std-b67:colorspace=bt2020nc"],
-        ["-c:v", "libx265", "-preset", "ultrafast", "-pix_fmt", "yuv420p10le"],
-        ["-x265-params", "keyint=48:min-keyint=48:scenecut=0:log-level=error"],
-        ["-color_primaries", "bt2020", "-color_trc", "arib-std-b67", "-colorspace", "bt2020nc", "-c:a", "aac", "-b:a", "128k"],
-      ].flat(),
-    },
-  },
   "styled-subtitles": {
     about: "H.264 High 8-bit SDR, 1920x1080 at 24 fps, 30 s of testsrc2 with a tone and a styled ASS track (e2) whose block font is attached, generated",
     generate: {
@@ -215,7 +276,143 @@ export const FIXTURES = {
       ].flat(),
     },
   },
+  "hdr10-patches": {
+    about: "HEVC Main 10 HDR10 (PQ, BT.2020, mastering 1000 cd/m²), 1920x1080 at 24 fps, 30 s: colour patches (a gray ramp from black to 1000 cd/m², saturated, dark, and bright colours) over a moving testsrc2 band, generated",
+    colour: "hdr10",
+    generate: {
+      title: "Verify Fixture HDR10 Patches",
+      year: 2026,
+      file: "Verify Fixture HDR10 Patches (2026).mkv",
+      files: { "hdr.raw": () => hdrPattern(100) },
+      args: [
+        ...patchInputs("hdr.raw", "gbrpf32le"),
+        "-filter_complex",
+        hdrPatchGraph("smpte2084", 100),
+        ...patchEncode(["-c:v", "libx265", "-preset", "ultrafast"], ["-x265-params", `${X265_GOP}:${HDR10_X265}`], ["-color_primaries", "bt2020", "-color_trc", "smpte2084", "-colorspace", "bt2020nc", "-color_range", "tv"]),
+      ],
+    },
+  },
+  "hlg-patches": {
+    about: "HEVC Main 10 HLG (BT.2020), 1920x1080 at 24 fps, 30 s: the HDR10 fixture's patches for a 1000 cd/m² HLG display, over a moving testsrc2 band, generated",
+    colour: "hlg",
+    generate: {
+      title: "Verify Fixture HLG Patches",
+      year: 2026,
+      file: "Verify Fixture HLG Patches (2026).mkv",
+      files: { "hdr.raw": () => hdrPattern(1000) },
+      args: [
+        ...patchInputs("hdr.raw", "gbrpf32le"),
+        "-filter_complex",
+        hdrPatchGraph("arib-std-b67", 1000),
+        ...patchEncode(["-c:v", "libx265", "-preset", "ultrafast"], ["-x265-params", X265_GOP], ["-color_primaries", "bt2020", "-color_trc", "arib-std-b67", "-colorspace", "bt2020nc", "-color_range", "tv"]),
+      ],
+    },
+  },
+  "sdr-bt601-patches": sdrPatches(
+    "Verify Fixture BT601 Patches",
+    "H.264 High 8-bit SDR BT.601 (smpte170m), 1920x1080 at 24 fps, 30 s: SDR colour patches over a moving testsrc2 band, generated",
+    "t=smpte170m:p=smpte170m:m=smpte170m:r=tv",
+    "yuv420p",
+    ["-c:v", "libx264", "-preset", "ultrafast", "-qp", "4", "-g", "48", "-keyint_min", "48", "-sc_threshold", "0"],
+    ["-color_primaries", "smpte170m", "-color_trc", "smpte170m", "-colorspace", "smpte170m", "-color_range", "tv"],
+  ),
+  "sdr-bt2020-patches": sdrPatches(
+    "Verify Fixture BT2020 SDR Patches",
+    "HEVC Main 10 SDR BT.2020 (bt2020-10 transfer), 1920x1080 at 24 fps, 30 s: SDR colour patches over a moving testsrc2 band, generated",
+    "t=bt2020-10:p=bt2020:m=bt2020nc:r=tv",
+    "yuv420p10le",
+    ["-c:v", "libx265", "-preset", "ultrafast", "-x265-params", `${X265_GOP}:qp=4`],
+    ["-color_primaries", "bt2020", "-color_trc", "bt2020-10", "-colorspace", "bt2020nc", "-color_range", "tv"],
+  ),
+  "sdr-full-range-patches": sdrPatches(
+    "Verify Fixture Full Range Patches",
+    "H.264 High 8-bit SDR BT.709 in full range (pc), 1920x1080 at 24 fps, 30 s: SDR colour patches over a moving testsrc2 band, generated",
+    "m=bt709:r=full",
+    "yuv420p",
+    ["-c:v", "libx264", "-preset", "ultrafast", "-qp", "4", "-g", "48", "-keyint_min", "48", "-sc_threshold", "0"],
+    ["-color_primaries", "bt709", "-color_trc", "bt709", "-colorspace", "bt709", "-color_range", "pc"],
+  ),
+  "dv81-patches": {
+    about: "HEVC Main 10 Dolby Vision 8.1 (HDR10 base layer, RPU on every picture), 1920x1080 at 24 fps, 30 s: the HDR10 fixture's patches, re-encoded by libx265 with the RPUs of FFmpeg's 8.1 sample (fetched), whose own pictures are black",
+    colour: "hdr10",
+    generate: {
+      title: "Verify Fixture Dolby Vision 81",
+      year: 2026,
+      file: "Verify Fixture Dolby Vision 81 (2026).mkv",
+      files: { "hdr.raw": () => hdrPattern(100) },
+      fetch: ["dovi-p81.mp4"],
+      args: [
+        ...patchInputs("hdr.raw", "gbrpf32le"),
+        ["-stream_loop", "-1", "-i", "/out/dovi-p81.mp4"],
+        "-filter_complex",
+        `${hdrPatchGraph("smpte2084", 100).replace("[v]", "[pic]")};[3:v]fps=24,format=yuv420p10le[dv];[dv][pic]overlay=format=yuv420p10[v]`,
+        ...patchEncode(
+          ["-c:v", "libx265", "-preset", "ultrafast", "-dolbyvision", "1", "-crf", "16", "-maxrate", "30M", "-bufsize", "30M"],
+          ["-x265-params", `${X265_GOP}:${HDR10_X265}`],
+          ["-color_primaries", "bt2020", "-color_trc", "smpte2084", "-colorspace", "bt2020nc", "-color_range", "tv"],
+        ),
+      ].flat(),
+    },
+  },
+  "dv84-patches": {
+    about: "HEVC Main 10 Dolby Vision 8.4 (HLG base layer, RPU on every picture), 1920x1080 at 24 fps, 30 s: the HLG fixture's patches, re-encoded by libx265 with the RPUs of an iPhone's 8.4 recording from FFmpeg's test suite (fetched)",
+    colour: "hlg",
+    generate: {
+      title: "Verify Fixture Dolby Vision 84",
+      year: 2026,
+      file: "Verify Fixture Dolby Vision 84 (2026).mkv",
+      files: { "hdr.raw": () => hdrPattern(1000) },
+      fetch: ["dv84.mov"],
+      args: [
+        ...patchInputs("hdr.raw", "gbrpf32le"),
+        ["-display_rotation:v", "0", "-stream_loop", "-1", "-i", "/out/dv84.mov"],
+        "-filter_complex",
+        `${hdrPatchGraph("arib-std-b67", 1000).replace("[v]", "[pic]")};[3:v]fps=24,scale=1920:1080,format=yuv420p10le[dv];[dv][pic]overlay=format=yuv420p10[v]`,
+        ...patchEncode(
+          ["-c:v", "libx265", "-preset", "ultrafast", "-dolbyvision", "1", "-crf", "16", "-maxrate", "30M", "-bufsize", "30M"],
+          ["-x265-params", X265_GOP],
+          ["-color_primaries", "bt2020", "-color_trc", "arib-std-b67", "-colorspace", "bt2020nc", "-color_range", "tv"],
+        ),
+      ].flat(),
+    },
+  },
+  "dv7": {
+    about: "HEVC Main 10 Dolby Vision 7 (HDR10 base layer with a full enhancement layer), 3840x2160: FFmpeg's one-picture sample (fetched), repeated for 30 s at 24 fps, with a tone",
+    generate: {
+      title: "Verify Fixture Dolby Vision 7",
+      year: 2026,
+      file: "Verify Fixture Dolby Vision 7 (2026).mkv",
+      fetch: ["dovi-p7.mp4"],
+      args: [
+        ["-stream_loop", "719", "-i", "/out/dovi-p7.mp4"],
+        tone(30),
+        ["-map", "0:v", "-map", "1:a", "-c:v", "copy", "-tag:v", "hvc1", "-c:a", "aac", "-b:a", "128k"],
+      ].flat(),
+    },
+  },
+  "dv5-apple": {
+    about: "HEVC Main 10 Dolby Vision 5 (IPT-PQ-c2, no compatible base layer), 1920x1080 at 23.976 fps, 33 s: Apple's HLS example rendition (fetched), with a tone",
+    reference: "dv5-apple-hdr10plus",
+    generate: {
+      title: "Verify Fixture Dolby Vision 5",
+      year: 2026,
+      file: "Verify Fixture Dolby Vision 5 (2026).mkv",
+      fetch: ["dv5.mp4"],
+      args: [["-i", "/out/dv5.mp4"], tone(34), ["-map", "0:v", "-map", "1:a", "-c:v", "copy", "-tag:v", "hvc1", "-c:a", "aac", "-b:a", "128k", "-shortest"]].flat(),
+    },
+  },
+  "dv5-apple-hdr10plus": {
+    about: "HEVC Main 10 HDR10+ (PQ, BT.2020), 1920x1080 at 23.976 fps, 33 s: Apple's HLS example rendition of the same pictures as dv5-apple (fetched), the source of that row's reference picture",
+    generate: {
+      title: "Verify Fixture Dolby Vision 5 Reference",
+      year: 2026,
+      file: "Verify Fixture Dolby Vision 5 Reference (2026).mkv",
+      fetch: ["hdr10plus.mp4"],
+      args: [["-i", "/out/hdr10plus.mp4"], tone(34), ["-map", "0:v", "-map", "1:a", "-c:v", "copy", "-tag:v", "hvc1", "-c:a", "aac", "-b:a", "128k", "-shortest"]].flat(),
+    },
+  },
 };
+
 
 /** The fixture's file inside a side's container. */
 export const fixturePath = (fixture) =>
@@ -269,7 +466,7 @@ export const PROFILES = {
 
 const GPU_DEINTERLACE = /deinterlace_(qsv|vaapi)|vpp_qsv=[^,;\s]*deinterlace=/;
 const GPU_SCALE = /scale_(qsv|vaapi)|vpp_qsv=[^,;\s]*\bw=/;
-const GPU_TONE_MAP = /tonemap_vaapi|vpp_qsv=[^,;\s]*tonemap=1/;
+const GPU_TONE_MAP = /tonemap_vaapi|vpp_qsv=[^,;\s]*tonemap=1|libplacebo=/;
 const GPU_OVERLAY = /overlay_(qsv|vaapi)/;
 
 /**
@@ -297,10 +494,12 @@ export const WORK = {
     qsv: { uses: [/vpp_qsv=[^,;\s]*\bw=\d+|scale_qsv/], avoids: [], engine: "any" },
     vaapi: { uses: [/scale_vaapi=[^,;\s]*\bw=\d+/], avoids: [], engine: "any" },
   },
+  // Quick Sync's and VA-API's paths map with libplacebo, on a Vulkan device of the same GPU,
+  // where it is proven, and with their own tone map otherwise.
   "tone-map": {
     cpu: { uses: [/(^|[\s,;\]])tonemap=/], avoids: [GPU_TONE_MAP], engine: "none" },
-    qsv: { uses: [/vpp_qsv=[^,;\s]*tonemap=1/], avoids: [], engine: "any" },
-    vaapi: { uses: [/tonemap_vaapi/], avoids: [], engine: "any" },
+    qsv: { uses: [/vpp_qsv=[^,;\s]*tonemap=1|libplacebo=/], avoids: [], engine: "any" },
+    vaapi: { uses: [/tonemap_vaapi|libplacebo=/], avoids: [], engine: "any" },
   },
   overlay: {
     cpu: { uses: [/(^|[\s,;\]])overlay=/], avoids: [GPU_OVERLAY], engine: "none" },
@@ -332,6 +531,62 @@ export const WORK = {
 const ALL_PATHS = Object.keys(PATHS);
 
 /**
+ * The side data an SDR stream from a tone map may carry, on the stream or its first picture, as
+ * ffprobe names it in ffmpeg 7.1 and 9 (frame and stream names both), each with why: what describes
+ * the picture or comes from the encoder, never its dynamic range or how it was meant to be viewed.
+ */
+export const SDR_SIDE_DATA = new Map([
+  ["H.26[45] User Data Unregistered SEI message", "the encoder's own settings (x264, x265)"],
+  ["CPB properties", "the encoder's own rate control"],
+  ["Stereo 3D", "how a stereoscopic picture is packed, which the transcode keeps"],
+  ["Spherical Mapping", "a 360° picture's projection"],
+  ["3x3 displaymatrix", "the picture's rotation, on a frame"],
+  ["Display Matrix", "the picture's rotation, on a stream"],
+  ["ATSC A53 Part 4 Closed Captions", "captions carried with the picture, on a frame"],
+  ["A53 Closed Captions", "captions carried with the picture, on a stream"],
+  ["Active format description", "the picture's active area"],
+  ["SMPTE 12-1 timecode", "a timecode"],
+  ["GOP timecode", "a timecode"],
+  ["Timecode Metadata", "a timecode"],
+]);
+
+/**
+ * The side data no SDR stream may carry, each with why: HDR10's static metadata, dynamic metadata,
+ * Dolby Vision, the viewing environment an iPhone's HLG states, and a colour profile of the source.
+ */
+export const HDR_SIDE_DATA = new Map([
+  ["Mastering display metadata", "HDR10's mastering display"],
+  ["Content light level metadata", "HDR10's content light levels"],
+  ["HDR Dynamic Metadata SMPTE2094-40 (HDR10+)", "HDR10+ on a frame"],
+  ["HDR Dynamic Metadata (SMPTE 2094-40)", "HDR10+ on a stream (ffmpeg 9)"],
+  ["HDR Dynamic Metadata SMPTE2094-50", "SMPTE 2094-50 on a frame (ffmpeg 9)"],
+  ["HDR Dynamic Metadata (SMPTE 2094-50)", "SMPTE 2094-50 on a stream (ffmpeg 9)"],
+  ["HDR Dynamic Metadata CUVA 005.1 2021 (Vivid)", "HDR Vivid"],
+  ["Dolby Vision RPU Data", "Dolby Vision's RPU"],
+  ["Dolby Vision Metadata", "Dolby Vision's parsed RPU"],
+  ["DOVI configuration record", "Dolby Vision's configuration record"],
+  ["Ambient viewing environment", "the viewing conditions, on a frame"],
+  ["Ambient Viewing Environment", "the viewing conditions, on a stream"],
+  ["ICC profile", "the source's colour profile, on a frame"],
+  ["ICC Profile", "the source's colour profile, on a stream"],
+]);
+
+/**
+ * What the `hdr-metadata` check makes of side data `types` left on an SDR stream: the forbidden ones
+ * with why, then the ones on neither list, which fail too until a person adds them to one.
+ */
+export const sdrSideDataFaults = (types) => {
+  const left = [...new Set(types)].filter((type) => !SDR_SIDE_DATA.has(type));
+  return left.map((type) => (HDR_SIDE_DATA.has(type) ? `${type} (${HDR_SIDE_DATA.get(type)})` : `${type} (on neither list: look at it)`));
+};
+
+/** What a row's colour check compares a fixture's patches with, and which patches it has. */
+export const patchesOf = (reference) => (reference === "source" ? SDR_PATCHES : HDR_PATCHES);
+
+/** The expected patches of `reference`: the reference tone map's, or none when the source's own are read. */
+export const referencePatches = (reference) => REFERENCES[reference];
+
+/**
  * The software tone map the hdr-to-sdr cell compares its picture with: linear light, Hable onto
  * 100 nits, BT.709. Run on the source in the side's container, it is a known-good SDR rendering of
  * the same frames; the cell's bounds catch a black, washed-out, or tinted picture, not a
@@ -339,6 +594,68 @@ const ALL_PATHS = Object.keys(PATHS);
  */
 export const REFERENCE_TONE_MAP =
   "zscale=t=linear:npl=100,format=gbrpf32le,zscale=p=bt709,tonemap=tonemap=hable:desat=0,zscale=t=bt709:m=bt709:r=tv,format=yuv420p";
+
+/**
+ * How far a tone-mapped patch may lie from the reference's (`colour-patches.mjs`): 10 in CIEDE2000,
+ * where colours look the same with a different tone curve and a cast, a range fault, or a lost
+ * gamut does not; and 8 codes of luma for a dark patch, where CIEDE2000 hardly tells a crushed
+ * black from a right one. Stated before any path was measured, not fitted to one.
+ */
+const TONE_MAPPED = { deltaE: 10, dark: 8 };
+
+/**
+ * How far an SDR patch may lie from the source's own: 3 in CIEDE2000 and 3 codes of luma, the
+ * encoder's loss, since nothing is converted and the right answer is the source itself.
+ */
+const SOURCE_EXACT = { deltaE: 3, dark: 3 };
+
+/** A tone-mapping row on a patch fixture: tags, metadata, and every patch against `reference`. */
+const toneMapped = (id, paths, fixture, reference) => ({
+  id,
+  stage: "hdr-to-sdr",
+  paths,
+  fixture,
+  profile: "h264-sdr",
+  request: {},
+  start: 0,
+  seek: 20,
+  span: 4,
+  work: { "tone-map": "path" },
+  notBuilt: ["hdr-tone-mapping-requires-hardware"],
+  checks: [
+    { check: "hdr-removed" },
+    { check: "sdr-tags" },
+    { check: "hdr-metadata" },
+    { check: "colour", reference, at: 21, tolerance: TONE_MAPPED },
+    { check: "codec", codec: "h264", stage: false },
+    { check: "bit-depth", max: 8 },
+    { check: "dimensions", expect: "source" },
+    { check: "frame-rate", expect: ["source"] },
+  ],
+});
+
+/** A row that scales an SDR patch fixture to 720 lines: its colour and tags carried, the patches as the source's. */
+const sdrScaled = (id, fixture) => ({
+  id,
+  stage: "scale",
+  paths: ALL_PATHS,
+  fixture,
+  profile: "h264-sdr",
+  request: { quality: { maxHeight: 720 } },
+  start: 0,
+  seek: 20,
+  span: 4,
+  work: { scale: "path" },
+  notBuilt: [],
+  checks: [
+    { check: "scaled", maxHeight: 720 },
+    { check: "dimensions", expect: "negotiated" },
+    { check: "codec", codec: "h264", stage: false },
+    { check: "frame-rate", expect: ["source"] },
+    { check: "source-tags" },
+    { check: "colour", reference: "source", at: 21, tolerance: SOURCE_EXACT },
+  ],
+});
 
 /**
  * The rows: one per stage, a stage's row for a kind of source (`<stage>-<source>`, such as a
@@ -428,6 +745,9 @@ export const ROWS = [
       { check: "frame-rate", expect: ["base"] },
     ],
   },
+  sdrScaled("scale-bt601", "sdr-bt601-patches"),
+  sdrScaled("scale-bt2020", "sdr-bt2020-patches"),
+  sdrScaled("scale-full-range", "sdr-full-range-patches"),
   {
     id: "hdr-to-sdr",
     stage: "hdr-to-sdr",
@@ -443,7 +763,58 @@ export const ROWS = [
     checks: [
       { check: "hdr-removed" },
       { check: "sdr-tags" },
+      { check: "hdr-metadata" },
       { check: "picture", at: 240, seconds: 2 },
+      { check: "codec", codec: "h264", stage: false },
+      { check: "bit-depth", max: 8 },
+      { check: "dimensions", expect: "source" },
+      { check: "frame-rate", expect: ["source"] },
+    ],
+  },
+  toneMapped("hdr-to-sdr-patches", ALL_PATHS, "hdr10-patches", "hdr10"),
+  toneMapped("hdr-to-sdr-hlg", ALL_PATHS, "hlg-patches", "hlg"),
+  toneMapped("hdr-to-sdr-dv81", ALL_PATHS, "dv81-patches", "hdr10"),
+  toneMapped("hdr-to-sdr-dv84", ALL_PATHS, "dv84-patches", "hlg"),
+  {
+    id: "hdr-to-sdr-dv7",
+    stage: "hdr-to-sdr",
+    paths: ALL_PATHS,
+    fixture: "dv7",
+    profile: "h264-sdr",
+    request: {},
+    start: 0,
+    seek: 20,
+    span: 4,
+    work: { "tone-map": "path" },
+    notBuilt: ["hdr-tone-mapping-requires-hardware"],
+    checks: [
+      { check: "hdr-removed" },
+      { check: "sdr-tags" },
+      { check: "hdr-metadata" },
+      { check: "picture", at: 21, seconds: 2 },
+      { check: "codec", codec: "h264", stage: false },
+      { check: "bit-depth", max: 8 },
+      { check: "dimensions", expect: "negotiated" },
+      { check: "frame-rate", expect: ["source"] },
+    ],
+  },
+  {
+    id: "hdr-to-sdr-dv5",
+    stage: "hdr-to-sdr",
+    paths: ALL_PATHS,
+    fixture: "dv5-apple",
+    profile: "h264-sdr",
+    request: {},
+    start: 12,
+    seek: 24,
+    span: 4,
+    work: { "tone-map": "path" },
+    notBuilt: ["hdr-tone-mapping-requires-hardware", "dolby-vision-not-convertible"],
+    checks: [
+      { check: "hdr-removed" },
+      { check: "sdr-tags" },
+      { check: "hdr-metadata" },
+      { check: "picture", at: 25, seconds: 2 },
       { check: "codec", codec: "h264", stage: false },
       { check: "bit-depth", max: 8 },
       { check: "dimensions", expect: "source" },
@@ -595,27 +966,6 @@ export const ROWS = [
       { check: "frame-rate", expect: ["source"] },
     ],
   },
-  {
-    id: "hybrid-cpu-tone-map",
-    stage: "hdr-to-sdr",
-    paths: ["vaapi"],
-    fixture: "hlg-hevc",
-    profile: "h264-sdr",
-    request: {},
-    start: 0,
-    seek: 20,
-    span: 4,
-    work: { decode: "path", "tone-map": "cpu", "encode-h264": "path" },
-    notBuilt: ["hdr-tone-mapping-requires-hardware"],
-    checks: [
-      { check: "hdr-removed" },
-      { check: "sdr-tags" },
-      { check: "codec", codec: "h264", stage: false },
-      { check: "bit-depth", max: 8 },
-      { check: "dimensions", expect: "source" },
-      { check: "frame-rate", expect: ["source"] },
-    ],
-  },
 ];
 
 /** The checks every transcode cell gets, before its row's own. */
@@ -678,11 +1028,22 @@ export const parseProbe = (json) => {
     transfer: known(video.color_transfer),
     primaries: known(video.color_primaries),
     space: known(video.color_space),
+    range: known(video.color_range),
     fieldOrder: known(video.field_order),
     fps: rate(video.avg_frame_rate) ?? rate(video.r_frame_rate),
     baseFps: rate(video.r_frame_rate),
     duration: number(parsed.format?.duration) ?? number(video.duration),
   };
+};
+
+/**
+ * The side data types of a video stream and its first picture, from `ffprobe -select_streams v:0
+ * -read_intervals %+#1 -show_entries stream_side_data=side_data_type:frame_side_data=side_data_type`.
+ */
+export const parseSideData = (json) => {
+  const parsed = typeof json === "string" ? JSON.parse(json) : json;
+  const types = (items) => (items ?? []).map((item) => item.side_data_type).filter((type) => typeof type === "string");
+  return { stream: types(parsed.streams?.[0]?.side_data_list), frame: types(parsed.frames?.[0]?.side_data_list) };
 };
 
 /** Frames of `ffprobe -show_entries frame=… -of json`, sorted by time: `{ pts, key, interlaced }`. */
@@ -1428,11 +1789,47 @@ export const CHECKS = {
     class: "output",
     run: (obs) =>
       everyOutput(obs, (media) => {
-        const tags = `${media.transfer ?? "untagged"}/${media.primaries ?? "untagged"}/${media.space ?? "untagged"}`;
-        return media.transfer === "bt709" && media.primaries === "bt709" && media.space === "bt709"
+        const tags = `${media.transfer ?? "untagged"}/${media.primaries ?? "untagged"}/${media.space ?? "untagged"}/${media.range ?? "untagged"}`;
+        return media.transfer === "bt709" && media.primaries === "bt709" && media.space === "bt709" && media.range !== "pc"
           ? ok(`tagged ${tags}`)
-          : no(`tagged ${tags}, not bt709/bt709/bt709`);
+          : no(`tagged ${tags}, not bt709/bt709/bt709 in limited range`);
       }),
+  },
+  // Side data left on an SDR stream: the encoders write what ffmpeg's frames carry into the
+  // bitstream, and a player that reads HDR or viewing metadata shows the SDR picture as HDR. Only
+  // the allowed kinds pass (`SDR_SIDE_DATA`); the forbidden ones and any on neither list fail
+  // (`sdrSideDataFaults`).
+  "hdr-metadata": {
+    class: "output",
+    run: (obs) => {
+      const fetches = fetchesOf(obs);
+      if (fetches.length === 0) return no("no output was fetched");
+      for (const fetch of fetches) {
+        if (fetch.sideData === undefined) return no(`could not measure: no side data was read from the ${fetch.name} output`);
+        const faults = sdrSideDataFaults([...fetch.sideData.stream, ...fetch.sideData.frame]);
+        if (faults.length > 0) return no(`the ${fetch.name} output still carries ${faults.join(", ")}`);
+      }
+      return ok("no side data on the stream or its first picture but what describes the picture or comes from the encoder");
+    },
+  },
+  // The colour an SDR source states, carried to the output: its transfer, primaries, matrix, and range.
+  "source-tags": {
+    class: "output",
+    run: (obs) =>
+      everyOutput(obs, (media) => {
+        const tags = (of) => `${of?.transfer ?? "untagged"}/${of?.primaries ?? "untagged"}/${of?.space ?? "untagged"}/${of?.range ?? "untagged"}`;
+        return tags(media) === tags(obs.source) ? ok(`tagged ${tags(media)} as the source`) : no(`tagged ${tags(media)}, the source ${tags(obs.source)}`);
+      }),
+  },
+  colour: {
+    class: "output",
+    run: (obs, params) => {
+      const colour = obs.analysis?.colour;
+      if (colour === undefined) return no("could not measure: no patches were read");
+      if (colour.error !== undefined) return no(`could not measure: ${colour.error}`);
+      const verdict = judgePatches(colour.measured, colour.expected, colour.patches, params.tolerance);
+      return verdict.ok ? ok(`patches at ${params.at} s against the ${params.reference} reference, ${verdict.evidence}`) : no(`patches at ${params.at} s against the ${params.reference} reference: ${verdict.evidence}`);
+    },
   },
   picture: {
     class: "output",

@@ -131,7 +131,11 @@ describe("decideDownload", () => {
     const mkv = probe("mkv", video("h264", 720), [aac, audio(2, "dts", false)], 2_000_000);
     const remux = decideDownload(mkv, iphone, "standard", optionsFor(mkv));
 
-    expect(remux).toMatchObject({ _tag: "Mp4", mode: "remux", video: VideoPlan.Copy() });
+    expect(remux).toMatchObject({
+      _tag: "Mp4",
+      mode: "remux",
+      video: VideoPlan.Copy({ dolbyVision: "none" }),
+    });
     expect(remux).toMatchObject({ audio: AudioPlan.Copy({ index: 1 }) });
 
     expect(

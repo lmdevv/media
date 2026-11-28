@@ -18,7 +18,6 @@ import {
   encodeRowId,
   encodesTarget,
   filter,
-  HDR_COLOURS,
   ImplId,
   NOTHING,
   Op,
@@ -27,8 +26,12 @@ import {
   type OutputCodec,
   row,
   type Row,
-  transferOf,
   visibleCanvas,
+  SDR_BT709,
+  STRIP_DYNAMIC_HDR_METADATA,
+  STRIP_HDR_METADATA,
+  TAG_SDR_BT709,
+  toneMapTransfer,
 } from "./video-ops.ts";
 
 /** Any codec ffmpeg decodes in software, in the layout the stream has. */
@@ -89,30 +92,36 @@ const scaleCpu: OpImpl<"Scale"> = {
 };
 
 /**
- * HDR to SDR in software: linearize, map with Hable onto 100 nits, convert to BT.709. Needs
- * ffmpeg's `zscale` (libzimg) and `tonemap`.
+ * HDR to SDR in software from PQ and HLG frames: linearize, map with Hable onto 100 nits, convert
+ * to BT.709. Dynamic HDR metadata, which it does not read, goes first all the same, as before every
+ * tone map (`STRIP_DYNAMIC_HDR_METADATA`). The frames leave tagged SDR BT.709 in limited range
+ * (`TAG_SDR_BT709`), without the source's HDR metadata (`STRIP_HDR_METADATA`). Needs ffmpeg's
+ * `zscale` (libzimg) and `tonemap`.
  */
 const toneMapCpu: OpImpl<"ToneMap"> = {
   id: ImplId("tonemap.cpu"),
   op: "ToneMap",
   on: "cpu",
   takes: "cpu",
-  needs: () => ["filter:zscale", "filter:tonemap"],
-  variant: (_, input) => (HDR_COLOURS.has(input.colour) ? transferOf(input.colour) : undefined),
-  output: (_, input) => ({ ...input, colour: "sdr", depth: 8, pixelFormat: "yuv420p" }),
+  needs: () => ["filter:zscale", "filter:tonemap", "filter:setparams", "filter:sidedata"],
+  variant: (_, input) => toneMapTransfer(input),
+  output: (_, input) => ({ ...input, colour: SDR_BT709, depth: 8, pixelFormat: "yuv420p" }),
   render: () => ({
     ...NOTHING,
     filters: [
+      ...STRIP_DYNAMIC_HDR_METADATA,
       filter("zscale", ["t", "linear"], ["npl", "100"]),
       filter("format", "gbrpf32le"),
       filter("zscale", ["p", "bt709"]),
       filter("tonemap", ["tonemap", "hable"], ["desat", "0"]),
       filter("zscale", ["t", "bt709"], ["m", "bt709"], ["r", "tv"]),
+      TAG_SDR_BT709,
+      ...STRIP_HDR_METADATA,
     ],
   }),
   probes: [
-    { op: Op.ToneMap(), clip: "hevc-pq", runs: 1 },
-    { op: Op.ToneMap(), clip: "hevc-hlg", runs: 1 },
+    { op: Op.ToneMap(), clip: "hevc-pq", runs: 1, readback: "picture" },
+    { op: Op.ToneMap(), clip: "hevc-hlg", runs: 1, readback: "picture" },
   ],
 };
 
@@ -129,7 +138,7 @@ const burnImageCpu: OpImpl<"BurnImage"> = {
   takes: "cpu",
   needs: () => ["filter:overlay", "filter:scale"],
   variant: (op, input) =>
-    input.colour === "sdr" && op.subtitle.frame.memory === "cpu" ? "bitmap" : undefined,
+    input.colour.signal === "sdr" && op.subtitle.frame.memory === "cpu" ? "bitmap" : undefined,
   output: (_, input) => ({ ...input, depth: 8, pixelFormat: "yuv420p" }),
   render: (op, input) => {
     const byHeight = canvasFit(op.subtitle.codec) === "height";
@@ -192,7 +201,7 @@ const burnTextCpu: OpImpl<"BurnText"> = {
   on: "cpu",
   takes: "cpu",
   needs: () => ["filter:subtitles"],
-  variant: (_, input) => (input.colour === "sdr" ? "ass" : undefined),
+  variant: (_, input) => (input.colour.signal === "sdr" ? "ass" : undefined),
   output: (_, input) => input,
   render: (op) => ({
     ...NOTHING,
@@ -293,7 +302,9 @@ const encodeCpu = (codec: OutputCodec): OpImpl<"Encode"> => {
     takes: "cpu",
     needs: () => [`encoder:${encoder.name}`],
     variant: (op, input) =>
-      encodesTarget(codec, op.target) && input.colour === "sdr" && input.scan === "progressive"
+      encodesTarget(codec, op.target) &&
+      input.colour.signal === "sdr" &&
+      input.scan === "progressive"
         ? `${String(op.target.depth)}/crf`
         : undefined,
     output: (_, input) => ({ ...input, depth: 8, pixelFormat: "yuv420p" }),
