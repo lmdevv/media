@@ -248,7 +248,8 @@ const qsv =
     behavior.qsvFailsAfterFirstFragmentBefore !== undefined);
 const failsLater = qsv && behavior.qsvFailsAfterSeconds !== undefined;
 
-// Listings name the GPU components the stand-in plays, whatever the real build has.
+// Listings name the GPU components the stand-in plays, whatever the real build has. It plays no
+// Vulkan device, so they never name libplacebo, whose rows need one, though the build has it.
 const emulated = {
   "-hwaccels": "qsv\\nvaapi\\n",
   "-filters": [
@@ -278,11 +279,10 @@ if (listing !== undefined) {
   const listed = run(args, { encoding: "utf8" });
   const lines = (listed.stdout + emulated[listing]).split("\\n");
 
+  const hidden = behavior.withoutCpuToneMap === true ? /\\s(zscale|tonemap|libplacebo)\\s/ : /\\slibplacebo\\s/;
+
   process.stdout.write(
-    (behavior.withoutCpuToneMap === true && listing === "-filters"
-      ? lines.filter((line) => !/\\s(zscale|tonemap)\\s/.test(line))
-      : lines
-    ).join("\\n"),
+    (listing === "-filters" ? lines.filter((line) => !hidden.test(line)) : lines).join("\\n"),
   );
   process.exit(listed.status ?? 1);
 }
