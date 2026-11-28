@@ -19,6 +19,7 @@ import { convertible } from "./source-colours.ts";
 import {
   type CapabilitySnapshot,
   encodeDomain,
+  type Instead,
   planVideo,
   sourceOf,
   type VideoIntent,
@@ -52,6 +53,8 @@ export type VideoPlan = Data.TaggedEnum<{
     readonly intent: VideoIntent;
     readonly output: VideoOutput;
     readonly pipeline: VideoPipeline;
+    /** The steps that run a fallback row, and why (`PlannedVideo.instead`). */
+    readonly instead: ReadonlyArray<Instead>;
   };
 }>;
 
@@ -414,8 +417,8 @@ export const replan = (
   const source = sourceOf(video);
 
   return Result.match(planVideo(source, intent, capabilities), {
-    onSuccess: ({ output, pipeline }) =>
-      Result.succeed(VideoPlan.Encode({ intent, output, pipeline })),
+    onSuccess: ({ output, pipeline, instead }) =>
+      Result.succeed(VideoPlan.Encode({ intent, output, pipeline, instead })),
     onFailure: () => Result.fail(refusalOf(source.colour, video, intent, capabilities)),
   });
 };

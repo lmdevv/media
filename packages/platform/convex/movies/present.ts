@@ -79,15 +79,19 @@ export const presentMediaFile = (file: Doc<"mediaFiles">): MediaFile => ({
 const defaultAudio = (file: Doc<"mediaFiles">) =>
   file.probe.audio.find((track) => track.default) ?? file.probe.audio[0];
 
-/** A video stream's Dolby Vision configuration record and RPU flag, the ones it has. */
+/** A video stream's Dolby Vision record, RPU flag, and stated transfer, the ones it has. */
 const dolbyVisionOf = (
   video: Doc<"mediaFiles">["probe"]["video"][number] | undefined,
-): Pick<MediaVersion, "dolbyVision" | "dolbyVisionRpu"> => {
-  const fields: { -readonly [Key in "dolbyVision" | "dolbyVisionRpu"]?: MediaVersion[Key] } = {};
+): Pick<MediaVersion, "dolbyVision" | "dolbyVisionRpu" | "videoTransfer"> => {
+  const fields: {
+    -readonly [Key in "dolbyVision" | "dolbyVisionRpu" | "videoTransfer"]?: MediaVersion[Key];
+  } = {};
 
   if (video?.dolbyVision !== undefined) fields.dolbyVision = video.dolbyVision;
 
   if (video?.dolbyVisionRpu === true) fields.dolbyVisionRpu = true;
+
+  if (video?.colour?.transfer !== undefined) fields.videoTransfer = video.colour.transfer;
 
   return fields;
 };
@@ -246,6 +250,7 @@ const directPlayFile = (file: Doc<"mediaFiles">): DirectPlayFile => {
             dynamicRange: dynamicRangeOf(video.hdr),
             dolbyVision: video.dolbyVision,
             dolbyVisionRpu: video.dolbyVisionRpu,
+            colour: video.colour,
           },
     audio: audio === undefined ? undefined : { codec: audio.codec, channels: audio.channels },
   };

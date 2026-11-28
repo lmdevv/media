@@ -87,7 +87,9 @@ const placeboTransfer = (frame: Frame): "pq" | "hlg" | undefined =>
  * lines (7.1's; 9 reached 229 to 41), against Intel's own 150 up to 1440 lines and 102 at 2160.
  * VA-API's: 149, 121, 91, 66, and 26 (9's at 480 and 2160, 7.1's between), against Intel's own 248
  * to 96. For a 24 fps film it keeps up (`KEEPS_UP`) up to 1080 lines on Quick Sync and 1440 on
- * VA-API, and above that Intel's own tone map is the cheaper choice.
+ * VA-API, and above that Intel's own tone map is the cheaper choice. These are the Arc's figures,
+ * and every Quick Sync or VA-API device is held to them: a faster or slower card is not measured
+ * here, so it may get libplacebo where it falls behind or Intel's own where libplacebo would keep up.
  */
 const PLACEBO_THROUGHPUT: Readonly<
   Record<GpuDomain, ReadonlyArray<readonly [height: number, framesPerSecond: number]>>
@@ -447,9 +449,9 @@ const scaleQsv: OpImpl<"Scale"> = {
 /**
  * `vpp_qsv`'s tone map from P010 PQ and HLG surfaces to BT.709 SDR in NV12, where libplacebo's
  * cannot run (`fallbackFor`). `vpp_qsv` hands the driver the frames' mastering display and content
- * light levels alone, so dynamic HDR metadata changes nothing it maps (on Apple's HDR10+ sample, 120
- * frames at 720 lines came out byte for byte the same without it, under ffmpeg 7.1 and 9), and it
- * fuses with the scale before it into one pass. It leaves the source's colour on the frames under Debian's ffmpeg
+ * light levels alone, so dynamic HDR metadata changes nothing it maps (the same frames with and
+ * without HDR10+, where libplacebo's differ: `hdr10-plus.device.test.ts`), and it fuses with the
+ * scale before it into one pass. It leaves the source's colour on the frames under Debian's ffmpeg
  * 7.1 and its HDR metadata under 7.1 and 9, which encoders then write into the stream, so an SDR
  * stream would say PQ and BT.2020: the row tags its frames SDR BT.709 in limited range
  * (`TAG_SDR_BT709`) and drops that metadata (`STRIP_HDR_METADATA`).

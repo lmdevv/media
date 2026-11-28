@@ -111,35 +111,43 @@ Old movies' Convex project, its SDK client, and its command registry were delete
   keeps them), HDR10+, a Dolby Vision configuration (profile, level, and the base layer's
   compatibility id), and whether the first picture carries a Dolby Vision RPU. `DynamicRange` stays
   the summary the wire and clients use. One table (`source-colours.ts`, printed by its test) decides
-  per kind, from the profile first and the compatibility id second, and any pairing it does not name
-  takes the stricter side: SDR BT.709, BT.601, BT.2020, and full range are carried as they are;
+  per kind, from the profile first and the compatibility id second, and believes a record only where
+  the stream's own transfer is the one its id names (1 and 6 PQ, 4 HLG, 2 a stated SDR transfer);
+  any pairing it does not name, or a record the pictures contradict, takes the stricter side: SDR BT.709, BT.601, BT.2020, and full range are carried as they are;
   HDR10 and HDR10+ are PQ (HDR10+ mapped as its static base: every tone map that would read the
   dynamic metadata gets it removed first); HLG is HLG; HEVC Dolby Vision 7 with id 6 and 8.1 are
   their HDR10 base layer, 8.4 its HLG one, 8.2 its SDR one; Dolby Vision 5, and every other pairing,
   is IPT-PQ that only the RPU makes colour, so only libplacebo maps it, and only when the first
   picture carries an RPU; without one, or without a proven libplacebo, it is refused
-  (`dolby-vision-not-convertible`). A later picture losing its RPU cannot be known at scan time.
+  (`dolby-vision-not-convertible`). A later picture losing its RPU cannot be known at scan time,
+  which reads one picture a file: such a file is broken, and its conversion goes wrong as any
+  player's would. Profile 8 whose first picture has no RPU is its base layer's own kind.
   Direct play and copies follow one rule per profile (`playableAs`): profile 8 plays as it is only
   for a client that declares Dolby Vision and is copied with its configuration (`-strict
   unofficial`) for one, or as its base layer, the RPU's NAL units removed (`filter_units`), for one
-  that declares that range; profile 7 never plays as it is and is copied as its HDR10 base layer
+  that declares that range, and without a first-picture RPU only as its base layer, never as stored; profile 7 never plays as it is and is copied as its HDR10 base layer
   alone; profile 5 plays and is copied (`dvh1`) only with an RPU and only for a client that declares
   Dolby Vision. A negotiation's `video.dynamicRange` is the range the bytes carry: a base-layer copy
   says the base's, a tone map says `sdr`. Every tone map's frames leave SDR BT.709 in limited range,
-  carrying no side data but the encoder's own unregistered SEI: mastering display, content light
-  levels, HDR10+, HDR Vivid, the RPU, an iPhone's ambient viewing environment, and an ICC profile
-  are removed, which encoders would otherwise write. Judged against libplacebo's BT.2390 on colour
+  carrying no side data about dynamic range or viewing: mastering display, content light levels,
+  HDR10+, HDR Vivid, the RPU, an iPhone's ambient viewing environment, and an ICC profile are
+  removed, which encoders would otherwise write; what describes the picture (stereo 3D, spherical
+  projection, rotation, captions, timecodes) stays, and the grid fails any kind on neither list. Judged against libplacebo's BT.2390 on colour
   patches, the CPU's `zscale` and Hable lie within 6.5 (CIEDE2000) and oversaturate bright saturated
   HLG (9.5 against the kept reference), and Intel's own tone map, Quick Sync's and VA-API's alike,
   crushes shadows and mid-tones (0.5 cd/m² at luma 3 where 16 is right, 100 cd/m² at 130 where 174
   is) and cannot be set otherwise. So Quick Sync's and VA-API's paths map with libplacebo where it is
   proven (its probe reads the picture back) and sustains 2.5 times the source's frame rate at the
   output's height (measured on both builds: up to 1080 lines on Quick Sync and 1440 on VA-API for a
-  24 fps film), else with their own tone map; Dolby Vision 5 keeps libplacebo at any size. libplacebo
-  runs on a Vulkan device derived from the configured render node's VA-API or Quick Sync device, so
-  it is that GPU by construction and never Mesa's software device. It takes frames in CPU memory and
-  uploads and downloads them itself (two transfers the plan's cost counts); a mapped hand-over failed
-  on both builds (`VK_ERROR_OUT_OF_DEVICE_MEMORY` creating the image). On builds whose libplacebo
+  24 fps film; every card is held to the Arc A380's figures, a variable-rate file to its peak rate,
+  an unknown rate to 60), else with their own tone map, and the stage says which reason held
+  (`slower`, `unproven`, `excluded`, `unsuited`); Dolby Vision 5 keeps libplacebo at any size.
+  libplacebo runs on a Vulkan device derived from the configured render node's VA-API or Quick Sync
+  device; where ffmpeg's derivation falls back to its first device, its probe reads the device ffmpeg
+  opened and fails on a software, virtual, or unknown one, and it reads the picture back in colour.
+  It takes frames in CPU memory and uploads and downloads them itself (two transfers the plan's cost
+  counts); a mapped hand-over fails on ffmpeg 9 (`VK_ERROR_OUT_OF_DEVICE_MEMORY` creating the image)
+  and draws solid green on the image's 7.1. On builds whose libplacebo
   has `shader_cache` (ffmpeg 9, not the image's 7.1), compiled shaders are kept under the data
   folder. When a Dolby Vision copy fails in an app's player, the app negotiates once more without
   Dolby Vision: the iOS simulator's HLS path decodes no Dolby Vision, while AVFoundation with a

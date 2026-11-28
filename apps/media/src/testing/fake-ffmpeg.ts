@@ -52,6 +52,11 @@ export interface FakeFfmpegBehavior {
    * conversion to NV12, as on a GPU whose Vulkan the probes prove.
    */
   readonly withPlacebo?: true;
+  /**
+   * The Vulkan device a run that opens one names, as ffmpeg logs its pick: `Stand-in GPU
+   * (discrete)` unless given, such as `llvmpipe (LLVM 21.1.8, 256 bits) (software)`.
+   */
+  readonly vulkanDevice?: string;
   /** Runs these rules pick fail, hang, or start late, as a broken or slow stage would. */
   readonly rules?: ReadonlyArray<RunRule>;
   /**
@@ -148,6 +153,13 @@ const asked = process.argv.slice(2);
 let args = asked;
 const hls = args.includes("hls");
 const probe = args.includes("-progress") && (args.includes("null") || args.includes("rawvideo"));
+
+// A run that opens a Vulkan device names the one it picked, as ffmpeg does at the verbose level.
+if (asked.some((arg, index) => asked[index - 1] === "-init_hw_device" && arg.startsWith("vulkan="))) {
+  process.stderr.write(
+    "[Vulkan @ 0x1] Device 0 selected: " + (behavior.vulkanDevice ?? "Stand-in GPU (discrete)") + " (0x1)\\n",
+  );
+}
 
 if (behavior.logInvocations === true) {
   appendFileSync(join(here, "invocations.jsonl"), JSON.stringify(asked) + "\\n");

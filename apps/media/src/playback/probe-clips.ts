@@ -28,6 +28,32 @@ const SIZE = { width: 320, height: 240 } as const;
 const PICTURE = ["-f", "lavfi", "-i", "testsrc2=size=320x240:rate=10:duration=1"];
 
 /**
+ * The patches the HDR clips are made of, R'G'B' codes in four columns of 80 by two rows of 120:
+ * black, gray 128, white, and gray 64 above, red, green, and blue at 192 and gray 192 below, coded as
+ * PQ or HLG as they stand. A tone map keeps the grays neutral and in order and each primary its
+ * own hue, which a picture of the wrong chroma, or of none, does not (`readbackVerdict`).
+ */
+const PATCH_COLOURS = [
+  ["0x000000", "0x808080", "0xffffff", "0x404040"],
+  ["0xc00000", "0x00c000", "0x0000c0", "0xc0c0c0"],
+] as const;
+
+const PATCHES = [
+  "-f",
+  "lavfi",
+  "-i",
+  [
+    "color=c=0x808080:size=320x240:rate=10:duration=1",
+    ...PATCH_COLOURS.flatMap((row, y) =>
+      row.map(
+        (colour, x) =>
+          `drawbox=x=${String(x * 80)}:y=${String(y * 120)}:w=80:h=120:color=${colour}:t=fill`,
+      ),
+    ),
+  ].join(","),
+];
+
+/**
  * Ten interlaced frames: twenty pictures woven in pairs, the top field from the earlier one, and
  * coded as fields (`ildct`), so each decoded frame is flagged interlaced and top field first.
  */
@@ -111,7 +137,7 @@ export const PROBE_CLIPS: Readonly<Record<ClipName, ProbeClip>> = {
     source: { ...sdr("hevc", "yuv420p10le", 10), colour: hdr("pq", "present") },
     needs: "encoder:libx265",
     args: [
-      ...PICTURE,
+      ...PATCHES,
       "-vf",
       PQ,
       ...libx265("yuv420p10le", HDR10_X265),
@@ -127,7 +153,7 @@ export const PROBE_CLIPS: Readonly<Record<ClipName, ProbeClip>> = {
     source: { ...sdr("hevc", "yuv420p10le", 10), colour: hdr("pq", "absent") },
     needs: "encoder:libx265",
     args: [
-      ...PICTURE,
+      ...PATCHES,
       "-vf",
       PQ,
       ...libx265("yuv420p10le"),
@@ -143,7 +169,7 @@ export const PROBE_CLIPS: Readonly<Record<ClipName, ProbeClip>> = {
     source: { ...sdr("hevc", "yuv420p10le", 10), colour: hdr("hlg", "absent") },
     needs: "encoder:libx265",
     args: [
-      ...PICTURE,
+      ...PATCHES,
       "-vf",
       HLG,
       ...libx265("yuv420p10le"),
@@ -277,6 +303,43 @@ const meanOf = (gray: Uint8Array, x0: number, x1: number, y0: number, y1: number
 /** A measured level, rounded for the evidence. */
 const level = (value: number): string => value.toFixed(0);
 
+/** The layout a probe reads `readback` back in: R'G'B' where colour is judged, else gray. */
+export const readbackPixelFormat = (readback: Readback): "gray" | "rgb24" =>
+  readback === "picture" ? "rgb24" : "gray";
+
+/** The mean R'G'B' of the middle of the patch in column `x` and row `y` of a 320x240 rgb24 picture. */
+const patchOf = (rgb: Uint8Array, x: number, y: number): readonly [number, number, number] => {
+  const total = [0, 0, 0];
+  let count = 0;
+
+  for (let row = y * 120 + 30; row < y * 120 + 90; row += 1) {
+    for (let column = x * 80 + 20; column < x * 80 + 60; column += 1) {
+      for (const channel of [0, 1, 2] as const) {
+        total[channel] = (total[channel] ?? 0) + (rgb[(row * 320 + column) * 3 + channel] ?? 0);
+      }
+
+      count += 1;
+    }
+  }
+
+  return [(total[0] ?? 0) / count, (total[1] ?? 0) / count, (total[2] ?? 0) / count];
+};
+
+const lumaOf = ([r, g, b]: readonly [number, number, number]): number =>
+  0.2126 * r + 0.7152 * g + 0.0722 * b;
+
+/** A measured colour, rounded for the evidence. */
+const shown = (colour: readonly [number, number, number]): string => colour.map(level).join(",");
+
+/**
+ * How a tone map's picture of the HDR clips' patches must come out: each gray's channels within
+ * `neutral` of each other, black, gray 64, and gray 128 at least `steps` apart in luma, and each
+ * primary at least `primary` above the other two channels. On ffmpeg 9 the CPU's Hable and
+ * libplacebo's BT.2390 keep the grays within 1, step them 47 to 122 apart, and lift each primary
+ * 141 or more above the rest; solid green with the luma's shadows, or a gray picture, fails.
+ */
+const MAPPED = { neutral: 12, steps: 20, primary: 60 } as const;
+
 /** How far the gray clip, decoded, may lie from the middle gray `color=c=gray` draws. */
 const GRAY = { low: 110, high: 146 } as const;
 
@@ -287,47 +350,52 @@ export interface ReadbackVerdict {
   readonly detail: string;
 }
 
-/**
- * How a tone map's picture of the HDR clips must spread and sit: its tenth and ninetieth percentile
- * levels at least `spread` apart and its mean within `low` and `high`. On ffmpeg 9, the CPU's Hable
- * and libplacebo's BT.2390 picture of the PQ and HLG clips spread 59 to 151 levels around means of
- * 110 to 168; a blank or flat picture spreads none.
- */
-const MAPPED = { spread: 30, low: 20, high: 235 } as const;
+/** Whether a tone map's rgb24 picture of the HDR clips keeps their patches (`MAPPED`). */
+const pictureVerdict = (rgb: Uint8Array): ReadbackVerdict => {
+  const grays = [patchOf(rgb, 0, 0), patchOf(rgb, 3, 0), patchOf(rgb, 1, 0), patchOf(rgb, 3, 1)];
+  const primaries = [patchOf(rgb, 0, 1), patchOf(rgb, 1, 1), patchOf(rgb, 2, 1)];
+  const neutral = grays.every((gray) => Math.max(...gray) - Math.min(...gray) <= MAPPED.neutral);
+  const [black = 0, dark = 0, middle = 0] = grays.map(lumaOf);
+  const stepped = dark - black >= MAPPED.steps && middle - dark >= MAPPED.steps;
+
+  const hued = primaries.every(
+    (colour, channel) =>
+      (colour[channel] ?? 0) - Math.max(...colour.filter((_, other) => other !== channel)) >=
+      MAPPED.primary,
+  );
+
+  return {
+    passed: neutral && stepped && hued,
+    detail: `grays ${grays.map(shown).join(" ")}; red, green, blue ${primaries.map(shown).join(" ")}`,
+  };
+};
 
 /**
- * Whether the 320x240 gray picture a probe read back (`gray`, 8 bits a pixel) shows `readback`,
- * measured inside each region with a margin to its edges. `blend`: the clear band keeps the clip's
- * gray, the opaque band is white (220 or more), and the half band lies within 14 levels of halfway
- * between them, so an overlay that ignores alpha, takes it as premultiplied, or draws nothing
- * fails. `glyph`: the block's middle is white (215 or more) and the left edge, which no glyph
- * reaches, keeps the clip's gray. `picture`: a tone map's frames show the clip's picture
- * (`MAPPED`), so one that hands on blank or garbled frames fails.
+ * Whether the 320x240 picture a probe read back shows `readback`, measured inside each region with a
+ * margin to its edges: in 8-bit gray, or in 8-bit R'G'B' for `picture` (`readbackPixelFormat`).
+ * `blend`: the clear band keeps the clip's gray, the opaque band is white (220 or more), and the
+ * half band lies within 14 levels of halfway between them, so an overlay that ignores alpha, takes
+ * it as premultiplied, or draws nothing fails. `glyph`: the block's middle is white (215 or more)
+ * and the left edge, which no glyph reaches, keeps the clip's gray. `picture`: a tone map's frames
+ * keep the HDR clip's patches (`MAPPED`), so one that hands on blank frames, or frames of the wrong
+ * chroma or of none, fails.
  */
-export const readbackVerdict = (readback: Readback, gray: Uint8Array): ReadbackVerdict => {
-  if (gray.length < 320 * 240) {
+export const readbackVerdict = (readback: Readback, picture: Uint8Array): ReadbackVerdict => {
+  const size = 320 * 240 * (readbackPixelFormat(readback) === "rgb24" ? 3 : 1);
+
+  if (picture.length < size) {
     return {
       passed: false,
-      detail: `read back ${String(gray.length)} bytes, not a 320x240 picture`,
+      detail: `read back ${String(picture.length)} bytes, not a 320x240 picture`,
     };
   }
 
-  if (readback === "picture") {
-    const levels = [...gray.subarray(0, 320 * 240)].toSorted((left, right) => left - right);
-    const low = levels[Math.floor(levels.length / 10)] ?? 0;
-    const high = levels[Math.floor((levels.length * 9) / 10)] ?? 0;
-    const mean = levels.reduce((total, value) => total + value, 0) / levels.length;
-
-    return {
-      passed: high - low >= MAPPED.spread && mean >= MAPPED.low && mean <= MAPPED.high,
-      detail: `levels ${level(low)} to ${level(high)} around ${level(mean)}`,
-    };
-  }
+  if (readback === "picture") return pictureVerdict(picture);
 
   if (readback === "blend") {
-    const clear = meanOf(gray, 8, 99, 8, 232);
-    const opaque = meanOf(gray, 115, 206, 8, 232);
-    const half = meanOf(gray, 221, 312, 8, 232);
+    const clear = meanOf(picture, 8, 99, 8, 232);
+    const opaque = meanOf(picture, 115, 206, 8, 232);
+    const half = meanOf(picture, 221, 312, 8, 232);
     const expected = (clear + opaque) / 2;
 
     return {
@@ -337,8 +405,8 @@ export const readbackVerdict = (readback: Readback, gray: Uint8Array): ReadbackV
     };
   }
 
-  const glyph = meanOf(gray, 150, 170, 110, 130);
-  const edge = meanOf(gray, 0, 60, 0, 240);
+  const glyph = meanOf(picture, 150, 170, 110, 130);
+  const edge = meanOf(picture, 0, 60, 0, 240);
 
   return {
     passed: glyph >= 215 && edge >= GRAY.low && edge <= GRAY.high,

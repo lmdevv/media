@@ -11,7 +11,7 @@ import * as MediaTools from "../media/media-tools.ts";
 import { ffmpegAvailable, qsvUsable, vaapiUsable } from "../testing/fixture-library.ts";
 import * as FixtureWorkspace from "../testing/fixture-workspace.ts";
 import * as MediaTestServer from "../testing/media-test-server.ts";
-import { ambientBox, dolbyVisionBox, withSampleEntryBox } from "../testing/mp4-boxes.ts";
+import { ambientBox, dolbyVisionBox, stereoBox, withSampleEntryBox } from "../testing/mp4-boxes.ts";
 import { signTestToken } from "../testing/test-tokens.ts";
 
 const hasFfmpeg = await ffmpegAvailable();
@@ -80,6 +80,11 @@ interface Fixture {
   readonly transfer: string;
   /** An MP4 whose video carries this box in its sample entry, as an iPhone's HLG or a Dolby Vision copy does. */
   readonly box?: Uint8Array;
+  /**
+   * Side data that describes the picture, which the SDR stream from the CPU keeps; Quick Sync's
+   * and VA-API's filters drop it, which the allowed list lets pass either way.
+   */
+  readonly keeps?: string;
 }
 
 const HDR10_GRAPH = `${PICTURE},zscale=tin=bt709:pin=bt709:min=gbr:rin=full:t=smpte2084:p=bt2020:m=bt2020nc:r=tv:npl=100,format=yuv420p10le`;
@@ -109,12 +114,15 @@ const HLG: Fixture = {
   transfer: "arib-std-b67",
 };
 
-/** HDR10 with a Dolby Vision profile 8.1 configuration record, its base layer's range HDR10. */
+/**
+ * HDR10 with a Dolby Vision profile 8.1 configuration record and no RPU, which no encoder here
+ * writes: its base layer alone, HDR10, whose record the SDR stream must not keep.
+ */
 const DOLBY_VISION_81: Fixture = {
-  name: "Dolby Vision 8.1",
+  name: "Dolby Vision 8.1 without an RPU",
   file: "dolby-vision-8.1.mp4",
   kind: "hdr10",
-  source: "dolby-vision-8.1",
+  source: "hdr10",
   graph: HDR10_GRAPH,
   params: HDR10_PARAMS,
   transfer: "smpte2084",
@@ -135,6 +143,17 @@ const FIXTURES: ReadonlyArray<Fixture> = [
     box: ambientBox(3_140_000, 15_635, 16_450),
   },
   DOLBY_VISION_81,
+  {
+    name: "HDR10 side by side in 3D",
+    file: "hdr10-stereo.mp4",
+    kind: "hdr10",
+    source: "hdr10",
+    graph: HDR10_GRAPH,
+    params: HDR10_PARAMS,
+    transfer: "smpte2084",
+    box: stereoBox(2),
+    keeps: "Stereo 3D",
+  },
 ];
 
 /** The kinds a burned-in subtitle is drawn over, each with the subtitle muxed in as stream 2. */
@@ -164,11 +183,25 @@ const BOXES = [
 ].join("\n");
 
 /**
- * The only side data an SDR stream may carry, on the stream or its first picture: the encoder's own
- * unregistered SEI. Anything else, HDR10's static metadata, HDR10+, Dolby Vision, an ambient viewing
- * environment, or a kind not met yet, fails.
+ * The side data an SDR stream may carry, on the stream or its first picture, as ffprobe names it in
+ * ffmpeg 7.1 and 9: what describes the picture or comes from the encoder (as the grid's
+ * `SDR_SIDE_DATA` lists them, each with why). HDR10's static metadata, dynamic metadata, Dolby Vision,
+ * an ambient viewing environment, an ICC profile, and any kind on neither list fail.
  */
-const SDR_SIDE_DATA: ReadonlySet<string> = new Set(["H.26[45] User Data Unregistered SEI message"]);
+const SDR_SIDE_DATA: ReadonlySet<string> = new Set([
+  "H.26[45] User Data Unregistered SEI message",
+  "CPB properties",
+  "Stereo 3D",
+  "Spherical Mapping",
+  "3x3 displaymatrix",
+  "Display Matrix",
+  "ATSC A53 Part 4 Closed Captions",
+  "A53 Closed Captions",
+  "Active format description",
+  "SMPTE 12-1 timecode",
+  "GOP timecode",
+  "Timecode Metadata",
+]);
 
 /** The tone maps each path may run for each kind: libplacebo's first, where the build has it. */
 const TONE_MAPS = {
@@ -480,6 +513,10 @@ const plays = Effect.fn("HdrColour.plays")(function* (
     [],
     `${at}: side data left on the SDR stream`,
   );
+
+  if (fixture.keeps !== undefined && path === "cpu") {
+    assert.include(description.sideData, fixture.keeps, `${at}: what describes the picture stays`);
+  }
 
   const { ramp, bars } = yield* cells(served);
 

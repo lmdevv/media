@@ -396,6 +396,17 @@ const relapsing = await standIn({
 
 const plain = await standIn({});
 
+/** A build whose libplacebo the probes prove, on a GPU's Vulkan device. */
+const onGpuVulkan = await standIn({ withPlacebo: true });
+
+/** The same build where ffmpeg's derivation falls back to Mesa's software Vulkan device. */
+const onSoftwareVulkan = await standIn({
+  withPlacebo: true,
+  vulkanDevice: "llvmpipe (LLVM 21.1.8, 256 bits) (software)",
+});
+
+const PLACEBO_QSV = capabilityKey(ImplId("tonemap.qsv.placebo"), "pq");
+
 /** The device check opens the device and names its driver as `line` does, then exits 0. */
 const namingDriver = (line: string) =>
   standIn({
@@ -469,6 +480,58 @@ describe.skipIf(!hasFfmpeg)("TranscodeCapabilities", () => {
               "move.cpu>qsv",
               "encode.qsv.h264",
             ]),
+          );
+        }),
+      60_000,
+    );
+  });
+
+  layer(
+    onGpuVulkan.services,
+    live,
+  )((it) => {
+    it.effect(
+      "proves libplacebo on the Vulkan device ffmpeg opens when it is a GPU's",
+      () =>
+        Effect.gen(function* () {
+          const capabilities = yield* TranscodeCapabilities.Service;
+          const snapshot = yield* capabilities.resolve(request(HDR));
+
+          assert.strictEqual(yield* statusOf(PLACEBO_QSV), "verified");
+          assert.include(Result.getOrThrow(plannedImpls(HDR, snapshot)), "tonemap.qsv.placebo");
+        }),
+      60_000,
+    );
+  });
+
+  layer(
+    onSoftwareVulkan.services,
+    live,
+  )((it) => {
+    it.effect(
+      "refuses libplacebo when ffmpeg opens a software Vulkan device, and maps with Quick Sync's own",
+      () =>
+        Effect.gen(function* () {
+          const capabilities = yield* TranscodeCapabilities.Service;
+          const snapshot = yield* capabilities.resolve(request(HDR));
+
+          const [evidence] = Inventory.capabilityOf(
+            yield* capabilities.inventory,
+            PLACEBO_QSV,
+          ).evidence;
+
+          assert.strictEqual(yield* statusOf(PLACEBO_QSV), "unsupported");
+          assert.deepInclude(evidence, {
+            _tag: "Probe",
+            outcome: "rejected",
+            detail: "Vulkan opened llvmpipe (LLVM 21.1.8, 256 bits), a software device",
+          });
+          assert.include(Result.getOrThrow(plannedImpls(HDR, snapshot)), "tonemap.qsv");
+          assert.notInclude(Result.getOrThrow(plannedImpls(HDR, snapshot)), "tonemap.qsv.placebo");
+          assert.strictEqual(
+            yield* runsWith(onSoftwareVulkan.ffmpeg, "libplacebo="),
+            0,
+            "no probe of the chain itself ran",
           );
         }),
       60_000,
@@ -1356,7 +1419,7 @@ describe.skipIf(!hasFfmpeg)("TranscodeCapabilities", () => {
               evidence !== undefined &&
                 Inventory.Evidence.$is("Probe")(evidence) &&
                 evidence.outcome === "rejected" &&
-                evidence.detail.startsWith("the picture read back shows no subtitle"),
+                evidence.detail.startsWith("the picture read back is not what the row must draw"),
             );
             assert.deepStrictEqual(
               Result.map(planVideo(SDR, burning(IMAGE).intent, snapshot), ({ pipeline }) =>

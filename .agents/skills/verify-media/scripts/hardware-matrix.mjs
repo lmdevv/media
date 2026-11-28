@@ -531,12 +531,54 @@ export const WORK = {
 const ALL_PATHS = Object.keys(PATHS);
 
 /**
- * The only side data an SDR stream from a tone map may carry, on the stream or its first picture,
- * as ffprobe names it: the encoders' own unregistered SEI (x264's settings). Anything else, HDR10's
- * mastering display and content light levels, HDR10+, Dolby Vision, an iPhone's ambient viewing
- * environment, an ICC profile, or a kind not met yet, fails the check rather than slipping past.
+ * The side data an SDR stream from a tone map may carry, on the stream or its first picture, as
+ * ffprobe names it in ffmpeg 7.1 and 9 (frame and stream names both), each with why: what describes
+ * the picture or comes from the encoder, never its dynamic range or how it was meant to be viewed.
  */
-export const SDR_SIDE_DATA = new Set(["H.26[45] User Data Unregistered SEI message"]);
+export const SDR_SIDE_DATA = new Map([
+  ["H.26[45] User Data Unregistered SEI message", "the encoder's own settings (x264, x265)"],
+  ["CPB properties", "the encoder's own rate control"],
+  ["Stereo 3D", "how a stereoscopic picture is packed, which the transcode keeps"],
+  ["Spherical Mapping", "a 360° picture's projection"],
+  ["3x3 displaymatrix", "the picture's rotation, on a frame"],
+  ["Display Matrix", "the picture's rotation, on a stream"],
+  ["ATSC A53 Part 4 Closed Captions", "captions carried with the picture, on a frame"],
+  ["A53 Closed Captions", "captions carried with the picture, on a stream"],
+  ["Active format description", "the picture's active area"],
+  ["SMPTE 12-1 timecode", "a timecode"],
+  ["GOP timecode", "a timecode"],
+  ["Timecode Metadata", "a timecode"],
+]);
+
+/**
+ * The side data no SDR stream may carry, each with why: HDR10's static metadata, dynamic metadata,
+ * Dolby Vision, the viewing environment an iPhone's HLG states, and a colour profile of the source.
+ */
+export const HDR_SIDE_DATA = new Map([
+  ["Mastering display metadata", "HDR10's mastering display"],
+  ["Content light level metadata", "HDR10's content light levels"],
+  ["HDR Dynamic Metadata SMPTE2094-40 (HDR10+)", "HDR10+ on a frame"],
+  ["HDR Dynamic Metadata (SMPTE 2094-40)", "HDR10+ on a stream (ffmpeg 9)"],
+  ["HDR Dynamic Metadata SMPTE2094-50", "SMPTE 2094-50 on a frame (ffmpeg 9)"],
+  ["HDR Dynamic Metadata (SMPTE 2094-50)", "SMPTE 2094-50 on a stream (ffmpeg 9)"],
+  ["HDR Dynamic Metadata CUVA 005.1 2021 (Vivid)", "HDR Vivid"],
+  ["Dolby Vision RPU Data", "Dolby Vision's RPU"],
+  ["Dolby Vision Metadata", "Dolby Vision's parsed RPU"],
+  ["DOVI configuration record", "Dolby Vision's configuration record"],
+  ["Ambient viewing environment", "the viewing conditions, on a frame"],
+  ["Ambient Viewing Environment", "the viewing conditions, on a stream"],
+  ["ICC profile", "the source's colour profile, on a frame"],
+  ["ICC Profile", "the source's colour profile, on a stream"],
+]);
+
+/**
+ * What the `hdr-metadata` check makes of side data `types` left on an SDR stream: the forbidden ones
+ * with why, then the ones on neither list, which fail too until a person adds them to one.
+ */
+export const sdrSideDataFaults = (types) => {
+  const left = [...new Set(types)].filter((type) => !SDR_SIDE_DATA.has(type));
+  return left.map((type) => (HDR_SIDE_DATA.has(type) ? `${type} (${HDR_SIDE_DATA.get(type)})` : `${type} (on neither list: look at it)`));
+};
 
 /** What a row's colour check compares a fixture's patches with, and which patches it has. */
 export const patchesOf = (reference) => (reference === "source" ? SDR_PATCHES : HDR_PATCHES);
@@ -1755,7 +1797,8 @@ export const CHECKS = {
   },
   // Side data left on an SDR stream: the encoders write what ffmpeg's frames carry into the
   // bitstream, and a player that reads HDR or viewing metadata shows the SDR picture as HDR. Only
-  // the allowed kinds pass (`SDR_SIDE_DATA`).
+  // the allowed kinds pass (`SDR_SIDE_DATA`); the forbidden ones and any on neither list fail
+  // (`sdrSideDataFaults`).
   "hdr-metadata": {
     class: "output",
     run: (obs) => {
@@ -1763,10 +1806,10 @@ export const CHECKS = {
       if (fetches.length === 0) return no("no output was fetched");
       for (const fetch of fetches) {
         if (fetch.sideData === undefined) return no(`could not measure: no side data was read from the ${fetch.name} output`);
-        const left = [...fetch.sideData.stream, ...fetch.sideData.frame].filter((type) => !SDR_SIDE_DATA.has(type));
-        if (left.length > 0) return no(`the ${fetch.name} output still carries ${[...new Set(left)].join(", ")}`);
+        const faults = sdrSideDataFaults([...fetch.sideData.stream, ...fetch.sideData.frame]);
+        if (faults.length > 0) return no(`the ${fetch.name} output still carries ${faults.join(", ")}`);
       }
-      return ok("no side data on the stream or its first picture but the encoder's own");
+      return ok("no side data on the stream or its first picture but what describes the picture or comes from the encoder");
     },
   },
   // The colour an SDR source states, carried to the output: its transfer, primaries, matrix, and range.

@@ -223,6 +223,15 @@ export const TranscodeStage = Schema.Struct({
    * prepared in CPU memory and drawn on the device while the picture stayed there.
    */
   move: Schema.optionalKey(Schema.Struct({ from: Schema.String, to: Schema.String })),
+  /**
+   * For a stage that runs in place of the implementation the service prefers for it, such as the
+   * GPU's own tone map in place of libplacebo's: that implementation, and why it did not run:
+   * `slower` (it does not keep up with the source at this output size), `unproven` (no evidence
+   * it runs here, such as no Vulkan device of a GPU), `excluded` (set aside for this stream after a
+   * failure), or `unsuited` (it does not take these frames). A string, so a later reason changes no
+   * contract.
+   */
+  insteadOf: Schema.optionalKey(Schema.Struct({ impl: Schema.String, reason: Schema.String })),
 });
 
 /** One stage of a transcode's video chain. */

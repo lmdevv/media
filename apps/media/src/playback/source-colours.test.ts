@@ -53,6 +53,34 @@ const DECLARED: ReadonlyMap<string, string> = new Map([
 
 const declared = (ranges: string): string => DECLARED.get(ranges) ?? ranges;
 
+/**
+ * The probe of fixture `name` with its Dolby Vision record edited to say 8.1 (HDR10), as a file whose
+ * record and pictures disagree: an iPhone's 8.4 states HLG, Apple's profile 5 no transfer at all.
+ */
+const relabelled = (name: "dolby-vision-8.4" | "dolby-vision-5") =>
+  parseFfprobeJson(
+    JSON.stringify(FIXTURES[name]).replace(
+      /"dv_profile":\s*\d+,\s*"dv_level":\s*(\d+),\s*"dv_bl_signal_compatibility_id":\s*\d+/u,
+      '"dv_profile": 8, "dv_level": $1, "dv_bl_signal_compatibility_id": 1',
+    ),
+    `/media/${name}-as-8.1.mkv`,
+  );
+
+/** Profile 8 of `compatibility` over `colour`, its first picture carrying no RPU. */
+const profile8 = (
+  compatibility: number,
+  colour: NonNullable<VideoStream["colour"]>,
+): VideoStream => ({
+  index: 0,
+  codec: "hevc",
+  bitDepth: 10,
+  width: 3840,
+  height: 2160,
+  dynamicRange: "dolby-vision",
+  colour,
+  dolbyVision: { profile: 8, level: 6, compatibility },
+});
+
 describe("the table of source colours", () => {
   it("decides for every kind", () => {
     const lines = tableLines();
@@ -201,6 +229,75 @@ describe("the table of source colours", () => {
       });
     }),
   );
+
+  it("believes a Dolby Vision record only where the stream states its base layer's transfer, for every id", () => {
+    const transfers = ["smpte2084", "arib-std-b67", "bt709", "smpte170m", "bt2020-10", undefined];
+
+    const sdrTransfers: ReadonlySet<string | undefined> = new Set([
+      "bt709",
+      "smpte170m",
+      "bt2020-10",
+    ]);
+
+    // The rule, read off the record and the stream: each base layer an id names needs its transfer.
+    const believed = (profile: number, compatibility: number, transfer: string | undefined) => {
+      if (profile === 7 && compatibility === 6 && transfer === "smpte2084") return "dolby-vision-7";
+
+      if (profile !== 8) return "dolby-vision-other";
+
+      if (compatibility === 1 && transfer === "smpte2084") return "dolby-vision-8.1";
+
+      if (compatibility === 4 && transfer === "arib-std-b67") return "dolby-vision-8.4";
+
+      return compatibility === 2 && sdrTransfers.has(transfer)
+        ? "dolby-vision-8.2"
+        : "dolby-vision-other";
+    };
+
+    for (const profile of [7, 8]) {
+      for (let compatibility = 0; compatibility < 16; compatibility += 1) {
+        for (const transfer of transfers) {
+          const video: VideoStream = {
+            index: 0,
+            codec: "hevc",
+            bitDepth: 10,
+            width: 3840,
+            height: 2160,
+            dynamicRange: "dolby-vision",
+            colour: transfer === undefined ? {} : { transfer },
+            dolbyVision: { profile, level: 6, compatibility },
+            dolbyVisionRpu: true,
+          };
+
+          expect(
+            kindOf(video),
+            `${String(profile)}.${String(compatibility)} over ${transfer ?? "no transfer"}`,
+          ).toBe(believed(profile, compatibility, transfer));
+        }
+      }
+    }
+  });
+
+  it.effect(
+    "reads a real file whose record names another base layer than its pictures as no kind it names",
+    () =>
+      Effect.gen(function* () {
+        for (const name of ["dolby-vision-8.4", "dolby-vision-5"] as const) {
+          const video = (yield* relabelled(name)).video;
+
+          assert.isDefined(video);
+          expect(video.dolbyVision?.compatibility, name).toBe(1);
+          expect(kindOf(video), name).toBe("dolby-vision-other");
+        }
+      }),
+  );
+
+  it("reads profile 8 without an RPU on its first picture as its base layer's own kind", () => {
+    expect(kindOf(profile8(1, { transfer: "smpte2084", primaries: "bt2020" }))).toBe("hdr10");
+    expect(kindOf(profile8(4, { transfer: "arib-std-b67", primaries: "bt2020" }))).toBe("hlg");
+    expect(kindOf(profile8(2, { transfer: "bt709", primaries: "bt709" }))).toBe("sdr");
+    expect(kindOf(profile8(2, { transfer: "bt2020-10", primaries: "bt2020" }))).toBe("sdr-bt2020");
+  });
 
   it("decides a Dolby Vision stream whose configuration was not read as no kind it names", () => {
     const unread: VideoStream = {

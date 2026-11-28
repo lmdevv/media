@@ -5,7 +5,12 @@
  * signal its decoded frames carry, which picks the tone map, and how an encode reaches SDR. The
  * rows read the signal; nothing else branches on a kind of source.
  */
-import { canonicalCodec, dolbyVisionBase, playableAs } from "@media/contracts/direct-play";
+import {
+  type BaseRange,
+  canonicalCodec,
+  dolbyVisionBase,
+  playableAs,
+} from "@media/contracts/direct-play";
 import type { DynamicRange } from "@media/contracts/media-playback";
 
 import type { VideoStream } from "../media/media-probe.ts";
@@ -39,7 +44,10 @@ export interface ColourDecision {
    * A stream of this kind, as the probe reads it, from which the table's direct-play and copy rules
    * are printed.
    */
-  readonly example: Pick<VideoStream, "codec" | "dynamicRange" | "dolbyVision" | "dolbyVisionRpu">;
+  readonly example: Pick<
+    VideoStream,
+    "codec" | "dynamicRange" | "dolbyVision" | "dolbyVisionRpu" | "colour"
+  >;
   /**
    * What a copy (remux) for a client that declares Dolby Vision keeps of the stream's Dolby Vision
    * configuration: `kept` writes it into the output, so the player applies the RPU; `dropped`
@@ -55,6 +63,13 @@ export interface ColourDecision {
 }
 
 const SDR = { codec: "hevc", dynamicRange: "sdr" } as const;
+
+/**
+ * What a profile 8 stream whose first picture carries no RPU is: its base layer alone, so its
+ * record says nothing a player can apply.
+ */
+const NO_RPU =
+  "without an RPU on its first picture it is that base layer's own kind, copied without its record and never played as stored";
 
 /** What keeps an SDR source's own colour on Quick Sync's path, whose scale would convert it. */
 const QSV_KEEPS =
@@ -116,7 +131,7 @@ export const COLOUR_DECISIONS: Readonly<Record<SourceKind, ColourDecision>> = {
     dolbyVisionCopy: "none",
     signal: "pq",
     encode:
-      "as HDR10, from its static metadata: its dynamic metadata is removed before every tone map, so no path reads it, and none is kept",
+      "as HDR10, from its static metadata: its dynamic metadata is removed before libplacebo's, VA-API's, and the CPU's tone maps, and Quick Sync's fused scale and tone map hand the driver only the static metadata, so no path reads it; none is kept",
     why: "its base is ordinary HDR10, which every HDR10 player shows",
   },
   hlg: {
@@ -143,11 +158,14 @@ export const COLOUR_DECISIONS: Readonly<Record<SourceKind, ColourDecision>> = {
     why: "read as HDR10 its IPT samples come out green and purple, so no PQ tone map may take it, and without its RPU nothing says what they mean",
   },
   "dolby-vision-7": {
-    about: "Dolby Vision 7: HDR10 base layer with an enhancement layer",
+    about:
+      "Dolby Vision 7: HDR10 base layer (compatibility id 6, the stream stating PQ) with an enhancement layer",
     example: {
       codec: "hevc",
       dynamicRange: "dolby-vision",
       dolbyVision: { profile: 7, level: 6, compatibility: 6 },
+      dolbyVisionRpu: true,
+      colour: { transfer: "smpte2084" },
     },
     dolbyVisionCopy: "dropped",
     signal: "pq",
@@ -155,11 +173,13 @@ export const COLOUR_DECISIONS: Readonly<Record<SourceKind, ColourDecision>> = {
     why: "players other than Blu-ray's do not apply profile 7 (AVFoundation fails to decode it with its record, so the original never plays as stored), and every HDR10 player shows its base layer",
   },
   "dolby-vision-8.1": {
-    about: "Dolby Vision 8.1: HDR10 base layer",
+    about: `Dolby Vision 8.1: HDR10 base layer (compatibility id 1, the stream stating PQ); ${NO_RPU}`,
     example: {
       codec: "hevc",
       dynamicRange: "dolby-vision",
       dolbyVision: { profile: 8, level: 6, compatibility: 1 },
+      dolbyVisionRpu: true,
+      colour: { transfer: "smpte2084" },
     },
     dolbyVisionCopy: "kept",
     signal: "pq",
@@ -167,11 +187,13 @@ export const COLOUR_DECISIONS: Readonly<Record<SourceKind, ColourDecision>> = {
     why: "the base layer is ordinary HDR10, the picture a player without Dolby Vision shows",
   },
   "dolby-vision-8.2": {
-    about: "Dolby Vision 8.2: SDR base layer",
+    about: `Dolby Vision 8.2: SDR base layer (compatibility id 2, the stream stating an SDR transfer); ${NO_RPU}`,
     example: {
       codec: "hevc",
       dynamicRange: "dolby-vision",
       dolbyVision: { profile: 8, level: 6, compatibility: 2 },
+      dolbyVisionRpu: true,
+      colour: { transfer: "bt709" },
     },
     dolbyVisionCopy: "kept",
     signal: "sdr",
@@ -179,11 +201,13 @@ export const COLOUR_DECISIONS: Readonly<Record<SourceKind, ColourDecision>> = {
     why: "the base layer is SDR, which every client plays",
   },
   "dolby-vision-8.4": {
-    about: "Dolby Vision 8.4: HLG base layer, as iPhones record",
+    about: `Dolby Vision 8.4: HLG base layer (compatibility id 4, the stream stating HLG), as iPhones record; ${NO_RPU}`,
     example: {
       codec: "hevc",
       dynamicRange: "dolby-vision",
       dolbyVision: { profile: 8, level: 4, compatibility: 4 },
+      dolbyVisionRpu: true,
+      colour: { transfer: "arib-std-b67" },
     },
     dolbyVisionCopy: "kept",
     signal: "hlg",
@@ -192,7 +216,7 @@ export const COLOUR_DECISIONS: Readonly<Record<SourceKind, ColourDecision>> = {
   },
   "dolby-vision-other": {
     about:
-      "Dolby Vision of another profile, a profile and compatibility id that disagree, another codec, or an RPU with no configuration record",
+      "Dolby Vision of another profile, a profile and compatibility id that disagree, a compatibility id whose transfer the stream contradicts or does not state, another codec, or an RPU with no configuration record",
     example: { codec: "hevc", dynamicRange: "dolby-vision", dolbyVisionRpu: true },
     dolbyVisionCopy: "none",
     signal: "dovi",
@@ -219,22 +243,34 @@ const BT2020: ReadonlySet<string> = new Set(["bt2020", "bt2020nc", "bt2020c"]);
 const fullRange = (video: VideoStream): boolean =>
   video.colour?.range === "full" || (video.pixelFormat ?? "").startsWith("yuvj");
 
-/** The kind of `video`'s colour, as the probe read it. */
+/**
+ * The kind of `video`'s colour, as the probe read it. A Dolby Vision record is believed only where
+ * the stream's own transfer agrees with the base layer its compatibility id names
+ * (`dolbyVisionBase`): 1 and 6 need PQ, 4 needs HLG, 2 needs a stated SDR transfer; any other
+ * reading is `dolby-vision-other`. Profile 8 without an RPU on its first picture is its base
+ * layer's own kind.
+ */
 export const kindOf = (video: VideoStream): SourceKind => {
-  if (video.dynamicRange === "dolby-vision") {
-    const profile = video.dolbyVision?.profile;
+  if (video.dynamicRange !== "dolby-vision") return kindIn(video, video.dynamicRange);
+  const profile = video.dolbyVision?.profile;
 
-    if (profile === 5 && canonicalCodec(video.codec) === "hevc") return "dolby-vision-5";
-    const base = dolbyVisionBase(video);
+  if (profile === 5 && canonicalCodec(video.codec) === "hevc") return "dolby-vision-5";
+  const base = dolbyVisionBase(video);
 
-    if (base === undefined) return "dolby-vision-other";
+  if (base === undefined) return "dolby-vision-other";
 
-    return profile === 7 ? "dolby-vision-7" : (PROFILE_8.get(base) ?? "dolby-vision-other");
-  }
+  if (profile === 7) return "dolby-vision-7";
 
-  if (video.dynamicRange === "hdr10") return video.hdr10Plus === true ? "hdr10plus" : "hdr10";
+  if (video.dolbyVisionRpu !== true) return kindIn(video, base);
 
-  if (video.dynamicRange === "hlg") return "hlg";
+  return PROFILE_8.get(base) ?? "dolby-vision-other";
+};
+
+/** The kind of `video`'s colour when its pictures are `range`, HDR10, HLG, or SDR. */
+const kindIn = (video: VideoStream, range: BaseRange): SourceKind => {
+  if (range === "hdr10") return video.hdr10Plus === true ? "hdr10plus" : "hdr10";
+
+  if (range === "hlg") return "hlg";
 
   if (fullRange(video)) return "sdr-full-range";
   const tags = [video.colour?.primaries, video.colour?.matrix];

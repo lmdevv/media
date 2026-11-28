@@ -22,6 +22,7 @@ export const playsDirectly = (version: MediaVersion, client: ClientCapabilities)
             dynamicRange: dynamicRangeOf(version.hdr),
             dolbyVision: version.dolbyVision,
             dolbyVisionRpu: version.dolbyVisionRpu,
+            colour: { transfer: version.videoTransfer },
           },
     audio:
       version.audioCodec === null

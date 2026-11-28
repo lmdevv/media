@@ -336,10 +336,11 @@ export type ClipName =
   | "h264-8-gray";
 
 /**
- * What a probe of a subtitle row reads back from its first output picture, since an overlay that
- * runs can still ignore the subtitle's transparency: `blend`, that a canvas of a clear, an opaque,
- * and a half-transparent band lands on the gray clip as each should; `glyph`, that libass drew a
- * glyph of the default font where the probe's script puts it (`probe-clips.ts`).
+ * What a probe reads back from its first output picture, since a row that runs can still draw the
+ * wrong thing: `blend`, that a canvas of a clear, an opaque, and a half-transparent band lands on
+ * the gray clip as each should; `glyph`, that libass drew a glyph of the default font where the
+ * probe's script puts it; `picture`, that a tone map's frames keep the HDR clip's patches, neutral
+ * grays in order and each primary its own hue (`probe-clips.ts`).
  */
 export type Readback = "blend" | "glyph" | "picture";
 
@@ -405,7 +406,9 @@ const UNKNOWN_FRAME_RATE = 60;
 
 /**
  * Whether `row` keeps up (`KEEPS_UP`) with a source of `frameRate` at an output `height` lines
- * tall, by the first measured height at or above it, else the tallest.
+ * tall, by the first measured height at or above it, else the tallest. The rate is the source's
+ * as the probe reads it, a variable-rate file's peak (`peakFrameRateOf`); a source of unknown rate
+ * is held to 60 frames a second (`UNKNOWN_FRAME_RATE`).
  */
 export const keepsUp = (
   row: { readonly throughput?: OpImpl["throughput"] | undefined },
@@ -511,9 +514,10 @@ export const toneMapTransfer = (frame: Frame): "pq" | "hlg" | undefined =>
 
 /**
  * Dynamic HDR metadata, scene by scene: HDR10+ (SMPTE 2094-40) and HDR Vivid (CUVA 005.1). Every
- * tone map maps a source as its static HDR10 base, so rows remove these before the tone map, where
- * libplacebo would read them (on Apple's HDR10+ sample, up to 14 luma codes apart at one frame);
- * the CPU's, VA-API's, and Quick Sync's tone maps read only static metadata.
+ * tone map maps a source as its static HDR10 base, so the CPU's, VA-API's, and libplacebo's rows
+ * remove these before the tone map, where libplacebo would read them (on Apple's HDR10+ sample, up
+ * to 14 luma codes apart at one frame). Quick Sync's fused scale and tone map keep them past its
+ * pass, which hands the driver only static metadata (`hdr10-plus.device.test.ts`).
  */
 const DYNAMIC_HDR_METADATA = ["DYNAMIC_HDR_PLUS", "DYNAMIC_HDR_VIVID"] as const;
 

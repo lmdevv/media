@@ -1250,7 +1250,13 @@ describe.skipIf(!hasFfmpeg)("stream recovery", () => {
             film.transcode?.stages.filter((stage) => stage.op !== "decode"),
             [
               { op: "scale", domain: "qsv", impl: "scale.qsv" },
-              { op: "tonemap", domain: "qsv", impl: "tonemap.qsv" },
+              {
+                op: "tonemap",
+                domain: "qsv",
+                impl: "tonemap.qsv",
+                // The stand-in's build has no libplacebo, so nothing proves it here.
+                insteadOf: { impl: "tonemap.qsv.placebo", reason: "unproven" },
+              },
               { op: "move", domain: "qsv", impl: "move.qsv>cpu", move: { from: "qsv", to: "cpu" } },
               { op: "burn-image", domain: "cpu", impl: "burn-image.cpu" },
               { op: "move", domain: "qsv", impl: "move.cpu>qsv", move: { from: "cpu", to: "qsv" } },

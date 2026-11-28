@@ -193,10 +193,27 @@ export interface VideoOutput extends Size {
   readonly dynamicRange: DynamicRange;
 }
 
-/** A chosen pipeline and what it produces. */
+/**
+ * Why a step runs a fallback row (`Row.fallbackFor`) rather than the row it stands in for:
+ * `excluded`, that row is set aside for this stream; `unsuited`, it does not take the step's
+ * frames; `unproven`, it has no evidence on a bound device; `slower`, it does not keep up with the
+ * source at the step's output height (`keepsUp`).
+ */
+type InsteadReason = "excluded" | "unsuited" | "unproven" | "slower";
+
+/** A step of a chosen pipeline that runs a fallback row, by its place, and why. */
+export interface Instead {
+  readonly step: number;
+  /** The row the step's row stands in for. */
+  readonly of: ImplId;
+  readonly reason: InsteadReason;
+}
+
+/** A chosen pipeline, what it produces, and the steps that run a fallback row. */
 export interface PlannedVideo {
   readonly pipeline: VideoPipeline;
   readonly output: VideoOutput;
+  readonly instead: ReadonlyArray<Instead>;
 }
 
 /**
@@ -540,6 +557,33 @@ const canDo = (entry: Row, step: Step, snapshot: CapabilitySnapshot): boolean =>
   return bound && snapshot.verified.has(capabilityKey(entry.id, use.variant));
 };
 
+/**
+ * Why `step`, run by a fallback row, does not run the row it stands in for (`InsteadReason`); none
+ * for a step whose row stands in for nothing.
+ */
+const insteadOf = (
+  step: Step,
+  snapshot: CapabilitySnapshot,
+  frameRate: number | undefined,
+): Omit<Instead, "step"> | undefined => {
+  const preferredId = rowById.get(step.impl)?.fallbackFor;
+  const preferred = preferredId === undefined ? undefined : rowById.get(preferredId);
+
+  if (preferredId === undefined || preferred === undefined) return undefined;
+
+  if (snapshot.excluded.has(preferredId)) return { of: preferredId, reason: "excluded" };
+
+  if (preferred.use(step.op, step.input) === undefined) {
+    return { of: preferredId, reason: "unsuited" };
+  }
+
+  if (!canDo(preferred, step, snapshot)) return { of: preferredId, reason: "unproven" };
+
+  return keepsUp(preferred, step.output.height, frameRate)
+    ? undefined
+    : { of: preferredId, reason: "slower" };
+};
+
 /** The rows that stand in for `id` (`Row.fallbackFor`). */
 const fallbacksOf = (id: ImplId): ReadonlyArray<Row> =>
   VIDEO_OPS.filter((entry) => entry.fallbackFor === id);
@@ -687,6 +731,11 @@ export const planVideo = (
       bitrate: last.op.bitrate,
       dynamicRange: dynamicRangeOf(last.output.colour),
     },
+    instead: pipeline.success.steps.flatMap((step, index) => {
+      const why = insteadOf(step, snapshot, intent.frameRate);
+
+      return why === undefined ? [] : [{ step: index, ...why }];
+    }),
   });
 };
 

@@ -36,7 +36,9 @@ const BASES = {
 /**
  * A Dolby Vision fixture: a second of HEVC Main 10 in `base`'s colour, in MP4 with the configuration
  * record of `profile`, `compatibility` (`dolbyVisionBox`) and in Matroska copied from it, which no
- * client plays as stored. None has an RPU in its pictures, which no encoder here writes.
+ * client plays as stored. None has an RPU in its pictures, which no encoder here writes, so each
+ * profile 8 fixture is its base layer alone; profile 8 with an RPU is decided in
+ * `colour-decisions.test.ts` and played by the grid's fixtures.
  */
 interface Fixture {
   readonly name: string;
@@ -53,6 +55,9 @@ const FIXTURES = {
   dv5: { name: "dv5", base: "ipt", profile: 5, compatibility: 0 },
   dv5Hdr10: { name: "dv5-claims-hdr10", base: "ipt", profile: 5, compatibility: 1 },
   dv8BluRay: { name: "dv8-blu-ray-id", base: "hdr10", profile: 8, compatibility: 6 },
+  hlgClaimsHdr10: { name: "dv84-claims-hdr10", base: "hlg", profile: 8, compatibility: 1 },
+  pqClaimsSdr: { name: "dv81-claims-sdr", base: "hdr10", profile: 8, compatibility: 2 },
+  iptClaims81: { name: "dv5-claims-81", base: "ipt", profile: 8, compatibility: 1 },
 } as const satisfies Record<string, Fixture>;
 
 /** An iPhone, as its app declares it: HEVC with HDR10, HLG, and Dolby Vision, MP4 and HLS. */
@@ -277,27 +282,27 @@ describe.skipIf(!hasFfmpeg)("Dolby Vision as each client receives it", () => {
   layer(MediaTestServer.layer(TOOLS), { excludeTestServices: true, timeout: "180 seconds" })(
     (it) => {
       it.effect(
-        "keeps a base layer's record only for Dolby Vision, and says what each copy delivers",
+        "copies profile 8 without an RPU as its base layer alone, never as stored, and says the base's range",
         () =>
           Effect.gen(function* () {
-            assert.deepStrictEqual(yield* ladder(FIXTURES.dv81), {
-              "iphone mp4": "direct",
-              "iphone mkv": "remux says dolby-vision, sends hvc1+dvvC smpte2084",
-              "hdr browser mp4": "remux says hdr10, sends hvc1 smpte2084",
-              "hdr browser mkv": "remux says hdr10, sends hvc1 smpte2084",
-            });
-            assert.deepStrictEqual(yield* ladder(FIXTURES.dv84), {
-              "iphone mp4": "direct",
-              "iphone mkv": "remux says dolby-vision, sends hvc1+dvvC arib-std-b67",
-              "hdr browser mp4": "remux says hlg, sends hvc1 arib-std-b67",
-              "hdr browser mkv": "remux says hlg, sends hvc1 arib-std-b67",
-            });
-            assert.deepStrictEqual(yield* ladder(FIXTURES.dv82), {
-              "iphone mp4": "direct",
-              "iphone mkv": "remux says dolby-vision, sends hvc1+dvvC bt709",
-              "hdr browser mp4": "remux says sdr, sends hvc1 bt709",
-              "hdr browser mkv": "remux says sdr, sends hvc1 bt709",
-            });
+            for (const [fixture, base] of [
+              [FIXTURES.dv81, "hdr10, sends hvc1 smpte2084"],
+              [FIXTURES.dv84, "hlg, sends hvc1 arib-std-b67"],
+              [FIXTURES.dv82, "sdr, sends hvc1 bt709"],
+            ] as const) {
+              const copy = `remux says ${base}`;
+
+              assert.deepStrictEqual(
+                yield* ladder(fixture),
+                {
+                  "iphone mp4": copy,
+                  "iphone mkv": copy,
+                  "hdr browser mp4": copy,
+                  "hdr browser mkv": copy,
+                },
+                fixture.name,
+              );
+            }
           }),
         150_000,
       );
@@ -321,6 +326,32 @@ describe.skipIf(!hasFfmpeg)("Dolby Vision as each client receives it", () => {
         () =>
           Effect.gen(function* () {
             for (const fixture of [FIXTURES.dv5, FIXTURES.dv5Hdr10, FIXTURES.dv8BluRay]) {
+              assert.deepStrictEqual(
+                yield* ladder(fixture),
+                {
+                  "iphone mp4": refused,
+                  "iphone mkv": refused,
+                  "hdr browser mp4": refused,
+                  "hdr browser mkv": refused,
+                },
+                fixture.name,
+              );
+            }
+          }),
+        150_000,
+      );
+
+      it.effect(
+        "does not believe a record whose base layer the pictures' transfer contradicts or does not state",
+        () =>
+          Effect.gen(function* () {
+            // HLG pictures whose record says HDR10, PQ pictures whose record says SDR, and IPT that
+            // states no transfer with a record that says HDR10: without an RPU none can be shown.
+            for (const fixture of [
+              FIXTURES.hlgClaimsHdr10,
+              FIXTURES.pqClaimsSdr,
+              FIXTURES.iptClaims81,
+            ]) {
               assert.deepStrictEqual(
                 yield* ladder(fixture),
                 {

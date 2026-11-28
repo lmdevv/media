@@ -570,6 +570,53 @@ describe("planVideo", () => {
     assert.include(impls(planned(hlg, intent, snapshot([VAAPI], keys))), "tonemap.vaapi.placebo");
   });
 
+  it("says why the GPU's own tone map runs: libplacebo too slow at the size, unproven, or set aside", () => {
+    const uhd = source({
+      codec: "hevc",
+      pixelFormat: "yuv420p10le",
+      depth: 10,
+      colour: HDR10,
+      width: 3840,
+      height: 2160,
+    });
+
+    const intent = intentFor(uhd, { frameRate: 24 });
+    const keys = everyKey(uhd, intent, [QSV]);
+
+    const insteadOf = (known: CapabilitySnapshot) => {
+      const chosen = planVideo(uhd, intent, known);
+
+      if (Result.isFailure(chosen)) throw new Error("no plan");
+
+      return chosen.success.instead.map(({ step, of, reason }): ReadonlyArray<string> => [
+        chosen.success.pipeline.steps[step]?.impl ?? "",
+        of,
+        reason,
+      ]);
+    };
+
+    assert.deepStrictEqual(insteadOf(snapshot([QSV], keys)), [
+      ["tonemap.qsv", "tonemap.qsv.placebo", "slower"],
+    ]);
+    assert.deepStrictEqual(insteadOf(snapshot([QSV], withoutPlacebo(keys))), [
+      ["tonemap.qsv", "tonemap.qsv.placebo", "unproven"],
+    ]);
+    assert.deepStrictEqual(insteadOf(snapshot([QSV], keys, [ImplId("tonemap.qsv.placebo")])), [
+      ["tonemap.qsv", "tonemap.qsv.placebo", "excluded"],
+    ]);
+
+    // At 1080 lines libplacebo keeps up and runs: nothing stands in for it.
+    const hd = { ...uhd, width: 1920, height: 1080 };
+
+    const hdPlan = planVideo(
+      hd,
+      intentFor(hd, { frameRate: 24 }),
+      snapshot([QSV], everyKey(hd, intentFor(hd, { frameRate: 24 }), [QSV])),
+    );
+
+    assert.isTrue(Result.isSuccess(hdPlan) && hdPlan.success.instead.length === 0);
+  });
+
   it("maps HDR10+ as its static base: dynamic metadata leaves before every tone map that reads it", () => {
     const video = source({ codec: "hevc", pixelFormat: "yuv420p10le", depth: 10, colour: HDR10 });
     const intent = intentFor(video, { frameRate: 24 });
@@ -603,9 +650,9 @@ describe("planVideo", () => {
         assert.include(impls(pipeline), impl);
         assert.include(text, map, impl);
 
-        // vpp_qsv hands the driver only static metadata: on Apple's HDR10+ sample, 120 frames at
-        // 720 lines came out byte for byte the same with and without it, under ffmpeg 7.1 and 9,
-        // so its scale and tone map keep their one fused pass.
+        // vpp_qsv hands the driver only static metadata, so its scale and tone map keep their one
+        // fused pass: its frames are the same with and without HDR10+, where libplacebo's differ
+        // (`hdr10-plus.device.test.ts`).
         if (impl === "tonemap.qsv") {
           assert.isAbove(text.indexOf(dynamic), text.indexOf(map), impl);
           continue;

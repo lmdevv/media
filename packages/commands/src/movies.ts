@@ -230,6 +230,8 @@ const mediaVersion = v.object({
   dolbyVision: v.optional(dolbyVision),
   /** Present when the primary video stream's first picture carries a Dolby Vision RPU. */
   dolbyVisionRpu: v.optional(v.literal(true)),
+  /** The transfer characteristic the primary video stream states, such as `smpte2084`. */
+  videoTransfer: v.optional(v.string()),
   audioCodec: nullable(v.string()),
   audioChannels: nullable(v.number()),
   audioTracks: v.number(),

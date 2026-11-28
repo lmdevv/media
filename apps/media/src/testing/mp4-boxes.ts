@@ -1,7 +1,7 @@
 /**
  * Boxes added to an MP4 ffmpeg wrote, for tests that need what no encoder here writes: a Dolby
- * Vision configuration record (`dvcC`, `dvvC`) and an ambient viewing environment (`amve`), as an
- * iPhone's HLG carries it. ffmpeg's demuxer reads each into the stream's side data, and its decoder
+ * Vision configuration record (`dvcC`, `dvvC`), an ambient viewing environment (`amve`), as an
+ * iPhone's HLG carries it, and a stereoscopic layout (`st3d`). ffmpeg's demuxer reads each into the stream's side data, and its decoder
  * puts an ambient viewing environment on every frame, as on a real file. The media data stays
  * where it is: ffmpeg writes the movie box after it, so no chunk offset moves.
  */
@@ -37,6 +37,13 @@ export const dolbyVisionBox = (
 
   return box(profile <= 7 ? "dvcC" : "dvvC", record);
 };
+
+/**
+ * A stereoscopic layout (`st3d`, from the Spherical Video V2 boxes): `mode` 0 mono, 1 top and bottom,
+ * 2 side by side.
+ */
+export const stereoBox = (mode: 0 | 1 | 2): Uint8Array =>
+  box("st3d", new Uint8Array([0, 0, 0, 0, mode]));
 
 /** An ambient viewing environment of `lux` (in 0.0001 lux) at chromaticity `x`, `y` (in 0.00002). */
 export const ambientBox = (lux: number, x: number, y: number): Uint8Array => {

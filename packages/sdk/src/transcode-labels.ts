@@ -28,14 +28,32 @@ const OPS: ReadonlyMap<string, string> = new Map([
 /** `Decode`, `Tone map`, `Subtitle` for a burned-in subtitle, or a later operation as named. */
 export const opLabel = (op: string): string => OPS.get(op) ?? op;
 
+const INSTEAD: ReadonlyMap<string, string> = new Map([
+  ["slower", "too slow at this size"],
+  ["unproven", "not proven here"],
+  ["excluded", "set aside after a failure"],
+  ["unsuited", "can't take these frames"],
+]);
+
 /**
  * One stage in a few words: `Decode · QSV`, or a move: `Move · QSV → CPU`, and a subtitle prepared
- * on the CPU and drawn on the GPU: `Subtitle · CPU → QSV`.
+ * on the CPU and drawn on the GPU: `Subtitle · CPU → QSV`. A stage that runs in place of the one
+ * the service prefers says which and why: `Tone map · QSV (tonemap.qsv.placebo too slow at this
+ * size)`; a reason a newer server added reads as itself.
  */
-export const stageLabel = (stage: TranscodeStage): string =>
-  stage.move === undefined
-    ? `${opLabel(stage.op)} · ${domainLabel(stage.domain)}`
-    : `${opLabel(stage.op)} · ${domainLabel(stage.move.from)} → ${domainLabel(stage.move.to)}`;
+export const stageLabel = (stage: TranscodeStage): string => {
+  const where =
+    stage.move === undefined
+      ? domainLabel(stage.domain)
+      : `${domainLabel(stage.move.from)} → ${domainLabel(stage.move.to)}`;
+
+  const instead =
+    stage.insteadOf === undefined
+      ? ""
+      : ` (${stage.insteadOf.impl} ${INSTEAD.get(stage.insteadOf.reason) ?? stage.insteadOf.reason})`;
+
+  return `${opLabel(stage.op)} · ${where}${instead}`;
+};
 
 const SOURCES: ReadonlyMap<string, string> = new Map([
   ["sdr", "SDR"],

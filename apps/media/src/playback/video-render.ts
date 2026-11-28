@@ -386,9 +386,37 @@ export const graphArgs = (
 export interface ProbeExtras {
   /** The files its filters read, such as the probe's own ASS script. */
   readonly files: RunFiles;
-  /** Where its first output picture goes, in 8-bit gray, for a probe that reads one back. */
-  readonly readback: string | undefined;
+  /**
+   * Where its first output picture goes, for a probe that reads one back, and in what layout: 8-bit
+   * gray, or 8-bit R'G'B' for a picture whose colour is judged.
+   */
+  readonly readback: { readonly path: string; readonly pixelFormat: "gray" | "rgb24" } | undefined;
 }
+
+/**
+ * The ffmpeg arguments that open `pipeline`'s devices and nothing else, logging at the verbose
+ * level, where ffmpeg names the Vulkan device it picked (`Device 0 selected: ... (discrete)`);
+ * undefined for a chain with no step on Vulkan.
+ */
+export const vulkanDeviceArgs = (pipeline: VideoPipeline): ReadonlyArray<string> | undefined =>
+  onVulkan(pipeline.steps)
+    ? [
+        "-hide_banner",
+        "-nostdin",
+        "-v",
+        "verbose",
+        ...deviceArgs(pipeline.steps),
+        "-f",
+        "lavfi",
+        "-i",
+        "nullsrc=size=16x16:duration=0.1",
+        "-frames:v",
+        "1",
+        "-f",
+        "null",
+        "-",
+      ]
+    : undefined;
 
 /**
  * The ffmpeg arguments that run `pipeline` reading `path`: the whole of a generated clip, or a real
@@ -438,7 +466,16 @@ export const probeCommandArgs = (
     "-dn",
     ...(extras.readback === undefined
       ? ["-f", "null", "-"]
-      : ["-frames:v", "1", "-pix_fmt", "gray", "-f", "rawvideo", "-y", extras.readback]),
+      : [
+          "-frames:v",
+          "1",
+          "-pix_fmt",
+          extras.readback.pixelFormat,
+          "-f",
+          "rawvideo",
+          "-y",
+          extras.readback.path,
+        ]),
   ];
 };
 

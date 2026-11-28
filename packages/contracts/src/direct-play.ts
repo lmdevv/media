@@ -20,6 +20,12 @@ export interface DirectPlayVideo {
   readonly dolbyVision?: { readonly profile: number; readonly compatibility: number } | undefined;
   /** Whether a Dolby Vision stream's first picture carries an RPU. */
   readonly dolbyVisionRpu?: true | undefined;
+  /**
+   * The colour the stream states: its transfer characteristic as ffprobe names it (`smpte2084`,
+   * `arib-std-b67`, `bt709`), absent when it states none. A Dolby Vision record's base layer is
+   * believed only where this agrees with it (`dolbyVisionBase`).
+   */
+  readonly colour?: { readonly transfer?: string | undefined } | undefined;
 }
 
 /** An audio track as direct play reads it. */
@@ -66,30 +72,62 @@ export const videoSupport = (
 ): VideoCodecSupport | undefined =>
   client.videoCodecs.find((support) => canonicalCodec(support.codec) === canonicalCodec(codec));
 
+/** The range a Dolby Vision base layer plays as: HDR10, HLG, or SDR. */
+export type BaseRange = Exclude<DynamicRange, "dolby-vision">;
+
 /** Profile 8's base layers by signal compatibility id: HDR10 (1), SDR (2), and HLG (4). */
-const PROFILE_8_BASES: ReadonlyMap<number, DynamicRange> = new Map([
+const PROFILE_8_BASES: ReadonlyMap<number, BaseRange> = new Map([
   [1, "hdr10"],
   [2, "sdr"],
   [4, "hlg"],
 ]);
 
+/** ffprobe's names for the HDR transfers: PQ and HLG. */
+const PQ = "smpte2084";
+
+const HLG = "arib-std-b67";
+
+/**
+ * Whether a stream that states `transfer` can hold a base layer of `range`: PQ for HDR10, HLG for
+ * HLG, and any other stated transfer (`bt709`, `smpte170m`, `bt2020-10`) for SDR. A stream that
+ * states none holds none: its record alone says what its samples are.
+ */
+const holdsBase = (range: BaseRange, transfer: string | undefined): boolean => {
+  if (transfer === undefined) return false;
+
+  if (range === "hdr10") return transfer === PQ;
+
+  if (range === "hlg") return transfer === HLG;
+
+  return transfer !== PQ && transfer !== HLG;
+};
+
+/** The base layer a Dolby Vision record names: profile 7's HDR10 (id 6), profile 8's by its id. */
+const namedBase = (config: NonNullable<DirectPlayVideo["dolbyVision"]>): BaseRange | undefined => {
+  if (config.profile === 7) return config.compatibility === 6 ? "hdr10" : undefined;
+
+  return config.profile === 8 ? PROFILE_8_BASES.get(config.compatibility) : undefined;
+};
+
 /**
  * What a Dolby Vision stream's base layer plays as for a player that does not apply Dolby Vision,
  * decided from the profile first and then the signal compatibility id, the stricter reading where
  * they disagree: profile 7's HDR10 (its Blu-ray id, 6) and profile 8's HDR10, SDR, or HLG (1, 2, 4),
- * each in HEVC. Profile 5 has none whatever its id says, since its samples are IPT-PQ-c2; nor has
- * any other profile, id, or codec, nor a stream whose configuration was not read.
+ * each in HEVC, and only where the stream states the transfer that base layer needs (`holdsBase`):
+ * a record that says HDR10 over HLG pictures, or over pictures that state no transfer, is not
+ * believed. Profile 5 has none whatever its id says, since its samples are IPT-PQ-c2; nor has any
+ * other profile, id, or codec, nor a stream whose configuration was not read.
  */
 export const dolbyVisionBase = (
-  video: Pick<DirectPlayVideo, "codec" | "dolbyVision">,
-): DynamicRange | undefined => {
+  video: Pick<DirectPlayVideo, "codec" | "dolbyVision" | "colour">,
+): BaseRange | undefined => {
   const config = video.dolbyVision;
 
   if (config === undefined || canonicalCodec(video.codec) !== "hevc") return undefined;
 
-  if (config.profile === 7) return config.compatibility === 6 ? "hdr10" : undefined;
+  const named = namedBase(config);
 
-  return config.profile === 8 ? PROFILE_8_BASES.get(config.compatibility) : undefined;
+  return named !== undefined && holdsBase(named, video.colour?.transfer) ? named : undefined;
 };
 
 /** Whether `video` is Dolby Vision 5 in HEVC, by its configuration. */
@@ -109,7 +147,9 @@ export type Delivery = "stored" | "copied";
  * For Dolby Vision:
  * - Profile 8 with a base layer (`dolbyVisionBase`) plays as stored only for Dolby Vision, since
  *   the original keeps its record and its sample entry may be `dvh1`; copied, for Dolby Vision or
- *   as its base layer, the record dropped.
+ *   as its base layer, the record dropped. Without an RPU on its first picture it is its base
+ *   layer alone: never played as stored, where its record would claim Dolby Vision, and copied
+ *   only as its base layer.
  * - Profile 7 never plays as stored: AVFoundation, which declares Dolby Vision, fails to decode it
  *   with its record. Copied, it plays as its HDR10 base layer, the record dropped.
  * - Profile 5 plays, stored or copied, only for Dolby Vision, and only when its first picture
@@ -118,7 +158,10 @@ export type Delivery = "stored" | "copied";
  *   neither: only a conversion that reads its RPU shows it.
  */
 export const playableAs = (
-  video: Pick<DirectPlayVideo, "codec" | "dynamicRange" | "dolbyVision" | "dolbyVisionRpu">,
+  video: Pick<
+    DirectPlayVideo,
+    "codec" | "dynamicRange" | "dolbyVision" | "dolbyVisionRpu" | "colour"
+  >,
   delivery: Delivery,
 ): ReadonlyArray<DynamicRange> => {
   if (video.dynamicRange !== "dolby-vision") return [video.dynamicRange];
@@ -129,7 +172,9 @@ export const playableAs = (
 
   if (base === undefined) return [];
 
-  if (video.dolbyVision?.profile === 7) return delivery === "copied" ? [base] : [];
+  if (video.dolbyVision?.profile === 7 || video.dolbyVisionRpu !== true) {
+    return delivery === "copied" ? [base] : [];
+  }
 
   return delivery === "copied" ? ["dolby-vision", base] : ["dolby-vision"];
 };

@@ -114,7 +114,10 @@ const drawText = Effect.fnUntraced(function* (root: string, files: RunFiles) {
   assert.strictEqual(plan.success.readback, "glyph");
 
   const log = yield* tools.ffmpegLog(
-    probeCommandArgs(plan.success.pipeline, plan.success.input, clip, 0, { files, readback }),
+    probeCommandArgs(plan.success.pipeline, plan.success.input, clip, 0, {
+      files,
+      readback: { path: readback, pixelFormat: "gray" },
+    }),
   );
 
   return { verdict: readbackVerdict("glyph", yield* fs.readFile(readback)), log };

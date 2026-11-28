@@ -22,7 +22,10 @@ const h264Mp4: DirectPlayFile = {
   audio: { codec: "aac", channels: 2 },
 };
 
-/** A 4K HEVC Main 10 MP4 in `dynamicRange`, with Dolby Vision's configuration when given. */
+/**
+ * A 4K HEVC Main 10 MP4 in `dynamicRange`, stating PQ, with Dolby Vision's configuration and an RPU
+ * on its first picture when given.
+ */
 const uhd = (
   dynamicRange: "hdr10" | "hlg" | "dolby-vision",
   dolbyVision?: { readonly profile: number; readonly compatibility: number },
@@ -36,6 +39,8 @@ const uhd = (
     height: 2160,
     dynamicRange,
     dolbyVision,
+    dolbyVisionRpu: dolbyVision === undefined ? undefined : (true as const),
+    colour: { transfer: dynamicRange === "hlg" ? "arib-std-b67" : "smpte2084" },
   },
   audio: { codec: "eac3", channels: 6 },
 });

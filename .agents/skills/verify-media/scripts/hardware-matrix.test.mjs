@@ -38,6 +38,7 @@ import {
   soundFrom,
   renderGrid,
   ROWS,
+  sdrSideDataFaults,
   segmentsCovering,
   sessionRecords,
   STAGES,
@@ -116,6 +117,17 @@ describe("the table", () => {
         assert.ok(field in capabilities, `${name} has ${field}`);
       }
     }
+  });
+});
+
+describe("side data on an SDR stream", () => {
+  test("passes what describes the picture or comes from the encoder, and fails HDR, viewing, and unknown kinds", () => {
+    assert.deepEqual(sdrSideDataFaults(["H.26[45] User Data Unregistered SEI message", "Stereo 3D", "Stereo 3D", "CPB properties"]), []);
+    assert.deepEqual(sdrSideDataFaults(["Stereo 3D", "Mastering display metadata", "Ambient viewing environment", "LCEVC NAL data"]), [
+      "Mastering display metadata (HDR10's mastering display)",
+      "Ambient viewing environment (the viewing conditions, on a frame)",
+      "LCEVC NAL data (on neither list: look at it)",
+    ]);
   });
 });
 

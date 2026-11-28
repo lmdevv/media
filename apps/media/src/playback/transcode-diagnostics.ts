@@ -14,7 +14,7 @@ import type {
 import type { EvidenceReason, TranscodingReport } from "@media/contracts/server-functions";
 import { dolbyVisionBase } from "@media/contracts/direct-play";
 import { EpochMillis } from "@media/contracts/units";
-import { Option } from "effect";
+import { Option, type Types } from "effect";
 
 import type { VideoStream } from "../media/media-probe.ts";
 import {
@@ -27,7 +27,7 @@ import {
 import { VideoPlan } from "./playback-decision.ts";
 import { kindOf } from "./source-colours.ts";
 import { Diagnosis } from "./transcode-recovery.ts";
-import { rowOf, type Step } from "./video-pipeline.ts";
+import { type Instead, rowOf, type Step } from "./video-pipeline.ts";
 import { implOf, Op } from "./video-ops.ts";
 
 /** What a failure that was not the video's points at, as the recovery classifier names it. */
@@ -86,11 +86,17 @@ const movedBy = (step: Step): Stage["move"] => {
   return undefined;
 };
 
-const stageOf = (step: Step): Stage => {
-  const stage = { op: opName(step.op), domain: step.on, impl: step.impl };
+/** `step`, the `index`th of its chain, as a stage, with why it runs a fallback row (`instead`). */
+const stageOf = (step: Step, index: number, instead: ReadonlyArray<Instead>): Stage => {
+  const stage: Types.Mutable<Stage> = { op: opName(step.op), domain: step.on, impl: step.impl };
   const move = movedBy(step);
+  const why = instead.find((entry) => entry.step === index);
 
-  return move === undefined ? stage : { ...stage, move };
+  if (move !== undefined) stage.move = move;
+
+  if (why !== undefined) stage.insteadOf = { impl: why.of, reason: why.reason };
+
+  return stage;
 };
 
 /** A change of a stream's chain as the stream keeps it. */
@@ -124,7 +130,8 @@ export const summaryOf = (
   }),
   stages: VideoPlan.$match(video, {
     Copy: () => [],
-    Encode: ({ pipeline }) => pipeline.steps.map(stageOf),
+    Encode: ({ pipeline, instead }) =>
+      pipeline.steps.map((step, index) => stageOf(step, index, instead)),
   }),
   changes: changes.flatMap((change) =>
     change.generation > generation

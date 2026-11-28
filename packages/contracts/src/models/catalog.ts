@@ -406,6 +406,11 @@ export const MediaVersion = Schema.Struct({
   dolbyVision: Schema.optionalKey(DolbyVision),
   /** Present when the primary video stream's first picture carries a Dolby Vision RPU. */
   dolbyVisionRpu: Schema.optionalKey(Schema.Literal(true)),
+  /**
+   * The transfer characteristic the primary video stream states, as ffprobe names it, such as
+   * `smpte2084`; absent when it states none. A Dolby Vision record's base layer must agree with it.
+   */
+  videoTransfer: Schema.optionalKey(Schema.String),
   /** ffmpeg codec name of the default audio track, such as `eac3`. */
   audioCodec: Schema.NullOr(Schema.String),
   audioChannels: Schema.NullOr(Schema.Int),

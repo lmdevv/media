@@ -25,7 +25,21 @@ the evidence of where it ran.
   render node's) where it is proven and keeps up at the output's height (`PLACEBO_THROUGHPUT` in
   `video-ops-intel.ts`), else with the GPU's own tone map; Dolby Vision 5 keeps libplacebo at any
   size. The CPU maps with zscale and Hable, and refuses Dolby Vision 5
-  (`dolby-vision-not-convertible`), which only libplacebo reads.
+  (`dolby-vision-not-convertible`), which only libplacebo reads. libplacebo's probe fails when
+  ffmpeg opens a Vulkan device that is not a GPU's (`software`, `virtual`, or unknown in its
+  verbose log), and reads its picture back in colour: the HDR probe clips are patches, and the
+  grays must stay neutral and in order and each primary its own hue.
+- Where libplacebo keeps up: it must sustain 2.5 times the source's frame rate at the output's
+  height (the rate a variable-rate file peaks at; 60 for an unknown rate), by the Arc A380's
+  figures, the lower of ffmpeg 7.1 and 9. Every card is held to the Arc's figures, measured on no
+  other card. The tallest output it maps:
+
+  | Source rate | Quick Sync | VA-API |
+  | --- | --- | --- |
+  | 23.976, 24, 25 | 1080 lines | 1440 lines |
+  | 30 | 1080 lines | 1080 lines |
+  | 50 | 720 lines | 480 lines |
+  | 60, or unknown | 480 lines | none (Intel's own; HLG on the CPU) |
 - `scale-bt601`, `scale-bt2020`, and `scale-full-range` scale SDR patches in BT.601, BT.2020, and
   full range to 720 lines: their colour is carried, tags and pixels as the source's.
 - `hw-burn-in` draws the DVD (image) subtitle track into the picture: on a GPU path with the GPU's

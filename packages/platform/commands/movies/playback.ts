@@ -97,6 +97,7 @@ const getResult = v.object({
         v.object({ profile: v.number(), level: v.number(), compatibility: v.number() }),
       ),
       dolbyVisionRpu: v.optional(v.literal(true)),
+      videoTransfer: v.optional(v.string()),
       audioCodec: v.union(v.string(), v.null()),
       audioChannels: v.union(v.number(), v.null()),
       audioTracks: v.number(),
