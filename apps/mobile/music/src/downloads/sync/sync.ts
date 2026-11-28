@@ -736,7 +736,17 @@ export class DownloadSync {
       Option.getOrElse(this.#listed, (): ListedLyrics => new Map()),
     );
 
-    if (!Equal.equals(questions, this.#questions)) this.#questions = questions;
+    if (Equal.equals(questions, this.#questions)) return;
+
+    // A question that didn't change stays the same object, so its watcher keeps the lookups it
+    // has in flight while another bucket's answers land.
+    const before = new Map(this.#questions.map((question) => [question.key, question]));
+
+    this.#questions = questions.map((question) => {
+      const same = before.get(question.key);
+
+      return same !== undefined && Equal.equals(same, question) ? same : question;
+    });
   }
 
   #desired(): Desired {

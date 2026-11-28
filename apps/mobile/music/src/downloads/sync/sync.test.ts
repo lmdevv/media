@@ -430,6 +430,31 @@ describe("DownloadSync's lyrics questions", () => {
   });
 });
 
+describe("DownloadSync's lyrics question objects", () => {
+  it("keeps every other bucket's question the same object while one bucket's answers land", async () => {
+    const tracks = Array.from({ length: 150 }, (_, index) => song(`t${String(index)}`, "Bulk"));
+
+    sync.setOnline(false);
+    await settled((snapshot) => snapshot.ready);
+    await sync.request(ALBUM, DETAILS);
+    sync.offerManifest(pinIdOf(ALBUM), manifestOf(tracks));
+    sync.offerKept(new Map(tracks.map((track) => [track.id, at("s1")])));
+    const before = await settled((snapshot) => asked(snapshot).length === tracks.length);
+    const [first, ...others] = before.lyricsQuestions;
+
+    expect(others.length).toBeGreaterThan(0);
+
+    sync.offerLyrics(
+      (first?.held ?? []).map(({ trackId }) =>
+        LyricsChange.cases.Changed.make({ trackId, rev: at("s1"), lyrics: WORDS }),
+      ),
+    );
+    const after = await settled((snapshot) => snapshot.lyricsQuestions.length === others.length);
+
+    expect(after.lyricsQuestions.every((question, index) => question === others[index])).toBe(true);
+  });
+});
+
 describe("DownloadSync.releaseAll", () => {
   it("releases every song the core keeps here for the account, and stops fetching", async () => {
     const one = song("t1", "Safe from Harm");
