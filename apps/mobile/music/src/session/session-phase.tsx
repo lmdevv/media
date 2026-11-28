@@ -6,7 +6,7 @@ import type { ReactNode } from "react";
 
 import { useHasDownloads } from "@/downloads";
 import { appKeychains } from "@/lib/keychains";
-import { useReadSettled } from "@/lib/platform";
+import { isSaved, settledOf, useQueryState } from "@/lib/platform";
 import { sameScreens, sessionPhase, settle } from "@/lib/session-phase";
 import type { SessionPhase, SettledPhase, SetupProgress } from "@/lib/session-phase";
 import { useConnectionControls, useServer } from "@/session/connection";
@@ -121,16 +121,20 @@ const useLivePhase = (): SessionPhase => {
   const signingIn = useSigningIn();
   const launch = useLaunchSignIn(status);
   const hasDownloads = useHasDownloads();
-  const info = useReadSettled(platform.core.server.info, {});
+  const infoState = useQueryState(platform.core.server.info, {});
 
-  const me = useReadSettled(
+  const meState = useQueryState(
     platform.core.auth.sessions.current,
     status === "signedIn" ? {} : "skip",
   );
 
+  const info = settledOf(infoState);
+  const me = settledOf(meState);
   const { progress } = useSetupProgress();
-  const answered = info !== undefined && !(info instanceof Error);
+  // Only the server's own answer counts: a saved one stands in until it comes or the wait runs out.
+  const answered = infoState.status === "success" && !isSaved(infoState);
   const silent = useSilent(!answered, hasDownloads ? OFFLINE_AFTER_MS : SILENT_AFTER_MS);
+  const hasAnswer = info !== undefined && !(info instanceof Error);
 
   return sessionPhase({
     connected: true,
@@ -139,8 +143,9 @@ const useLivePhase = (): SessionPhase => {
     auth: status,
     launch,
     signingIn,
-    hasOwner: answered ? info.hasOwner : undefined,
+    hasOwner: hasAnswer ? info.hasOwner : undefined,
     me,
+    saved: isSaved(infoState) || isSaved(meState),
     refused: me instanceof Error && isFailure(me, "Unauthenticated"),
     person: lastPerson({ own: appKeychains().own, server: mediaUrl }),
     progress,

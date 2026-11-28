@@ -81,15 +81,18 @@ const useWatch = (playing: boolean): ReachWatch | null => {
 
 /**
  * Works out, once for every screen below it, whether the server answers: `phase` is the phase on
- * show, offline when the app opened without the server. Tells the downloads, which fetch only
- * while it answers. The core's socket stands for the core; a failed request to the media service
+ * show, offline when the app opened without the server, and `saved` while it rests on answers
+ * this phone saved at an earlier launch. Tells the downloads, which fetch only while the server
+ * has answered. The core's socket stands for the core; a failed request to the media service
  * doubts it, and a health check decides each doubt.
  */
 export function ServerReachProvider({
   phase,
+  saved,
   children,
 }: {
   readonly phase: SettledPhase["kind"];
+  readonly saved: boolean;
   readonly children: ReactNode;
 }) {
   const [playing, setPlaying] = useState(false);
@@ -118,7 +121,7 @@ export function ServerReachProvider({
     [offlinePhase, lost, check, hear],
   );
 
-  useDownloadsReach(value.reach === "online" && phase === "ready");
+  useDownloadsReach(value.reach === "online" && phase === "ready" && !saved);
 
   return <ServerReachContext value={value}>{children}</ServerReachContext>;
 }

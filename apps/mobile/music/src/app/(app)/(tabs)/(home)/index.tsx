@@ -17,7 +17,7 @@ import { distinctSongs } from "@/lib/history";
 import { cardOf } from "@/lib/offline-library";
 import { DEVICE_FAMILY } from "@/lib/this-device";
 import { useNowPlaying } from "@/player";
-import { useMusic, useRead } from "@/lib/platform";
+import { useMusic, useReadAnswer } from "@/lib/platform";
 import { useServerReach } from "@/session/server-reach";
 
 const RECENT_SONGS = 5;
@@ -64,7 +64,7 @@ function OnThisPhone({ albums }: { readonly albums: ReadonlyArray<OfflineAlbum> 
 }
 
 export default function Home() {
-  const home = useRead(useMusic().library.home, LIBRARY_HOME);
+  const { data: home, saved } = useReadAnswer(useMusic().library.home, LIBRARY_HOME);
   const reach = useServerReach();
   const { albums } = useDownloadsLibrary();
   const onPhone = reach === "offline" || (reach === "reconnecting" && albums.length > 0);
@@ -100,7 +100,9 @@ export default function Home() {
           <RecentlyPlayed />
         </>
       )}
-      <HomeLaunchMarks content={onPhone ? "downloads" : home === undefined ? null : "network"} />
+      <HomeLaunchMarks
+        content={onPhone ? "downloads" : home === undefined ? null : saved ? "saved" : "network"}
+      />
     </TabRoot>
   );
 }

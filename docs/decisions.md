@@ -656,3 +656,7 @@ Old movies' Convex project, its SDK client, and its command registry were delete
   for the server's own answer. A launch whose server stays silent for 2.5 seconds opens on the
   downloads when the phone holds any, and goes back to Home if the server answers while the list
   is on screen.
+- The music iOS app saves the server's setup, who is signed in, and Home's rails and Recently
+  played the same way. A saved answer decides the phase only while the server may still answer:
+  after 2.5 seconds without it the app opens on the downloads, or after 8 on G05, as it does over
+  the splash. The downloads learn the device, and fetch, only from the server's own answer.

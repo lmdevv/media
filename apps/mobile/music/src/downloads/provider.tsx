@@ -25,7 +25,7 @@ import { appKeychains } from "@/lib/keychains";
 import { resolveMediaUrl } from "@/lib/media-url";
 import { asTrackId } from "@/lib/models";
 import type { UserId } from "@/lib/models";
-import { useReadSettled } from "@/lib/platform";
+import { useQueryState, useReadSettled } from "@/lib/platform";
 import { playsOnIos } from "@/player/player-state";
 import { useServer } from "@/session/connection";
 import { mediaRequest } from "@/session/media-requests";
@@ -472,12 +472,13 @@ const useDownloadsAccount = (mediaUrl: string): DownloadsAccount => {
   const platform = usePlatform();
   const status = usePlatformStatus();
 
-  const me = useReadSettled(
+  const me = useQueryState(
     platform.core.auth.sessions.current,
     status === "signedIn" ? {} : "skip",
   );
 
-  const signedIn = me === undefined || me instanceof Error ? null : me;
+  // Only the server's own answer names the device: a saved one could claim a device it dropped.
+  const signedIn = me.status === "success" && me.saved !== true ? me.data : null;
 
   if (status === "signedOut") return { userId: null, deviceId: null };
 
