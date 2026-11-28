@@ -182,7 +182,7 @@ function GuestPlayer({
               <SkipForwardIcon />
             </Button>
           </div>
-          <GuestProgress controller={controller} duration={track?.durationMs ?? 0} />
+          <GuestProgress controller={controller} track={track} />
           {state.error === null ? null : <output className="block">{state.error}</output>}
         </section>
         <section aria-label="Queue" className="flex flex-col gap-3">
@@ -216,14 +216,21 @@ function GuestPlayer({
 
 function GuestProgress({
   controller,
-  duration,
+  track,
 }: {
   readonly controller: PlaybackController;
-  readonly duration: number;
+  readonly track: GuestTrack | undefined;
 }) {
-  const position = useGuestPosition(controller);
-  const [dragging, setDragging] = useState<number | null>(null);
-  const shown = Math.min(dragging ?? position, duration);
+  const itemId = track?.id ?? null;
+  const duration = track?.durationMs ?? 0;
+  const position = useGuestPosition(controller, itemId);
+
+  const [dragging, setDragging] = useState<{
+    readonly itemId: GuestTrack["id"];
+    readonly position: number;
+  } | null>(null);
+
+  const shown = Math.min(dragging?.itemId === itemId ? dragging.position : position, duration);
 
   return (
     <>
@@ -234,10 +241,15 @@ function GuestProgress({
         step={1000}
         value={shown}
         disabled={duration === 0}
-        onValueChange={setDragging}
+        onValueChange={(value) => {
+          if (itemId !== null) setDragging({ itemId, position: value });
+        }}
         onValueCommitted={(value) => {
           setDragging(null);
-          controller.seek(value);
+
+          if (itemId !== null && controller.getSnapshot().current === itemId) {
+            controller.seek(value);
+          }
         }}
       />
       <div className="flex justify-between font-mono text-xs/xs text-text-muted">
