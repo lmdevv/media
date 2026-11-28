@@ -1,7 +1,13 @@
-import { assert, describe, it } from "@effect/vitest";
-import { Effect } from "effect";
+import { NodeServices } from "@effect/platform-node";
+import { assert, describe, it, layer } from "@effect/vitest";
+import { Effect, FileSystem, Layer, Path } from "effect";
 
-import { parseFfprobeJson } from "./media-probe.ts";
+import { ffmpegAvailable } from "../testing/fixture-library.ts";
+import { testConfigLayer } from "../testing/test-config.ts";
+import { parseFfprobeJson, probeFile } from "./media-probe.ts";
+import * as MediaTools from "./media-tools.ts";
+
+const hasFfmpeg = await ffmpegAvailable();
 
 interface StreamJson {
   readonly index: number;
@@ -288,4 +294,63 @@ describe("parseFfprobeJson", () => {
       );
     }),
   );
+});
+
+describe.runIf(hasFfmpeg)("probeFile", () => {
+  layer(
+    MediaTools.layer.pipe(
+      Layer.provide(testConfigLayer({})),
+      Layer.provideMerge(NodeServices.layer),
+    ),
+  )((tools) => {
+    tools.effect("reads the picture's first frame in a file whose first packets are audio", () =>
+      Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
+        const media = yield* MediaTools.Service;
+        const file = path.join(yield* fs.makeTempDirectoryScoped(), "Audio First (2026).mkv");
+
+        // The picture starts half a second in, so Matroska writes audio's packets first, and keeps
+        // HEVC's mastering display and content light level only in the pictures' SEI messages.
+        yield* media.ffmpeg([
+          "-hide_banner",
+          "-nostdin",
+          "-v",
+          "error",
+          "-f",
+          "lavfi",
+          "-i",
+          "sine=frequency=440:duration=2",
+          "-itsoffset",
+          "0.5",
+          "-f",
+          "lavfi",
+          "-i",
+          "testsrc2=size=320x180:rate=24:duration=1",
+          "-map",
+          "1:v",
+          "-map",
+          "0:a",
+          "-c:v",
+          "libx265",
+          "-vf",
+          "setparams=color_primaries=bt2020:color_trc=smpte2084:colorspace=bt2020nc,format=yuv420p10le",
+          "-x265-params",
+          "log-level=error:hdr10=1:master-display=G(13250,34500)B(7500,3000)R(34000,16000)WP(15635,16450)L(10000000,50):max-cll=1000,400",
+          "-c:a",
+          "aac",
+          file,
+        ]);
+
+        const { video } = yield* probeFile(file);
+
+        assert.strictEqual(video?.dynamicRange, "hdr10");
+        assert.deepStrictEqual(video?.colour?.mastering, {
+          minLuminance: 0.005,
+          maxLuminance: 1000,
+        });
+        assert.deepStrictEqual(video?.colour?.contentLight, { maxCll: 1000, maxFall: 400 });
+      }).pipe(Effect.scoped),
+    );
+  });
 });

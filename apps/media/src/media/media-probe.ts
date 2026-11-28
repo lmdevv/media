@@ -131,6 +131,8 @@ class MediaProbeInvalid extends Schema.TaggedError<
   }
 }
 
+const invalid = (cause: unknown) => new MediaProbeInvalid({ cause });
+
 const Disposition = Schema.Struct({
   default: Schema.optionalKey(Schema.Int),
   forced: Schema.optionalKey(Schema.Int),
@@ -162,7 +164,7 @@ const SideData = Schema.Struct({
 
 type SideData = typeof SideData.Type;
 
-/** The first decoded picture of a stream, as `-read_intervals %+#1` reads it. */
+/** The picture stream's first decoded picture, as `-read_intervals %+#1` reads it. */
 const FfprobeFrame = Schema.Struct({
   stream_index: Schema.optionalKey(Schema.Int),
   color_transfer: Schema.optionalKey(Schema.String),
@@ -224,7 +226,13 @@ const FfprobeOutput = Schema.Struct({
   frames: Schema.optionalKey(Schema.Array(FfprobeFrame)),
 });
 
+type FfprobeOutput = typeof FfprobeOutput.Type;
+
 const decodeFfprobeOutput = Schema.decodeUnknownEffect(Schema.fromJsonString(FfprobeOutput));
+
+const decodeFfprobeFrames = Schema.decodeUnknownEffect(
+  Schema.fromJsonString(Schema.Struct({ frames: Schema.optionalKey(Schema.Array(FfprobeFrame)) })),
+);
 
 const finiteOr = (text: string | undefined, fallback: number): number => {
   const value = text === undefined ? Number.NaN : Number(text);
@@ -513,29 +521,30 @@ const toChapters = (
     .toSorted((left, right) => left.startSeconds - right.startSeconds);
 
 /**
- * Translates ffprobe's `-show_format -show_streams -show_chapters` JSON for the file at `path`, with
- * its first pictures' colour and side data (`FRAME_ENTRIES`), into a `MediaProbe`. Cover art stored
- * as a video stream is ignored.
+ * The stream that holds the film's picture: the first video stream with a size that is not cover
+ * art.
  */
-export const parseFfprobeJson = Effect.fn("MediaProbe.parse")(function* (
-  json: string,
-  path: string,
-) {
-  const output = yield* decodeFfprobeOutput(json).pipe(
-    Effect.mapError((cause) => new MediaProbeInvalid({ cause })),
+const pictureStream = (output: FfprobeOutput): FfprobeStream | undefined =>
+  output.streams.find(
+    (stream) =>
+      stream.codec_type === "video" &&
+      !flag(stream.disposition?.attached_pic) &&
+      stream.width !== undefined &&
+      stream.height !== undefined,
   );
 
+/** The probe of the file at `path` from ffprobe's decoded `output`. */
+const probeOf = (output: FfprobeOutput, path: string): MediaProbe => {
   const ofType = (type: string) => output.streams.filter((stream) => stream.codec_type === type);
+  const picture = pictureStream(output);
 
-  const video = ofType("video")
-    .filter((stream) => !flag(stream.disposition?.attached_pic))
-    .map((stream) =>
-      toVideo(
-        stream,
-        output.frames?.find((frame) => frame.stream_index === stream.index),
-      ),
-    )
-    .find((stream) => stream !== undefined);
+  const video =
+    picture === undefined
+      ? undefined
+      : toVideo(
+          picture,
+          output.frames?.find((frame) => frame.stream_index === picture.index),
+        );
 
   const bitRate = Math.trunc(finiteOr(output.format.bit_rate, 0));
   const durationSeconds = finiteOr(output.format.duration, 0);
@@ -554,36 +563,73 @@ export const parseFfprobeJson = Effect.fn("MediaProbe.parse")(function* (
   };
 
   return probe;
+};
+
+/**
+ * Translates ffprobe's `-show_format -show_streams -show_chapters` JSON for the file at `path`, with
+ * the picture stream's first picture (`frames`, as `FRAME_ENTRIES` reads it), into a `MediaProbe`.
+ * Cover art stored as a video stream is ignored.
+ */
+export const parseFfprobeJson = Effect.fn("MediaProbe.parse")(function* (
+  json: string,
+  path: string,
+) {
+  const output = yield* decodeFfprobeOutput(json).pipe(Effect.mapError(invalid));
+
+  return probeOf(output, path);
 });
 
 /**
- * What the probe reads from each stream's first decoded picture (`-read_intervals %+#1`): its colour
- * tags, and the types and values of the side data the colour needs, since HEVC carries mastering
- * display, content light level, and HDR10+ metadata in SEI messages that MP4 keeps nowhere else.
+ * What the probe reads from the picture stream's first decoded picture: its colour tags, and the
+ * types and values of the side data the colour needs, since HEVC carries mastering display, content
+ * light level, and HDR10+ metadata in SEI messages that MP4 keeps nowhere else.
  */
 const FRAME_ENTRIES = [
   "frame=stream_index,color_range,color_space,color_primaries,color_transfer",
   "frame_side_data=side_data_type,min_luminance,max_luminance,max_content,max_average",
 ].join(":");
 
-/** Probes the file at `path` with ffprobe. */
+/**
+ * Probes the file at `path` with ffprobe: its format, streams, and chapters, then the picture
+ * stream's first picture (`FRAME_ENTRIES`). The second run names that stream alone, since
+ * `-read_intervals %+#1` stops after the first packet of the streams it reads, and a file whose
+ * first packet is audio would otherwise give no picture.
+ */
 export const probeFile = Effect.fn("MediaProbe.probeFile")(function* (path: string) {
   const tools = yield* MediaTools.Service;
 
-  const json = yield* tools.ffprobe([
-    "-v",
-    "error",
-    "-print_format",
-    "json",
-    "-show_format",
-    "-show_streams",
-    "-show_chapters",
-    "-read_intervals",
-    "%+#1",
-    "-show_entries",
-    FRAME_ENTRIES,
-    path,
-  ]);
+  const output = yield* tools
+    .ffprobe([
+      "-v",
+      "error",
+      "-print_format",
+      "json",
+      "-show_format",
+      "-show_streams",
+      "-show_chapters",
+      path,
+    ])
+    .pipe(Effect.flatMap((json) => decodeFfprobeOutput(json).pipe(Effect.mapError(invalid))));
 
-  return yield* parseFfprobeJson(json, path);
+  const picture = pictureStream(output);
+
+  if (picture === undefined) return probeOf(output, path);
+
+  const { frames } = yield* tools
+    .ffprobe([
+      "-v",
+      "error",
+      "-print_format",
+      "json",
+      "-select_streams",
+      String(picture.index),
+      "-read_intervals",
+      "%+#1",
+      "-show_entries",
+      FRAME_ENTRIES,
+      path,
+    ])
+    .pipe(Effect.flatMap((json) => decodeFfprobeFrames(json).pipe(Effect.mapError(invalid))));
+
+  return probeOf({ ...output, frames: frames ?? [] }, path);
 });
