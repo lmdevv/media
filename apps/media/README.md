@@ -2,8 +2,9 @@
 
 Node + Effect HttpApi media service. It scans approved library folders, probes files with
 ffprobe, merges local NFO/artwork with TMDB metadata, negotiates playback, serves direct files
-with byte ranges, produces fMP4 HLS (remux, audio-only transcode, Intel QSV or VA-API transcode with HDR
-tone mapping, or software transcode capped at 1080p), converts text subtitles to WebVTT, and
+with byte ranges, produces fMP4 HLS (remux, audio-only transcode, Intel QSV or VA-API transcode with
+deinterlacing and HDR tone mapping, or software transcode capped at 1080p), converts text subtitles
+to WebVTT, and
 hosts the built web app. For music (`src/music/`) it scans music
 folders into the core's catalog with their tags, folder art, and own lyrics, follows moved files,
 and streams songs as originals, fast-start AAC, or gapless fragmented FLAC and AAC.

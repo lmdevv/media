@@ -113,6 +113,8 @@ const noSharedSink: Layer.Layer<LibrarySink.Service> = Layer.succeed(
       Effect.fail(new LibrarySink.LibrarySinkFailed({ operation: "previousIndex", cause: null })),
     upsertBatch: () =>
       Effect.fail(new LibrarySink.LibrarySinkFailed({ operation: "upsertBatch", cause: null })),
+    reprobed: () =>
+      Effect.fail(new LibrarySink.LibrarySinkFailed({ operation: "reprobed", cause: null })),
     markMissing: () =>
       Effect.fail(new LibrarySink.LibrarySinkFailed({ operation: "markMissing", cause: null })),
     reportProgress: () => Effect.void,

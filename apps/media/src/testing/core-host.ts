@@ -5,7 +5,7 @@
  */
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, symlink, utimes, writeFile } from "node:fs/promises";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -68,3 +68,7 @@ export const addFile = async (from: string, to: string): Promise<void> => {
   await mkdir(dirname(to), { recursive: true });
   await writeFile(to, await readFile(from));
 };
+
+/** Gives the file at `path` the modification time `modified`, as an edit of it would. */
+export const touchFile = (path: string, modified: Date): Promise<void> =>
+  utimes(path, modified, modified);

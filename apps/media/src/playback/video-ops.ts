@@ -70,7 +70,7 @@ export const sdrTarget = (codec: OutputCodec): OutputTarget => ({
 });
 
 /** Whether a frame holds a whole picture or two fields. */
-type Scan = "progressive" | "interlaced";
+export type Scan = "progressive" | "interlaced";
 
 /** What a frame is at one point of a chain. */
 export interface Frame {
@@ -109,6 +109,11 @@ export interface SubtitleInput {
 /** One video operation. */
 export type Op = Data.TaggedEnum<{
   Decode: { readonly codec: string };
+  /**
+   * Two fields to one picture, one frame for each frame at the source's rate. Frames the decoder
+   * flags progressive pass through untouched, and each frame's own flag says which field is first.
+   */
+  Deinterlace: {};
   /** `depth` is the bit depth the scaled frames leave in. */
   Scale: { readonly width: number; readonly height: number; readonly depth: number };
   /** HDR to SDR. */
@@ -220,7 +225,9 @@ export type ClipName =
   | "av1-10"
   | "vp9-8"
   | "vp9-10"
-  | "mpeg2-8";
+  | "mpeg2-8"
+  | "mpeg2-8-interlaced"
+  | "h264-10-interlaced";
 
 /** One variant a row proves ahead of use: the operation, run on frames of a generated clip. */
 export interface ProbeCase<T extends OpName> {
@@ -330,6 +337,19 @@ export const surfaceDepth = (format: "nv12" | "p010le"): number => (format === "
 
 /** A rendering with nothing in it, as a CPU decoder's. */
 export const NOTHING: Rendering = { input: [], filters: [], output: [] };
+
+/**
+ * The variant of a deinterlacer taking `frame`: its depth, for interlaced frames only. Every
+ * deinterlacer works at the source's frame rate, so the rate is not part of it.
+ */
+export const deinterlaceVariant = (frame: Frame): string | undefined =>
+  frame.scan === "interlaced" ? String(frame.depth) : undefined;
+
+/** What proves a deinterlacer: interlaced 8-bit MPEG-2 and interlaced 10-bit H.264. */
+export const DEINTERLACE_PROBES: ReadonlyArray<ProbeCase<"Deinterlace">> = [
+  { op: Op.Deinterlace(), clip: "mpeg2-8-interlaced", runs: 1 },
+  { op: Op.Deinterlace(), clip: "h264-10-interlaced", runs: 1 },
+];
 
 /** The id of the row that encodes `codec` in `domain`, such as `encode.qsv.hevc`. */
 export const encodeRowId = (domain: Domain, codec: OutputCodec): ImplId =>

@@ -9,6 +9,7 @@ import {
   fitGenreRow,
   fitMediaFile,
   fitPerson,
+  fitProbeBeside,
   fitProgress,
   fitSeason,
   fitTitle,
@@ -198,6 +199,31 @@ export const patchMediaFile = async (
   await countMissing(db, existing, fitted);
 
   return fitted;
+};
+
+/**
+ * Writes a probe read again over a media file, with the reader revision that read it and the HDR
+ * flag it decides, and nothing else: the probe shrunk to fit beside the file's other fields as
+ * they are stored (`fitProbeBeside`), which never change. Writes nothing and answers false when
+ * the probe cannot fit without dropping its video tracks.
+ */
+export const patchMediaFileProbe = async (
+  db: Db,
+  existing: Doc<"mediaFiles">,
+  probe: Fields<"mediaFiles">["probe"],
+  probeRevision: number,
+): Promise<boolean> => {
+  const fitted = fitProbeBeside(existing, probe, probeRevision);
+
+  if (fitted === undefined) return false;
+
+  await db.patch(existing._id, {
+    probe: fitted,
+    probeRevision,
+    hdr: (fitted.video[0]?.hdr ?? "none") !== "none",
+  });
+
+  return true;
 };
 
 /**

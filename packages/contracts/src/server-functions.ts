@@ -40,6 +40,7 @@ import {
 } from "./models/migration-service";
 import {
   IndexedFile,
+  ReprobedFile,
   ResolvedFile,
   ScannedCollection,
   ScannedCredit,
@@ -556,6 +557,19 @@ export const serverFunctions = {
     path: "movies/scanner:missing",
     args: Schema.Struct({ lease: Lease, paths: Schema.Array(Schema.String) }),
     result: LeaseAnswer(Schema.Struct({ marked: Schema.Int, done: Schema.Int })),
+  }),
+  moviesReprobed: serverMutation({
+    name: "movies.scanner.reprobed",
+    path: "movies/scanner:reprobed",
+    args: Schema.Struct({ lease: Lease, files: Schema.Array(ReprobedFile) }),
+    result: LeaseAnswer(
+      Schema.Struct({
+        written: Schema.Int,
+        done: Schema.Int,
+        /** Paths whose probe could not fit beside the rest of their file, which keep the old. */
+        unfit: Schema.Array(Schema.String),
+      }),
+    ),
   }),
   musicKnown: serverMutation({
     name: "music.scanner.known",

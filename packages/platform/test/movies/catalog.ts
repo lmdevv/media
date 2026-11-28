@@ -73,6 +73,7 @@ const Known = answer(
         mtimeMs: Schema.Finite,
         missing: Schema.Boolean,
         sidecarDigest: Schema.NullOr(Schema.String),
+        probeRevision: Schema.NullOr(Schema.Finite),
       }),
     ),
     continueCursor: Schema.String,
@@ -81,6 +82,15 @@ const Known = answer(
 );
 
 const Marked = answer(Schema.Struct({ marked: Schema.Finite, done: Schema.Finite }));
+
+/** What `movies.scanner.reprobed` answers. */
+export const Reprobed = answer(
+  Schema.Struct({
+    written: Schema.Finite,
+    done: Schema.Finite,
+    unfit: Schema.Array(Schema.String),
+  }),
+);
 
 export const Totals = Schema.Struct({
   titles: Schema.Finite,

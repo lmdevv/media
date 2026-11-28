@@ -468,130 +468,150 @@ const trickplayWithin = <Fields extends FileFields>(fields: Fields): Fields => {
       };
 };
 
-const fileTexts = <Fields extends FileFields>(): ReadonlyArray<Shrinker<Fields>> => [
-  {
-    spare: (f) => spareAll(f.probe.chapters.map((chapter) => chapter.title)),
-    shrink: (f) =>
-      withProbe(f, {
-        ...f.probe,
-        chapters: f.probe.chapters.map((chapter) => ({
-          ...chapter,
-          title: shortenedOrNull(chapter.title),
-        })),
-      }),
-  },
-  {
-    spare: (f) =>
-      spareAll(
-        f.probe.audio.flatMap((track) => [
-          track.title,
-          track.language,
-          track.codec,
-          track.profile,
-          track.channelLayout,
-        ]),
-      ),
-    shrink: (f) =>
-      withProbe(f, {
-        ...f.probe,
-        audio: f.probe.audio.map((track) => ({
-          ...track,
-          title: shortenedOrNull(track.title),
-          language: shortenedOrNull(track.language),
-          codec: shortened(track.codec),
-          profile: shortenedOrNull(track.profile),
-          channelLayout: shortenedOrNull(track.channelLayout),
-        })),
-      }),
-  },
-  {
-    spare: (f) =>
-      spareAll(f.probe.subtitles.flatMap((track) => [track.title, track.language, track.codec])),
-    shrink: (f) =>
-      withProbe(f, {
-        ...f.probe,
-        subtitles: f.probe.subtitles.map((track) => ({
-          ...track,
-          title: shortenedOrNull(track.title),
-          language: shortenedOrNull(track.language),
-          codec: shortened(track.codec),
-        })),
-      }),
-  },
-  {
-    spare: (f) =>
-      spareAll(f.probe.video.flatMap((track) => [track.codec, track.profile, track.pixelFormat])),
-    shrink: (f) =>
-      withProbe(f, {
-        ...f.probe,
-        video: f.probe.video.map((track) => ({
-          ...track,
-          codec: shortened(track.codec),
-          profile: shortenedOrNull(track.profile),
-          pixelFormat: shortenedOrNull(track.pixelFormat),
-        })),
-      }),
-  },
-  {
-    spare: (f) =>
-      spareAll(
-        f.externalSubtitles.flatMap((subtitle) => [
-          subtitle.title,
-          subtitle.language,
-          subtitle.codec,
-        ]),
-      ),
-    shrink: (f) => ({
-      ...f,
-      externalSubtitles: f.externalSubtitles.map((subtitle) => {
-        const shrunk = {
-          ...subtitle,
-          language: shortenedOrNull(subtitle.language),
-          codec: shortened(subtitle.codec),
-        };
-
-        return subtitle.title === undefined
-          ? shrunk
-          : { ...shrunk, title: shortened(subtitle.title) };
-      }),
+const chapterTitles = <Fields extends FileFields>(): Shrinker<Fields> => ({
+  spare: (f) => spareAll(f.probe.chapters.map((chapter) => chapter.title)),
+  shrink: (f) =>
+    withProbe(f, {
+      ...f.probe,
+      chapters: f.probe.chapters.map((chapter) => ({
+        ...chapter,
+        title: shortenedOrNull(chapter.title),
+      })),
     }),
-  },
-  {
-    spare: (f) => spareAll([f.probe.container, f.probe.formatName]),
-    shrink: (f) => {
-      const container = { ...f.probe, container: shortened(f.probe.container) };
+});
 
-      return withProbe(
-        f,
-        container.formatName === undefined
-          ? container
-          : { ...container, formatName: shortened(container.formatName) },
-      );
-    },
+const audioTexts = <Fields extends FileFields>(): Shrinker<Fields> => ({
+  spare: (f) =>
+    spareAll(
+      f.probe.audio.flatMap((track) => [
+        track.title,
+        track.language,
+        track.codec,
+        track.profile,
+        track.channelLayout,
+      ]),
+    ),
+  shrink: (f) =>
+    withProbe(f, {
+      ...f.probe,
+      audio: f.probe.audio.map((track) => ({
+        ...track,
+        title: shortenedOrNull(track.title),
+        language: shortenedOrNull(track.language),
+        codec: shortened(track.codec),
+        profile: shortenedOrNull(track.profile),
+        channelLayout: shortenedOrNull(track.channelLayout),
+      })),
+    }),
+});
+
+const subtitleTexts = <Fields extends FileFields>(): Shrinker<Fields> => ({
+  spare: (f) =>
+    spareAll(f.probe.subtitles.flatMap((track) => [track.title, track.language, track.codec])),
+  shrink: (f) =>
+    withProbe(f, {
+      ...f.probe,
+      subtitles: f.probe.subtitles.map((track) => ({
+        ...track,
+        title: shortenedOrNull(track.title),
+        language: shortenedOrNull(track.language),
+        codec: shortened(track.codec),
+      })),
+    }),
+});
+
+const videoTexts = <Fields extends FileFields>(): Shrinker<Fields> => ({
+  spare: (f) =>
+    spareAll(f.probe.video.flatMap((track) => [track.codec, track.profile, track.pixelFormat])),
+  shrink: (f) =>
+    withProbe(f, {
+      ...f.probe,
+      video: f.probe.video.map((track) => ({
+        ...track,
+        codec: shortened(track.codec),
+        profile: shortenedOrNull(track.profile),
+        pixelFormat: shortenedOrNull(track.pixelFormat),
+      })),
+    }),
+});
+
+const externalSubtitleTexts = <Fields extends FileFields>(): Shrinker<Fields> => ({
+  spare: (f) =>
+    spareAll(
+      f.externalSubtitles.flatMap((subtitle) => [
+        subtitle.title,
+        subtitle.language,
+        subtitle.codec,
+      ]),
+    ),
+  shrink: (f) => ({
+    ...f,
+    externalSubtitles: f.externalSubtitles.map((subtitle) => {
+      const shrunk = {
+        ...subtitle,
+        language: shortenedOrNull(subtitle.language),
+        codec: shortened(subtitle.codec),
+      };
+
+      return subtitle.title === undefined
+        ? shrunk
+        : { ...shrunk, title: shortened(subtitle.title) };
+    }),
+  }),
+});
+
+const containerTexts = <Fields extends FileFields>(): Shrinker<Fields> => ({
+  spare: (f) => spareAll([f.probe.container, f.probe.formatName]),
+  shrink: (f) => {
+    const container = { ...f.probe, container: shortened(f.probe.container) };
+
+    return withProbe(
+      f,
+      container.formatName === undefined
+        ? container
+        : { ...container, formatName: shortened(container.formatName) },
+    );
   },
-  {
-    spare: (f) => spare(f.versionName),
-    shrink: (f) => ({ ...f, versionName: shortenedOrNull(f.versionName) }),
-  },
+});
+
+const versionText = <Fields extends FileFields>(): Shrinker<Fields> => ({
+  spare: (f) => spare(f.versionName),
+  shrink: (f) => ({ ...f, versionName: shortenedOrNull(f.versionName) }),
+});
+
+const fileTexts = <Fields extends FileFields>(): ReadonlyArray<Shrinker<Fields>> => [
+  chapterTitles(),
+  audioTexts(),
+  subtitleTexts(),
+  videoTexts(),
+  externalSubtitleTexts(),
+  containerTexts(),
+  versionText(),
 ];
 
+const chapterList = <Fields extends FileFields>(): Shrinker<Fields> => ({
+  spare: (f) => f.probe.chapters.length,
+  shrink: (f) => withProbe(f, { ...f.probe, chapters: firstHalf(f.probe.chapters) }),
+});
+
+const subtitleList = <Fields extends FileFields>(): Shrinker<Fields> => ({
+  spare: (f) => f.probe.subtitles.length,
+  shrink: (f) => withProbe(f, { ...f.probe, subtitles: firstHalf(f.probe.subtitles) }),
+});
+
+const audioList = <Fields extends FileFields>(): Shrinker<Fields> => ({
+  spare: (f) => f.probe.audio.length,
+  shrink: (f) => withProbe(f, { ...f.probe, audio: firstHalf(f.probe.audio) }),
+});
+
 const fileLists = <Fields extends FileFields>(): ReadonlyArray<Shrinker<Fields>> => [
-  {
-    spare: (f) => f.probe.chapters.length,
-    shrink: (f) => withProbe(f, { ...f.probe, chapters: firstHalf(f.probe.chapters) }),
-  },
-  {
-    spare: (f) => f.probe.subtitles.length,
-    shrink: (f) => withProbe(f, { ...f.probe, subtitles: firstHalf(f.probe.subtitles) }),
-  },
+  chapterList(),
+  subtitleList(),
   {
     spare: (f) => f.externalSubtitles.length,
     shrink: (f) => ({ ...f, externalSubtitles: firstHalf(f.externalSubtitles) }),
   },
-  {
-    spare: (f) => f.probe.audio.length,
-    shrink: (f) => withProbe(f, { ...f.probe, audio: firstHalf(f.probe.audio) }),
-  },
+  audioList(),
   {
     spare: (f) => f.probe.video.length,
     shrink: (f) => withProbe(f, { ...f.probe, video: firstHalf(f.probe.video) }),
@@ -611,6 +631,29 @@ export const fitMediaFile = <Fields extends FileFields>(fields: Fields): Fields 
     fileTexts<Fields>(),
     fileLists<Fields>(),
   );
+
+/**
+ * `probe` made to fit beside the rest of `file` within `DOCUMENT_BYTES.mediaFiles`, shrinking the
+ * probe alone as `fitMediaFile` shrinks a probe: its chapter titles, track names, languages, codec
+ * names, and container names with the most to give first, then its longest list of chapters,
+ * subtitle tracks, or audio tracks. Its video tracks, which hold the field order, are never
+ * dropped: none when the probe cannot fit without that. The rest of `file` is measured as stored,
+ * with `probeRevision` beside it, which a file read before revisions were kept does not hold yet.
+ */
+export const fitProbeBeside = (
+  file: FileFields,
+  probe: Probe,
+  probeRevision: number,
+): Probe | undefined => {
+  const fitted = fitWith(
+    withProbe({ ...file, probeRevision }, probe),
+    DOCUMENT_BYTES.mediaFiles,
+    [chapterTitles(), audioTexts(), subtitleTexts(), videoTexts(), containerTexts()],
+    [chapterList(), subtitleList(), audioList()],
+  );
+
+  return getDocumentSize(fitted) <= DOCUMENT_BYTES.mediaFiles ? fitted.probe : undefined;
+};
 
 /**
  * A progress row's playback id within its bound: `movies.play.report` refuses a longer one, and

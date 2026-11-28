@@ -1,6 +1,7 @@
 import {
   Cache,
   Context,
+  Data,
   Effect,
   FileSystem,
   Layer,
@@ -17,7 +18,7 @@ import { SCAN_FAILURE_PREFIXES } from "@media/contracts/scan-failure";
 import { createHash } from "node:crypto";
 
 import * as MediaConfig from "../media-config.ts";
-import { probeFile } from "../media/media-probe.ts";
+import { type MediaProbe, PROBE_REVISION, probeFile } from "../media/media-probe.ts";
 import * as MediaTools from "../media/media-tools.ts";
 import * as MetadataResolver from "../metadata/title-metadata.ts";
 import { modifiedAtMs } from "../platform/file-info.ts";
@@ -61,6 +62,16 @@ export interface ScanSummary {
   readonly discovered: number;
   readonly unchanged: number;
   readonly processed: number;
+  /**
+   * Unchanged files probed again because an older reader revision made their stored probe, and the
+   * new probe stored.
+   */
+  readonly reprobed: number;
+  /**
+   * Unchanged files probed again whose new probe the store left out, as each changed since or its
+   * probe could not fit beside the rest of its row; they keep their old probe and revision.
+   */
+  readonly reprobeKept: number;
   readonly failed: number;
   readonly missing: number;
   /** Symbolic links skipped because they point outside the library root. */
@@ -267,6 +278,16 @@ const holdsOneMovie = (mainVideos: ReadonlyArray<string>): boolean => {
   return movies.size === 1;
 };
 
+/** What a scan stores of one file it read. */
+type Written = Data.TaggedEnum<{
+  /** A new or changed file, read whole: stored with its title and episode. */
+  Scanned: { readonly file: LibrarySink.ScannedFile };
+  /** An unchanged file probed again: only its probe and revision are stored. */
+  Reprobed: { readonly file: LibrarySink.ReprobedFile };
+}>;
+
+const WrittenFile = Data.taggedEnum<Written>();
+
 interface Described {
   readonly title: MetadataResolver.TitleMetadata | undefined;
   readonly episode: MetadataResolver.EpisodeMetadata | undefined;
@@ -276,9 +297,19 @@ interface Counters {
   discovered: number;
   unchanged: number;
   processed: number;
+  reprobed: number;
+  reprobeKept: number;
   failed: number;
   missing: number;
 }
+
+/**
+ * What a scan does with one file it found. A new or changed file is read whole, title and episode
+ * matched again. An unchanged one whose stored probe an older reader revision made is only probed
+ * again: its probe and revision are stored and nothing else of it, so neither its title nor its
+ * history moves, and no metadata provider is asked.
+ */
+type Reading = "read" | "reprobe" | "skip";
 
 /** Builds a scanner over the `LibrarySink` in context, such as one scan job's own sink. */
 export const make = Effect.gen(function* () {
@@ -409,6 +440,8 @@ export const make = Effect.gen(function* () {
         discovered: 0,
         unchanged: 0,
         processed: 0,
+        reprobed: 0,
+        reprobeKept: 0,
         failed: 0,
         missing: 0,
       };
@@ -421,6 +454,8 @@ export const make = Effect.gen(function* () {
           discovered: counters.discovered,
           unchanged: counters.unchanged,
           processed: counters.processed,
+          reprobed: counters.reprobed,
+          reprobeKept: counters.reprobeKept,
           failed: counters.failed,
           missing: counters.missing,
         });
@@ -743,75 +778,138 @@ export const make = Effect.gen(function* () {
           ),
         );
 
-      const isUnchanged = (file: StatResult): boolean => {
+      const readingOf = (file: StatResult): Reading => {
         const known = previous.get(file.relativePath);
 
-        return (
+        const unchanged =
           request.mode === "incremental" &&
           known !== undefined &&
           known.sizeBytes === file.sizeBytes &&
           known.modifiedAtMs === file.modifiedAtMs &&
-          known.sidecarDigest === file.sidecarDigest
-        );
+          known.sidecarDigest === file.sidecarDigest;
+
+        if (!unchanged) return "read";
+
+        return known.probeRevision === PROBE_REVISION ? "skip" : "reprobe";
       };
 
-      const processFile = (file: StatResult) =>
-        Effect.gen(function* () {
-          const probe = yield* probeFile(absolute(file.relativePath)).pipe(
-            Effect.provideService(MediaTools.Service, tools),
-          );
-
-          const name = parseMediaPath(file.relativePath);
-          const described = yield* describe(file.relativePath, name);
-
-          const scanned: LibrarySink.ScannedFile = {
-            relativePath: file.relativePath,
-            sizeBytes: file.sizeBytes,
-            modifiedAtMs: file.modifiedAtMs,
-            sidecarDigest: file.sidecarDigest,
-            name,
-            probe,
-            subtitles: sidecarSubtitles(file.relativePath, listing(parentOf(file.relativePath))),
-            title: described.title,
-            episode: described.episode,
-          };
-
-          return Option.some(scanned);
-        }).pipe(
+      /**
+       * `file`'s probe, or none when ffprobe fails on it, which counts it failed and logs it once.
+       * A file probed again keeps its stored row then, and the next scan tries it again.
+       */
+      const probed = (file: StatResult) =>
+        probeFile(absolute(file.relativePath)).pipe(
+          Effect.provideService(MediaTools.Service, tools),
+          Effect.asSome,
           Effect.catchTags({
             MediaToolFailed: (error) =>
               fail(file.relativePath, `ffprobe exited with ${String(error.exitCode)}`).pipe(
-                Effect.as(Option.none<LibrarySink.ScannedFile>()),
+                Effect.as(Option.none<MediaProbe>()),
               ),
             MediaProbeInvalid: () =>
               fail(file.relativePath, "ffprobe output was not a media description").pipe(
-                Effect.as(Option.none<LibrarySink.ScannedFile>()),
+                Effect.as(Option.none<MediaProbe>()),
               ),
           }),
         );
 
+      const reprobeFile = (file: StatResult) =>
+        Effect.map(
+          probed(file),
+          Option.map((probe): Written =>
+            WrittenFile.Reprobed({
+              file: {
+                relativePath: file.relativePath,
+                sizeBytes: file.sizeBytes,
+                modifiedAtMs: file.modifiedAtMs,
+                probe,
+                probeRevision: PROBE_REVISION,
+              },
+            }),
+          ),
+        );
+
+      const processFile = (file: StatResult) =>
+        Effect.gen(function* () {
+          const probe = yield* probed(file);
+
+          if (Option.isNone(probe)) return Option.none<Written>();
+          const name = parseMediaPath(file.relativePath);
+          const described = yield* describe(file.relativePath, name);
+
+          return Option.some<Written>(
+            WrittenFile.Scanned({
+              file: {
+                relativePath: file.relativePath,
+                sizeBytes: file.sizeBytes,
+                modifiedAtMs: file.modifiedAtMs,
+                sidecarDigest: file.sidecarDigest,
+                name,
+                probe: probe.value,
+                probeRevision: PROBE_REVISION,
+                subtitles: sidecarSubtitles(
+                  file.relativePath,
+                  listing(parentOf(file.relativePath)),
+                ),
+                title: described.title,
+                episode: described.episode,
+              },
+            }),
+          );
+        });
+
       const skipUnchanged = Effect.sync(() => {
         counters.unchanged += 1;
 
-        return Option.none<LibrarySink.ScannedFile>();
+        return Option.none<Written>();
       });
+
+      const readFile = (file: StatResult) => {
+        const reading = readingOf(file);
+
+        if (reading === "skip") return skipUnchanged;
+
+        return reading === "reprobe" ? reprobeFile(file) : processFile(file);
+      };
 
       yield* Stream.fromIterable(walked.media).pipe(
         Stream.mapEffect(statFile, { concurrency: STAT_CONCURRENCY }),
         Stream.filter(Option.isSome),
         Stream.map((stat) => stat.value),
-        Stream.mapEffect((file) => (isUnchanged(file) ? skipUnchanged : processFile(file)), {
-          concurrency: PROBE_CONCURRENCY,
-          unordered: true,
-        }),
+        Stream.mapEffect(readFile, { concurrency: PROBE_CONCURRENCY, unordered: true }),
         Stream.filter(Option.isSome),
-        Stream.map((scanned) => scanned.value),
+        Stream.map((written) => written.value),
         Stream.grouped(BATCH_SIZE),
         Stream.buffer({ capacity: 1 }),
         Stream.runForEach((batch) =>
           Effect.gen(function* () {
-            yield* sink.upsertBatch(libraryFolder, batch);
-            counters.processed += batch.length;
+            const scanned = batch.flatMap((written) =>
+              WrittenFile.$is("Scanned")(written) ? [written.file] : [],
+            );
+
+            const reprobed = batch.flatMap((written) =>
+              WrittenFile.$is("Reprobed")(written) ? [written.file] : [],
+            );
+
+            if (scanned.length > 0) yield* sink.upsertBatch(libraryFolder, scanned);
+
+            const stored =
+              reprobed.length > 0
+                ? yield* sink.reprobed(libraryFolder, reprobed)
+                : { written: 0, unfit: [] };
+
+            for (const relativePath of stored.unfit) {
+              yield* Effect.logWarning("LibraryScanner.probe_kept").pipe(
+                Effect.annotateLogs({
+                  relativePath,
+                  reason: "the new probe does not fit beside the rest of the file's row",
+                }),
+              );
+            }
+
+            counters.processed += scanned.length;
+            counters.reprobed += stored.written;
+            counters.reprobeKept += reprobed.length - stored.written;
             yield* report("processing");
           }),
         ),
@@ -838,6 +936,8 @@ export const make = Effect.gen(function* () {
         discovered: counters.discovered,
         unchanged: counters.unchanged,
         processed: counters.processed,
+        reprobed: counters.reprobed,
+        reprobeKept: counters.reprobeKept,
         failed: counters.failed,
         missing: counters.missing,
         rejectedLinks: walked.rejectedLinks,

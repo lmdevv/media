@@ -231,6 +231,8 @@ export const moviesTables = {
     trickplay: v.optional(trickplayState),
     /** Digest of the companions the scan read (NFO, artwork, subtitles), to notice their edits. */
     sidecarDigest: nullable(v.string()),
+    /** The media service's reader revision `probe` comes from; absent before one was recorded. */
+    probeRevision: v.optional(v.number()),
   })
     .index("by_library_path", ["libraryId", "path"])
     .index("by_library_missing", ["libraryId", "missing", "missingSince", "path"])

@@ -168,6 +168,53 @@ const hevcEncoderFailsOnce = await writeFakeFfmpeg({
   logInvocations: true,
 });
 
+/** What ffmpeg prints when `vpp_qsv`, deinterlacing and scaling at once, fails at start. */
+const DEINTERLACE_FAILED = "[Parsed_vpp_qsv_3 @ 0x1] Failed to configure the deinterlacer.";
+
+/** The first stream run that deinterlaces on Quick Sync fails; its probe then fails too. */
+const deinterlacerFails = await writeFakeFfmpeg({
+  rules: [
+    {
+      token: "deinterlace=advanced",
+      runs: "hls",
+      stderr: DEINTERLACE_FAILED,
+      arm: "deinterlace",
+      limit: 1,
+    },
+    {
+      token: "deinterlace=advanced",
+      runs: "probe",
+      stderr: DEINTERLACE_FAILED,
+      armedBy: "deinterlace",
+    },
+  ],
+  logInvocations: true,
+});
+
+/**
+ * What ffmpeg 7.1 prints when Quick Sync's deinterlacer meets a picture flagged progressive with a
+ * repeated field, as soft telecine flags it, partway through a run.
+ */
+const DEINTERLACER_REFUSED = "[Parsed_vpp_qsv_2 @ 0x1] Error running VPP: undefined behavior (-16)";
+
+/**
+ * The first stream run that deinterlaces on Quick Sync writes two fragments, then fails as it does
+ * at the first soft-telecined picture after interlaced ones; its probe, on a clip with no such
+ * picture, passes.
+ */
+const deinterlacerFailsLater = await writeFakeFfmpeg({
+  rules: [
+    {
+      token: "deinterlace=advanced",
+      runs: "hls",
+      stderr: DEINTERLACER_REFUSED,
+      afterFragments: 2,
+      limit: 1,
+    },
+  ],
+  logInvocations: true,
+});
+
 /** Runs stall after their first fragment until killed, so a seek replaces a live run. */
 const stalling = await writeFakeFfmpeg({ hlsStallsAfterFragments: 1, logInvocations: true });
 
@@ -225,11 +272,51 @@ const decodeNegotiation = Schema.decodeUnknownEffect(Schema.toCodecJson(Negotiat
 
 const decodeSeek = Schema.decodeUnknownEffect(Schema.toCodecJson(SeekResponse));
 
+/** How a film's picture is coded. */
+const PICTURES = {
+  /** HEVC Main 10 tagged HDR10. */
+  hdr: [
+    "-f",
+    "lavfi",
+    "-i",
+    "testsrc2=size=640x360:rate=24:duration=12",
+    "-vf",
+    "format=yuv420p10le,setparams=color_primaries=bt2020:color_trc=smpte2084:colorspace=bt2020nc",
+    "-c:v",
+    "libx265",
+    "-preset",
+    "ultrafast",
+    "-x265-params",
+    "log-level=error:keyint=48",
+    "-color_primaries",
+    "bt2020",
+    "-color_trc",
+    "smpte2084",
+    "-colorspace",
+    "bt2020nc",
+  ],
+  /** MPEG-2 coded as fields, top first, 25 frames a second. */
+  interlaced: [
+    "-f",
+    "lavfi",
+    "-i",
+    "testsrc2=size=640x360:rate=50:duration=12",
+    "-vf",
+    "tinterlace=interleave_top,setfield=tff",
+    "-c:v",
+    "mpeg2video",
+    "-flags",
+    "+ildct+ilme",
+    "-g",
+    "12",
+  ],
+} as const;
+
 /**
- * Twelve seconds of HEVC Main 10 tagged HDR10 at 640x360 with an AAC track (1), an AC-3 track (2),
- * and a DVD subtitle (3), in a library of its own.
+ * Twelve seconds at 640x360, HDR10 HEVC or interlaced MPEG-2, with an AAC track (1), an AC-3
+ * track (2), and a DVD subtitle (3), in a library of its own.
  */
-const addFilm = Effect.fn(function* (library: string) {
+const addFilm = Effect.fn(function* (library: string, picture: keyof typeof PICTURES = "hdr") {
   const workspace = yield* FixtureWorkspace.Service;
   const tools = yield* MediaTools.Service;
   const scanner = yield* LibraryScanner.Service;
@@ -246,10 +333,7 @@ const addFilm = Effect.fn(function* (library: string) {
     "-v",
     "error",
     "-y",
-    "-f",
-    "lavfi",
-    "-i",
-    "testsrc2=size=640x360:rate=24:duration=12",
+    ...PICTURES[picture].slice(0, 4),
     "-f",
     "lavfi",
     "-i",
@@ -268,20 +352,7 @@ const addFilm = Effect.fn(function* (library: string) {
     "2:a",
     "-map",
     "3:s",
-    "-vf",
-    "format=yuv420p10le,setparams=color_primaries=bt2020:color_trc=smpte2084:colorspace=bt2020nc",
-    "-c:v",
-    "libx265",
-    "-preset",
-    "ultrafast",
-    "-x265-params",
-    "log-level=error:keyint=48",
-    "-color_primaries",
-    "bt2020",
-    "-color_trc",
-    "smpte2084",
-    "-colorspace",
-    "bt2020nc",
+    ...PICTURES[picture].slice(4),
     "-c:a:0",
     "aac",
     "-c:a:1",
@@ -364,14 +435,26 @@ const seekAnswer = Effect.fn(function* (token: string, streamId: string, positio
   return { status: response.status, body: yield* response.json.pipe(Effect.orDie) };
 });
 
-/** The index of the segment of the playlist at `url` that holds `seconds` into the stream. */
-const segmentHolding = Effect.fn(function* (url: string, seconds: number) {
+/** The length of each segment the playlist at `url` lists, in order. */
+const durationsOf = Effect.fn(function* (url: string) {
   const playlist = yield* fetchAnswer(url);
 
-  const durations = playlist.body
+  return playlist.body
     .split("\n")
     .filter((line) => line.startsWith("#EXTINF:"))
     .map((line) => Number.parseFloat(line.slice("#EXTINF:".length)));
+});
+
+/** Where segment `index` of the playlist at `url` starts, in seconds. */
+const segmentStart = Effect.fn(function* (url: string, index: number) {
+  const durations = yield* durationsOf(url);
+
+  return durations.slice(0, index).reduce((start, duration) => start + duration, 0);
+});
+
+/** The index of the segment of the playlist at `url` that holds `seconds` into the stream. */
+const segmentHolding = Effect.fn(function* (url: string, seconds: number) {
+  const durations = yield* durationsOf(url);
 
   let start = 0;
 
@@ -1045,6 +1128,105 @@ describe.skipIf(!hasFfmpeg)("stream recovery", () => {
           assert.include(replacement, "h264_qsv");
           assert.deepStrictEqual(valuesAfter(replacement, "-tag:v"), []);
           assert.deepStrictEqual(kept(replacement), kept(first));
+        }),
+      120_000,
+    );
+  });
+
+  layer(
+    recovering(deinterlacerFails),
+    options,
+  )((it) => {
+    it.effect(
+      "deinterlaces on the CPU between Quick Sync's decode and encode when its deinterlacer fails, keeping what the viewer chose",
+      () =>
+        Effect.gen(function* () {
+          const fileId = yield* addFilm("deinterlace-lost", "interlaced");
+
+          const film = yield* negotiated({
+            token: signTestToken({ fid: fileId, sid: "film" }),
+            ...CHOICES,
+          });
+
+          assert.strictEqual(film.generation, 2);
+          assert.strictEqual(film.mode, "transcode-qsv", "the encode stays on the GPU");
+          assert.strictEqual(yield* fetchStatus(segmentOf(film.url, 3)), 200);
+          assert.deepInclude(film.transcode?.changes[0], {
+            generation: 2,
+            reason: "reproduced",
+            excluded: ["deinterlace.qsv"],
+          });
+          assert.deepInclude(
+            film.transcode?.stages.find((stage) => stage.op === "deinterlace"),
+            { domain: "cpu", impl: "deinterlace.cpu" },
+          );
+          assert.deepInclude(film.transcode?.stages[0], { op: "decode", domain: "qsv" });
+
+          const runs = yield* runsOf(deinterlacerFails, film.streamId ?? "");
+          const [first = [], replacement = []] = runs;
+
+          assert.lengthOf(runs, 2);
+          assert.include(first.join(" "), "deinterlace=advanced");
+          assert.include(replacement.join(" "), "bwdif=mode=send_frame:deint=interlaced");
+          assert.notInclude(replacement.join(" "), "deinterlace=advanced");
+          assert.include(replacement, "h264_qsv");
+          assert.include(replacement, "-hwaccel");
+          assert.deepStrictEqual(kept(replacement), kept(first));
+          assert.isTrue(kept(first).subtitle);
+        }),
+      120_000,
+    );
+  });
+
+  layer(
+    recovering(deinterlacerFailsLater),
+    options,
+  )((it) => {
+    it.effect(
+      "moves deinterlacing to the CPU for this file when Quick Sync's deinterlacer fails after segments were served, from the first segment not served",
+      () =>
+        Effect.gen(function* () {
+          const fileId = yield* addFilm("deinterlace-lost-later", "interlaced");
+
+          const film = yield* negotiated({
+            token: signTestToken({ fid: fileId, sid: "film" }),
+            ...CHOICES,
+            startSeconds: 0,
+          });
+
+          assert.strictEqual(film.generation, 1);
+          assert.strictEqual(film.mode, "transcode-qsv");
+          assert.strictEqual(yield* fetchStatus(segmentOf(film.url, 0)), 200);
+          assert.strictEqual(yield* fetchStatus(segmentOf(film.url, 1)), 200);
+
+          // The first run ended after two segments: their generation is gone, the next one plays.
+          const gone = yield* fetchAnswer(segmentOf(film.url, 2));
+
+          assert.strictEqual(gone.status, 410, gone.body);
+          assert.deepInclude(JSON.parse(gone.body), {
+            _tag: "StreamGenerationGone",
+            generation: 1,
+            currentGeneration: 2,
+          });
+
+          const next = new URL(`../2/index.m3u8${new URL(film.url).search}`, film.url).toString();
+
+          assert.strictEqual(yield* fetchStatus(segmentOf(next, 2)), 200);
+          assert.strictEqual(yield* fetchStatus(segmentOf(next, 3)), 200);
+
+          const runs = yield* runsOf(deinterlacerFailsLater, film.streamId ?? "");
+          const [first = [], replacement = []] = runs;
+          const from = yield* segmentStart(next, 2);
+
+          assert.lengthOf(runs, 2);
+          assert.include(first.join(" "), "deinterlace=advanced");
+          assert.include(replacement.join(" "), "bwdif=mode=send_frame:deint=interlaced");
+          assert.notInclude(replacement.join(" "), "deinterlace=advanced");
+          assert.include(replacement, "h264_qsv");
+          assert.include(replacement, "-hwaccel");
+          assert.deepStrictEqual(kept(replacement).seeks.map(Number), [from], "from segment 2");
+          assert.deepStrictEqual(kept(replacement).maxrate, kept(first).maxrate);
+          assert.isTrue(kept(replacement).subtitle);
         }),
       120_000,
     );

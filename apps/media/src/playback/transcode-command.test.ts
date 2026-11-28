@@ -40,6 +40,8 @@ interface EncodeOptions {
   readonly level?: number;
   readonly bitDepth?: number;
   readonly toneMap?: boolean;
+  /** The source holds fields, so the plan deinterlaces it. */
+  readonly interlaced?: boolean;
   readonly burnSubtitle?: number;
   readonly subtitleCodec?: string;
   readonly device?: string;
@@ -61,7 +63,7 @@ const encode = (domain: "qsv" | "vaapi" | "software", options: EncodeOptions) =>
     pixelFormat: depth > 8 ? "yuv420p10le" : "yuv420p",
     depth,
     colour: toneMap ? "hdr10" : "sdr",
-    scan: "progressive",
+    scan: options.interlaced === true ? "interlaced" : "progressive",
     width: 1920,
     height: 1080,
   };
@@ -138,6 +140,14 @@ const restatements = (args: ReadonlyArray<string>): number =>
       .join(";")
       .matchAll(/fps=/gu),
   ].length;
+
+/** The run that plays interlaced MPEG-2 on `domain` from the start. */
+const interlacedRun = (domain: "qsv" | "vaapi" | "software", options: EncodeOptions = {}) =>
+  hlsCommand({
+    ...command(AudioPlan.Copy({ index: 1 }), "aac"),
+    videoCodec: "mpeg2video",
+    video: encode(domain, { codec: "mpeg2video", interlaced: true, ...options }),
+  });
 
 describe("hlsCommandArgs", () => {
   it("rewrites ADTS headers of copied AAC, which MPEG-TS files carry and MP4 refuses", () => {
@@ -321,6 +331,34 @@ describe("hlsCommandArgs", () => {
         ).toBe(0);
       }
     }
+  });
+
+  it("deinterlaces right after decoding at the source's frame rate, frames flagged interlaced only", () => {
+    expect(after(interlacedRun("software").args, "-vf")).toBe(
+      "bwdif=mode=send_frame:deint=interlaced,scale=1920:1080:flags=bicubic,format=yuv420p",
+    );
+    expect(after(interlacedRun("vaapi").args, "-vf")).toBe(
+      "deinterlace_vaapi=mode=bob:rate=frame:auto=1,scale_vaapi=w=1920:h=1080:format=nv12",
+    );
+
+    // Quick Sync deinterlaces in the `vpp_qsv` that scales, and the restated rate belongs to both.
+    const qsv = interlacedRun("qsv");
+
+    expect(after(qsv.args, "-vf")).toBe(
+      "hwmap,format=qsv,vpp_qsv=deinterlace=advanced:rate=frame:w=1920:h=1080:format=nv12,fps=source_fps",
+    );
+    expect(qsv.owners?.filters.get("Parsed_vpp_qsv_2")).toStrictEqual([1, 2]);
+    expect(qsv.owners?.filters.get("Parsed_fps_3")).toStrictEqual([1, 2]);
+
+    // A burned-in subtitle is drawn on the deinterlaced picture.
+    expect(
+      after(interlacedRun("software", { burnSubtitle: 3 }).args, "-filter_complex")?.split(";")[0],
+    ).toBe("[0:0]bwdif=mode=send_frame:deint=interlaced,scale=1920:1080:flags=bicubic[picture]");
+    expect(
+      after(interlacedRun("qsv", { burnSubtitle: 3 }).args, "-filter_complex")?.split(";")[0],
+    ).toBe(
+      "[0:0]hwmap,format=qsv,vpp_qsv=deinterlace=advanced:rate=frame:w=1920:h=1080:format=nv12,fps=source_fps,hwdownload,format=nv12[picture]",
+    );
   });
 
   it("uploads frames the GPU cannot decode, in the source's bit depth", () => {

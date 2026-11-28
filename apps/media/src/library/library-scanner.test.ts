@@ -1,54 +1,15 @@
-import { NodeServices } from "@effect/platform-node";
 import { assert, describe, layer } from "@effect/vitest";
-import { Effect, FileSystem, Layer, Option, Path } from "effect";
-import { FetchHttpClient } from "effect/http";
+import { Effect, FileSystem, Path } from "effect";
 
 import { LibraryId } from "@media/contracts/ids";
-import * as MediaTools from "../media/media-tools.ts";
-import * as DiskCache from "../disk-cache.ts";
-import * as MetadataResolver from "../metadata/title-metadata.ts";
-import * as Omdb from "../metadata/omdb.ts";
-import * as Tmdb from "../metadata/tmdb.ts";
 import { ffmpegAvailable } from "../testing/fixture-library.ts";
 import { copyBytes } from "../testing/byte-copies.ts";
 import * as FixtureWorkspace from "../testing/fixture-workspace.ts";
-import { testConfigLayer } from "../testing/test-config.ts";
+import { scannerLayer, scanned } from "../testing/memory-scanner.ts";
 import * as LibraryScanner from "./library-scanner.ts";
 import * as MemoryLibrary from "./memory-library.ts";
 
 const hasFfmpeg = await ffmpegAvailable();
-
-const scannerLayer = Layer.unwrap(
-  Effect.gen(function* () {
-    const workspace = yield* FixtureWorkspace.Service;
-    const path = yield* Path.Path;
-
-    const config = testConfigLayer({
-      LIBRARY_ROOTS: workspace.root,
-      DATA_DIR: path.join(workspace.root, "data"),
-    });
-
-    return LibraryScanner.layer.pipe(
-      Layer.provideMerge(MemoryLibrary.layer),
-      Layer.provide(MetadataResolver.layer),
-      Layer.provide(Tmdb.layerWithOptions(Tmdb.defaultOptions(Option.none()))),
-      Layer.provide(Omdb.layerWithOptions(Omdb.defaultOptions(Option.none()))),
-      Layer.provide(DiskCache.layer),
-      Layer.provide(MediaTools.layer),
-      Layer.provide(config),
-    );
-  }),
-).pipe(
-  Layer.provideMerge(FixtureWorkspace.layer),
-  Layer.provideMerge(Layer.mergeAll(NodeServices.layer, FetchHttpClient.layer)),
-);
-
-const scanned = Effect.fn(function* (libraryId: LibraryId) {
-  const library = yield* MemoryLibrary.Service;
-  const files = yield* library.files(libraryId);
-
-  return new Map(files.map((file) => [file.record.relativePath, file]));
-});
 
 describe.skipIf(!hasFfmpeg)("LibraryScanner", () => {
   layer(scannerLayer, { excludeTestServices: true, timeout: "60 seconds" })((it) => {

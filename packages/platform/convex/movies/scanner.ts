@@ -8,9 +8,16 @@ import { withScanLease } from "../core/scans";
 import { boundedItem, pathFits } from "./bounds";
 import { DOCUMENT_BYTES } from "./fit";
 import { NO_WORK, budgetFor, whileBudget, work } from "./budget";
-import { MISSING_COST, markFileMissing, upsertCost, upsertScannedItem } from "./catalog";
+import {
+  MISSING_COST,
+  markFileMissing,
+  REFRESH_COST,
+  refreshProbe,
+  upsertCost,
+  upsertScannedItem,
+} from "./catalog";
 import { moveTotals, sumMoved } from "./totals";
-import { knownFile, scannedItem, upsertedFile } from "./validators";
+import { knownFile, reprobedFile, scannedItem, upsertedFile } from "./validators";
 
 /**
  * The most files or paths one call takes as arguments. How many of them it writes is the call's
@@ -58,12 +65,13 @@ export const known = serverMutation({
         value: {
           files: found.page
             .filter((file) => scan.keeps(file.path))
-            .map(({ path, sizeBytes, mtimeMs, missing, sidecarDigest }) => ({
+            .map(({ path, sizeBytes, mtimeMs, missing, sidecarDigest, probeRevision }) => ({
               path,
               sizeBytes,
               mtimeMs,
               missing,
               sidecarDigest,
+              probeRevision: probeRevision ?? null,
             })),
           continueCursor: found.continueCursor,
           isDone: found.isDone,
@@ -131,6 +139,45 @@ export const missing = serverMutation({
 
       return {
         value: { marked: marked.filter(Boolean).length, done: marked.length },
+        added: 0,
+        removed: 0,
+      };
+    }),
+});
+
+/**
+ * Writes the probes of up to 500 files a scan found unchanged but probed again, as a newer reader
+ * revision reads more: each file's probe, its revision, and the HDR flag the probe decides, and
+ * nothing else of it, as many as the call's budget admits. It never matches a title, so a probe
+ * read again cannot move a file. A file changed since the scan found it is skipped and counted
+ * done; the scan that reads it as changed writes it. Answers how many it got through (`done`), how
+ * many it wrote, and the paths whose probe could not fit beside the rest of their file (`unfit`),
+ * which keep their old probe.
+ */
+export const reprobed = serverMutation({
+  args: { lease, files: v.array(reprobedFile) },
+  returns: leaseAnswer(
+    v.object({ written: v.number(), done: v.number(), unfit: v.array(v.string()) }),
+  ),
+  handler: (ctx, { lease: held, files }) =>
+    withScanLease(ctx, "movies", held, async (scan) => {
+      checkBatch(files.length);
+      scan.admit(files.map((file) => file.path));
+
+      const refreshed = await whileBudget(
+        budgetFor(CALL_COST),
+        files,
+        (file) => (pathFits(file.path) ? REFRESH_COST : NO_WORK),
+        async (file) =>
+          pathFits(file.path) ? refreshProbe(ctx.db, scan.library._id, file) : "skipped",
+      );
+
+      return {
+        value: {
+          written: refreshed.filter((outcome) => outcome === "written").length,
+          done: refreshed.length,
+          unfit: files.filter((_, index) => refreshed[index] === "unfit").map((file) => file.path),
+        },
         added: 0,
         removed: 0,
       };

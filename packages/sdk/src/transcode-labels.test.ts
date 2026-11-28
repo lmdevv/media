@@ -36,8 +36,11 @@ describe("TranscodeLabels", () => {
     expect(stageLabel({ op: "burn-image", domain: "cpu", impl: "burn-image.cpu" })).toBe(
       "Subtitle · CPU",
     );
-    expect(stageLabel({ op: "deinterlace", domain: "nvenc", impl: "deinterlace.nvenc" })).toBe(
-      "deinterlace · NVENC",
+    expect(stageLabel({ op: "deinterlace", domain: "qsv", impl: "deinterlace.qsv" })).toBe(
+      "Deinterlace · QSV",
+    );
+    expect(stageLabel({ op: "denoise", domain: "nvenc", impl: "denoise.nvenc" })).toBe(
+      "denoise · NVENC",
     );
     expect(domainLabel("vaapi")).toBe("VA-API");
     expect(causeLabel("capability")).toBe("stage failed");

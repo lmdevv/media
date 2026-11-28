@@ -76,6 +76,17 @@ const hdrFormat = v.union(
   v.literal("dolby_vision"),
 );
 
+/**
+ * How a video stream says its pictures are scanned: whole pictures, two fields with the top or
+ * bottom one first, or nothing either way.
+ */
+const fieldOrder = v.union(
+  v.literal("progressive"),
+  v.literal("tff"),
+  v.literal("bff"),
+  v.literal("unknown"),
+);
+
 const videoStream = v.object({
   index: v.number(),
   codec: v.string(),
@@ -88,6 +99,8 @@ const videoStream = v.object({
   pixelFormat: nullable(v.string()),
   hdr: hdrFormat,
   bitRate: nullable(v.number()),
+  /** Absent for a file last scanned before field orders were read. */
+  fieldOrder: v.optional(fieldOrder),
 });
 
 const audioStream = v.object({

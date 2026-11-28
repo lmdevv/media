@@ -10,8 +10,17 @@ import {
   withBuild,
   withDevice,
 } from "./capability-inventory.ts";
-import { transcodingReport } from "./transcode-diagnostics.ts";
-import { capabilityKey, ImplId } from "./video-ops.ts";
+import { Result } from "effect";
+
+import { VideoPlan } from "./playback-decision.ts";
+import { summaryOf, transcodingReport } from "./transcode-diagnostics.ts";
+import {
+  candidateKeys,
+  type CapabilitySnapshot,
+  planVideo,
+  type VideoIntent,
+} from "./video-pipeline.ts";
+import { capabilityKey, ImplId, sdrTarget, type SourceVideo } from "./video-ops.ts";
 
 const AT = 1_760_000_000_000;
 
@@ -76,5 +85,58 @@ describe("the transcoding report's capabilities", () => {
     assert.strictEqual(reported?.source, "probe");
     assert.strictEqual(reported?.reason, "crashed");
     assert.strictEqual(reported?.quarantineEndsAt, EpochMillis.make(AT + 15 * 60_000));
+  });
+});
+
+describe("the stage summary", () => {
+  it("names the deinterlace stage and where it ran, a CPU one between moves included", () => {
+    const source: SourceVideo = {
+      codec: "mpeg2video",
+      pixelFormat: "yuv420p",
+      depth: 8,
+      colour: "sdr",
+      scan: "interlaced",
+      width: 720,
+      height: 576,
+    };
+
+    const intent: VideoIntent = {
+      targets: [sdrTarget("h264")],
+      frameRate: 25,
+      bounds: { width: 1920, height: 1080 },
+      cpuEncodeBounds: { width: 1920, height: 1080 },
+      maxBitrate: undefined,
+      burnImage: undefined,
+    };
+
+    const bound: CapabilitySnapshot = {
+      domains: [{ domain: "vaapi", device: "/dev/dri/renderD128" }],
+      verified: new Set(),
+      excluded: new Set(),
+    };
+
+    const verified = new Set(candidateKeys(source, intent, bound).keys());
+
+    const stagesWith = (excluded: ReadonlyArray<string>) => {
+      const planned = planVideo(source, intent, {
+        ...bound,
+        verified,
+        excluded: new Set(excluded.map((id) => ImplId(id))),
+      });
+
+      if (Result.isFailure(planned)) throw new Error(JSON.stringify(planned.failure));
+
+      return summaryOf(VideoPlan.Encode({ intent, ...planned.success }), [], 1).stages;
+    };
+
+    assert.deepStrictEqual(stagesWith([]).slice(0, 2), [
+      { op: "decode", domain: "vaapi", impl: "decode.vaapi" },
+      { op: "deinterlace", domain: "vaapi", impl: "deinterlace.vaapi" },
+    ]);
+    assert.deepStrictEqual(stagesWith(["deinterlace.vaapi"]).slice(1, 4), [
+      { op: "move", domain: "vaapi", impl: "move.vaapi>cpu", move: { from: "vaapi", to: "cpu" } },
+      { op: "deinterlace", domain: "cpu", impl: "deinterlace.cpu" },
+      { op: "move", domain: "vaapi", impl: "move.cpu>vaapi", move: { from: "cpu", to: "vaapi" } },
+    ]);
   });
 });

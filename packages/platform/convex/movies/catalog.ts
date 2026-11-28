@@ -15,6 +15,7 @@ import {
   insertTitleGenre,
   patchEpisode,
   patchMediaFile,
+  patchMediaFileProbe,
   patchSeason,
   replaceMediaFile,
   patchTitle,
@@ -24,7 +25,13 @@ import type { Work } from "./budget";
 import { nothingMoved } from "./totals";
 import type { Moved } from "./totals";
 import { forgetTrickplay, queueTrickplay } from "./trickplayState";
-import type { scannedEpisode, scannedItem, scannedTitle, upsertedFile } from "./validators";
+import type {
+  reprobedFile,
+  scannedEpisode,
+  scannedItem,
+  scannedTitle,
+  upsertedFile,
+} from "./validators";
 
 type Db = MutationCtx["db"];
 
@@ -610,6 +617,7 @@ export const upsertScannedItem = async (
     externalSubtitles: item.file.externalSubtitles,
     versionName: item.file.versionName,
     sidecarDigest: item.file.sidecarDigest ?? null,
+    probeRevision: item.file.probeRevision,
     hdr: (item.file.probe.video[0]?.hdr ?? "none") !== "none",
     missing: false,
   };
@@ -652,6 +660,42 @@ export const upsertScannedItem = async (
   if (existingFile.missing || moved) await adjustPresent(db, title.row._id, episodeId, 1);
 
   return { row: { ...landed, fileId: existingFile._id }, moved: { ...found, files: 0 } };
+};
+
+/** The worst case of `refreshProbe`: the file looked up and written. */
+export const REFRESH_COST = work(4, 2);
+
+/** What `refreshProbe` did with a probe read again. */
+export type Refreshed = "written" | "unfit" | "skipped";
+
+/**
+ * Writes the probe a scan read again of a file it found unchanged, the reader revision that read
+ * it, and the HDR flag that probe decides, and nothing else: the file keeps its title, episode,
+ * version name, added date, subtitles, scrub thumbnails, and the history pointing at its title.
+ * Room for a larger probe comes out of the probe alone (`patchMediaFileProbe`); a probe that
+ * cannot fit without its video tracks is not written (`unfit`), so the file keeps its old probe
+ * and revision. A file missing, gone, or changed since the scan found it (another size or
+ * modification time) is left for the scan that reads it as changed (`skipped`).
+ */
+export const refreshProbe = async (
+  db: Db,
+  libraryId: Id<"libraries">,
+  file: Infer<typeof reprobedFile>,
+): Promise<Refreshed> => {
+  const stored = await fileAt(db, libraryId, file.path);
+
+  if (
+    stored === null ||
+    stored.missing ||
+    stored.sizeBytes !== file.sizeBytes ||
+    stored.mtimeMs !== file.mtimeMs
+  ) {
+    return "skipped";
+  }
+
+  return (await patchMediaFileProbe(db, stored, file.probe, file.probeRevision))
+    ? "written"
+    : "unfit";
 };
 
 /**

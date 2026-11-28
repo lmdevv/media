@@ -1,14 +1,16 @@
 /**
  * The rows of Intel's two GPU APIs, written for any Intel GPU and for AMD's VA-API: Quick Sync
- * (`qsv`, oneVPL derived from a VA-API device) and VA-API (`vaapi`). Each decodes, scales,
- * tone-maps, and encodes H.264, HEVC, and AV1 (a row per codec) on the device, and moves frames
- * to and from CPU memory in NV12 or P010. Which of these a device does is evidence, never
+ * (`qsv`, oneVPL derived from a VA-API device) and VA-API (`vaapi`). Each decodes, deinterlaces,
+ * scales, tone-maps, and encodes H.264, HEVC, and AV1 (a row per codec) on the device, and moves
+ * frames to and from CPU memory in NV12 or P010. Which of these a device does is evidence, never
  * assumed: a row only says what it may try.
  */
 import { type Level, levelOf } from "./output-levels.ts";
 import { DECODE_CLIPS, PROBE_CLIPS } from "./probe-clips.ts";
 import {
   type BuildFeature,
+  DEINTERLACE_PROBES,
+  deinterlaceVariant,
   type Domain,
   type DomainSpec,
   encodeProbes,
@@ -204,6 +206,28 @@ const decodeQsv = decodeOn(
   (codec) => ["hwaccel:vaapi", `decodes:${codec}`, "filter:hwmap"],
 );
 
+/**
+ * `vpp_qsv`'s motion-adaptive deinterlacer at the source's frame rate. Quick Sync takes each
+ * surface's structure from its frame's flags (interlaced, and which field is first), so a frame
+ * flagged progressive passes untouched; every frame comes out at its own time, from its first
+ * field, under ffmpeg 7.1 and 9. It fuses with the scale and tone map after it into one
+ * `vpp_qsv`, which deinterlaces before it scales.
+ */
+const deinterlaceQsv: OpImpl<"Deinterlace"> = {
+  id: ImplId("deinterlace.qsv"),
+  op: "Deinterlace",
+  on: "qsv",
+  takes: "qsv",
+  needs: () => ["filter:vpp_qsv"],
+  variant: (_, frame) => (SURFACE_DEPTHS.has(frame.depth) ? deinterlaceVariant(frame) : undefined),
+  output: (_, frame) => ({ ...frame, scan: "progressive" }),
+  render: () => ({
+    ...NOTHING,
+    filters: [fusing("vpp_qsv", ["deinterlace", "advanced"], ["rate", "frame"])],
+  }),
+  probes: DEINTERLACE_PROBES,
+};
+
 /** `vpp_qsv` scaling; it fuses with a following tone map into one `vpp_qsv`. */
 const scaleQsv: OpImpl<"Scale"> = {
   id: ImplId("scale.qsv"),
@@ -374,6 +398,29 @@ const decodeVaapi = decodeOn("vaapi", { input: VAAPI_DECODING, filters: [] }, (c
   `decodes:${codec}`,
 ]);
 
+/**
+ * `deinterlace_vaapi`'s bob at the source's frame rate: only frames flagged interlaced (`auto`),
+ * each from the field its flag says is first. The driver's default, motion-adaptive, needs the
+ * frame before: on an Arc A380 with iHD 25.2 and 26.3, under ffmpeg 7.1 and 9, it gave no frame
+ * for each run's first and stamped every other with the next frame's time, showing the field
+ * before, so each seek started a frame late. Bob reads one frame: every frame comes out, on time.
+ * Against 50p pictures woven to 25i it scored 35.0 dB, `bwdif` 36.5.
+ */
+const deinterlaceVaapi: OpImpl<"Deinterlace"> = {
+  id: ImplId("deinterlace.vaapi"),
+  op: "Deinterlace",
+  on: "vaapi",
+  takes: "vaapi",
+  needs: () => ["filter:deinterlace_vaapi"],
+  variant: (_, frame) => (SURFACE_DEPTHS.has(frame.depth) ? deinterlaceVariant(frame) : undefined),
+  output: (_, frame) => ({ ...frame, scan: "progressive" }),
+  render: () => ({
+    ...NOTHING,
+    filters: [filter("deinterlace_vaapi", ["mode", "bob"], ["rate", "frame"], ["auto", "1"])],
+  }),
+  probes: DEINTERLACE_PROBES,
+};
+
 /** `scale_vaapi` scaling. */
 const scaleVaapi: OpImpl<"Scale"> = {
   id: ImplId("scale.vaapi"),
@@ -450,12 +497,14 @@ const encodeVaapi = encodesOn("vaapi", {
 /** Every Quick Sync and VA-API row. */
 export const INTEL_ROWS: ReadonlyArray<Row> = [
   row(decodeQsv),
+  row(deinterlaceQsv),
   row(scaleQsv),
   row(toneMapQsv),
   ...encodeQsv,
   row(uploadTo("qsv", [["extra_hw_frames", "64"]], "qsv")),
   row(downloadFrom("qsv")),
   row(decodeVaapi),
+  row(deinterlaceVaapi),
   row(scaleVaapi),
   row(toneMapVaapi),
   ...encodeVaapi,

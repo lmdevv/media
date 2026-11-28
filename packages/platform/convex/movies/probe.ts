@@ -1,5 +1,5 @@
 import { paginationOptsValidator, paginationResultValidator } from "convex/server";
-import { v } from "convex/values";
+import { getDocumentSize, v } from "convex/values";
 
 import { level } from "../../commands/access";
 import { callerScope } from "../../commands/scopes";
@@ -34,7 +34,9 @@ import {
   insertTitle,
   insertTitleGenre,
   patchPerson,
+  patchMediaFile,
   patchTitle,
+  replaceMediaFile,
 } from "./write";
 import { findProgress, watchGeneration } from "./viewing";
 import { FEATURED_READS, featuredDetailOf } from "./playState";
@@ -547,6 +549,40 @@ export const files = internalQuery({
   },
 });
 
+/**
+ * Leaves a scanned file as an older media service and a provider's match left it, so a stack test
+ * can check what an update's scan does to it: its title keyed and named as a match through TMDB
+ * keys it, and its probe without a field order, stored at `probeRevision` or with none.
+ */
+export const ageFile = internalMutation({
+  args: {
+    fileId: v.id("mediaFiles"),
+    matchKey: v.string(),
+    name: v.string(),
+    probeRevision: v.optional(v.number()),
+  },
+  returns: v.null(),
+  handler: async (ctx, { fileId, matchKey, name, probeRevision }) => {
+    const file = (await ctx.db.get(fileId)) ?? fail("not_found", "No such file");
+    const title = (await ctx.db.get(file.titleId)) ?? fail("not_found", "No such title");
+    const { _id, _creationTime, probeRevision: _newer, ...fields } = file;
+
+    await patchTitle(ctx.db, title, { matchKey, name, matchStatus: "matched" });
+
+    const aged = await replaceMediaFile(ctx.db, file, {
+      ...fields,
+      probe: {
+        ...file.probe,
+        video: file.probe.video.map(({ fieldOrder: _read, ...video }) => video),
+      },
+    });
+
+    if (probeRevision !== undefined) await patchMediaFile(ctx.db, aged, { probeRevision });
+
+    return null;
+  },
+});
+
 /** Asks for an admin's match of a title, as the movies command will (`askForMatch`). */
 export const askMatch = internalMutation({
   args: { titleId: v.id("titles"), providerId: v.string() },
@@ -592,6 +628,34 @@ export const hasTotals = internalQuery({
 });
 
 /** A file's scrub-thumbnail state, for a test to find the job a scan queued. */
+/**
+ * A media file as stored, so a stack test can place it near the media-file bound and compare it:
+ * its size as Convex measures it, its probe, revision, and HDR flag, and the rest of its fields as
+ * the JSON text of the row without them.
+ */
+export const fileRecord = internalQuery({
+  args: { fileId: v.id("mediaFiles") },
+  returns: v.object({
+    bytes: v.number(),
+    probe: v.string(),
+    probeRevision: v.union(v.number(), v.null()),
+    hdr: v.boolean(),
+    rest: v.string(),
+  }),
+  handler: async (ctx, { fileId }) => {
+    const file = (await ctx.db.get(fileId)) ?? fail("not_found", "No such file");
+    const { probe, probeRevision, hdr, ...rest } = file;
+
+    return {
+      bytes: getDocumentSize(file),
+      probe: JSON.stringify(probe),
+      probeRevision: probeRevision ?? null,
+      hdr,
+      rest: JSON.stringify(rest),
+    };
+  },
+});
+
 export const fileState = internalQuery({
   args: { fileId: v.id("mediaFiles") },
   returns: v.object({ trickplay: v.union(trickplayState, v.null()) }),

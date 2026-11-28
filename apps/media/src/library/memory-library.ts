@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 
 import { MediaFileId, type LibraryId } from "@media/contracts/ids";
 import { MediaFileNotFound } from "@media/contracts/media-playback";
-import { Context, Effect, Layer, Ref } from "effect";
+import { Context, Effect, Layer, Ref, Struct } from "effect";
 
 import * as FileResolver from "../playback/file-resolver.ts";
 import * as LibrarySink from "./library-sink.ts";
@@ -71,6 +71,7 @@ export const layer: Layer.Layer<Service | LibrarySink.Service | FileResolver.Ser
                     sizeBytes: file.record.sizeBytes,
                     modifiedAtMs: file.record.modifiedAtMs,
                     sidecarDigest: file.record.sidecarDigest,
+                    probeRevision: file.record.probeRevision,
                   },
                 ]
               : [],
@@ -83,6 +84,35 @@ export const layer: Layer.Layer<Service | LibrarySink.Service | FileResolver.Ser
               files.set(fileId, { fileId, folder, record, missing: false });
             }
           });
+        }),
+        reprobed: Effect.fn("MemoryLibrary.reprobed")(function* (folder, reprobedFiles) {
+          let written = 0;
+
+          yield* updateFiles((files) => {
+            for (const reprobedFile of reprobedFiles) {
+              const fileId = fileIdOf(folder.libraryId, reprobedFile.relativePath);
+              const stored = files.get(fileId);
+
+              if (
+                stored !== undefined &&
+                !stored.missing &&
+                stored.record.sizeBytes === reprobedFile.sizeBytes &&
+                stored.record.modifiedAtMs === reprobedFile.modifiedAtMs
+              ) {
+                files.set(fileId, {
+                  ...stored,
+                  record: Struct.assign(stored.record, {
+                    probe: reprobedFile.probe,
+                    probeRevision: reprobedFile.probeRevision,
+                  }),
+                });
+                written += 1;
+              }
+            }
+          });
+
+          // Its records have no size bound, so every probe fits.
+          return { written, unfit: [] };
         }),
         markMissing: Effect.fn("MemoryLibrary.markMissing")(function* (folder, relativePaths) {
           yield* updateFiles((files) => {
