@@ -533,6 +533,8 @@ export const musicStore = (db: Db, meter: Meter): MusicStore => {
         lrclibWalked(row._id);
       }
 
+      await patch("tracks", trackId, { lrclibAt: checkedAt });
+
       return stored.status;
     },
     deleteLrclibLyrics: async (trackId) => {

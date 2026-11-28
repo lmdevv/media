@@ -2,6 +2,7 @@ import type { Doc, Id } from "../_generated/dataModel";
 import type { DatabaseReader } from "../_generated/server";
 import type { LibraryReader, SourceLoader } from "../core/downloadSources";
 import type { ContentFacts } from "../core/permissions/policy";
+import { lyricsRevisionOf } from "./lyricsRevision";
 
 /**
  * The facts a kid's restrictions read about a track: whether its tags mark it explicit, which the
@@ -85,6 +86,7 @@ export const trackSource: SourceLoader<"track"> = async (db, trackId, libraryOf)
     facts: placed.facts,
     resource: { kind: "track", id: track._id },
     revision: fileRevision(track.size, track.mtimeMs),
+    extrasRevision: await lyricsRevisionOf(track),
     bytes: () => track.size,
     label: track.title,
   };

@@ -559,7 +559,7 @@ List what you keep on this device, newest first, and whether each item can still
 - Scope: signed-in
 - Arguments: `{ paginationOpts: { numItems: number; cursor: string | null; endCursor?: string | null; id?: number; maximumRowsRead?: number; maximumBytesRead?: number } }`
 - Pages: `--limit <n>` (default 100) and `--cursor <continueCursor>`
-- Result: `{ page: Array<{ item: { kind: "file"; id: Id<"mediaFiles"> } | { kind: "track"; id: Id<"tracks"> }; state: "available"; revision: string; quality: "standard" | "high"; bytes: number; label: string } | { item: { kind: "file"; id: Id<"mediaFiles"> } | { kind: "track"; id: Id<"tracks"> }; state: "expired"; because: "access" | "restricted" | "device" } | { item: { kind: "file"; id: Id<"mediaFiles"> } | { kind: "track"; id: Id<"tracks"> }; state: "gone" }>; continueCursor: string; isDone: boolean; splitCursor?: string | null; pageStatus?: "SplitRecommended" | "SplitRequired" | null }`
+- Result: `{ page: Array<{ item: { kind: "file"; id: Id<"mediaFiles"> } | { kind: "track"; id: Id<"tracks"> }; state: "available"; revision: string; extrasRevision: string | null; quality: "standard" | "high"; bytes: number; label: string } | { item: { kind: "file"; id: Id<"mediaFiles"> } | { kind: "track"; id: Id<"tracks"> }; state: "expired"; because: "access" | "restricted" | "device" } | { item: { kind: "file"; id: Id<"mediaFiles"> } | { kind: "track"; id: Id<"tracks"> }; state: "gone" }>; continueCursor: string; isDone: boolean; splitCursor?: string | null; pageStatus?: "SplitRecommended" | "SplitRequired" | null }`
 
 ## `core.downloads.remove`
 

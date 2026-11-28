@@ -16,6 +16,7 @@ import {
   HELD_LYRICS_LIMIT,
   lyricsBytes,
   lyricsQuestions,
+  PENDING_LYRICS,
   planSync,
   SyncStep,
   targetKey,
@@ -388,6 +389,9 @@ describe("planSync for lyrics", () => {
 const songs = (count: number): ReadonlyArray<TrackId> =>
   Array.from({ length: count }, (_, index) => TrackId.make(`t${String(index).padStart(4, "0")}`));
 
+const listedAt = (ids: ReadonlyArray<TrackId>, rev: string | null) =>
+  new Map(ids.map((id) => [id, rev === null ? null : LyricsRevision.make(rev)]));
+
 describe("lyricsQuestions", () => {
   const album = pin(DownloadPinId.make("p1"));
 
@@ -403,26 +407,76 @@ describe("lyricsQuestions", () => {
         ],
       ),
       vaultOf([]),
+      listedAt(ids, "s1"),
     );
 
-  it("asks about every kept song with the revision this device keeps for it", () => {
-    const first = TrackId.make("t1");
-    const second = TrackId.make("t2");
+  it("asks only about kept songs whose lyrics here are behind the server's revision", () => {
+    const current = TrackId.make("current");
+    const behind = TrackId.make("behind");
+    const pending = TrackId.make("pending");
+    const none = TrackId.make("none");
+    const unlisted = TrackId.make("unlisted");
+    const ids = [current, behind, pending, none, unlisted];
 
     expect(
       lyricsQuestions(
-        desiredOf([album], [manifest(album, [entry(second, "r1"), entry(first, "r1")])]),
-        vaultOf([], [], [storedLyrics(second, "l1")]),
+        desiredOf(
+          [album],
+          [
+            manifest(
+              album,
+              ids.map((id) => entry(id, "r1")),
+            ),
+          ],
+        ),
+        vaultOf(
+          [],
+          [],
+          [
+            storedLyrics(current, "s2"),
+            storedLyrics(behind, "s1"),
+            storedLyrics(pending, PENDING_LYRICS),
+          ],
+        ),
+        new Map([
+          ...listedAt([current, behind, pending, none], "s2"),
+          ...listedAt([unlisted], null),
+        ]),
       ).map((question) => question.held),
     ).toEqual([
       [
-        { trackId: first, rev: null },
-        { trackId: second, rev: "l1" },
+        { trackId: behind, rev: "s2" },
+        { trackId: none, rev: "s2" },
+        { trackId: pending, rev: "s2" },
       ],
     ]);
   });
 
-  it(`asks about every kept song once, at most ${HELD_LYRICS_LIMIT} a read`, () => {
+  it("asks nothing at launch when every kept song's lyrics are current, however many", () => {
+    const ids = songs(500);
+
+    expect(
+      lyricsQuestions(
+        desiredOf(
+          [album],
+          [
+            manifest(
+              album,
+              ids.map((id) => entry(id, "r1")),
+            ),
+          ],
+        ),
+        vaultOf(
+          [],
+          [],
+          ids.map((id) => storedLyrics(id, "s1")),
+        ),
+        listedAt(ids, "s1"),
+      ),
+    ).toEqual([]);
+  });
+
+  it(`asks about every song behind once, at most ${HELD_LYRICS_LIMIT} a read`, () => {
     const ids = songs(5 * HELD_LYRICS_LIMIT + 1);
     const questions = questionsFor(ids);
     const asked = questions.flatMap((question) => question.held.map(({ trackId }) => trackId));

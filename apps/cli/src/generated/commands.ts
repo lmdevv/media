@@ -1474,6 +1474,7 @@ export const generatedCommands = [
             ]),
             state: Schema.Literal("available"),
             revision: Schema.String,
+            extrasRevision: Schema.Union([Schema.String, Schema.Null]),
             quality: Schema.Union([Schema.Literal("standard"), Schema.Literal("high")]),
             bytes: Schema.Finite,
             label: Schema.String,

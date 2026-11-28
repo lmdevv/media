@@ -81,6 +81,7 @@ export const fileSource: SourceLoader<"file"> = async (db, fileId, libraryOf) =>
     facts: found.placed.facts,
     resource: { kind: "file", id: file._id },
     revision: `${file.sizeBytes}:${file.mtimeMs}`,
+    extrasRevision: null,
     bytes: () => file.sizeBytes,
     label: found.title.overrides?.name ?? found.title.name,
   };

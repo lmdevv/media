@@ -323,6 +323,7 @@ export const { add, list, fetch, remove, usage, setCap } = register({
           item: row.item,
           state: kept.state,
           revision: kept.source.revision,
+          extrasRevision: kept.source.extrasRevision,
           quality: row.quality,
           bytes: kept.bytes,
           label: kept.source.label,

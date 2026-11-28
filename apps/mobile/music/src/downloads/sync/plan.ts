@@ -1,11 +1,10 @@
 import { Data, Equal, Option, Schema, Struct } from "effect";
 
-import { DownloadPinId, LyricsChange, OfflineLyrics } from "./models";
+import { DownloadPinId, LyricsChange, LyricsRevision, OfflineLyrics } from "./models";
 import type {
   DownloadManifest,
   DownloadPin,
   DownloadTarget,
-  LyricsRevision,
   ManifestEntry,
   ManifestEntryState,
   OfflineTrack,
@@ -16,11 +15,23 @@ import type {
 /** Songs one lyrics question holds at most. */
 export const HELD_LYRICS_LIMIT = 200;
 
-/** A kept song and the revision of the lyrics the phone keeps for it, null for none. */
+/**
+ * A kept song whose lyrics here are not the server's current ones, and the server's revision of
+ * them now (`core.downloads.list`'s `extrasRevision`), which the answer is kept at.
+ */
 export interface HeldLyrics {
   readonly trackId: TrackId;
-  readonly rev: LyricsRevision | null;
+  readonly rev: LyricsRevision;
 }
+
+/** The lyrics revision the core lists for each song it keeps on this device; null for none. */
+export type ListedLyrics = ReadonlyMap<TrackId, LyricsRevision | null>;
+
+/**
+ * The revision lyrics are kept at when the server answered while a lookup was still pending. No
+ * server revision equals it, so they are asked again.
+ */
+export const PENDING_LYRICS = LyricsRevision.make("pending");
 
 /** A song this device holds: one file of one revision of the server's file, in one profile. */
 export interface StoredCopy {
@@ -257,24 +268,29 @@ const bucketCount = (songs: number): number => {
 };
 
 /**
- * What to look up lyrics for: every kept song with the revision of the lyrics this phone keeps for
- * it, one batch per bucket of songs by a hash of their IDs. A new download moves only its own
- * bucket, and the songs the others hold stay as they were. A bucket that passes
- * `HELD_LYRICS_LIMIT` is split in ID order.
+ * What to look up lyrics for: each kept song the core lists with lyrics at a revision other than
+ * the one this phone keeps them at, one batch per bucket of kept songs by a hash of their IDs. A
+ * song whose lyrics here are current is never asked. A new download moves only its own bucket,
+ * and the songs the others hold stay as they were. A bucket that passes `HELD_LYRICS_LIMIT` is
+ * split in ID order.
  */
 export const lyricsQuestions = (
   desired: Desired,
   vault: VaultView,
+  listed: ListedLyrics,
 ): ReadonlyArray<LyricsQuestion> => {
   const kept = keptSongs(desired, vault);
   const count = bucketCount(kept.size);
   const buckets = new Map<number, Array<HeldLyrics>>();
 
   for (const trackId of kept) {
+    const current = listed.get(trackId) ?? null;
+
+    if (current === null || vault.lyrics.get(trackId)?.rev === current) continue;
     const bucket = bucketHash(trackId) % count;
     const held = buckets.get(bucket) ?? [];
 
-    held.push({ trackId, rev: vault.lyrics.get(trackId)?.rev ?? null });
+    held.push({ trackId, rev: current });
     buckets.set(bucket, held);
   }
 

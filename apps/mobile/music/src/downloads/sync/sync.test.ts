@@ -6,7 +6,7 @@ import { NotFound } from "@media/contracts/errors";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { FakeMedia } from "./fake-media";
-import { AlbumId, ArtistId, TrackId } from "./models";
+import { AlbumId, ArtistId, LyricsChange, LyricsRevision, TrackId } from "./models";
 import type { DownloadManifest, OfflineTrack } from "./models";
 import { nodeTransfer } from "./node-transfer";
 import { pinIdOf, UNKNOWN_REVISION } from "./plan";
@@ -377,6 +377,59 @@ describe("DownloadSync with Wi-Fi only", () => {
   });
 });
 
+const WORDS = { status: "instrumental" } as const;
+
+const asked = (snapshot: DownloadsSnapshot) =>
+  snapshot.lyricsQuestions.flatMap((question) => question.held);
+
+const at = (rev: string) => LyricsRevision.make(rev);
+
+describe("DownloadSync's lyrics questions", () => {
+  it("asks only about songs the server's lyrics revision moved past, and keeps a late answer behind", async () => {
+    const one = song("t1", "Safe from Harm");
+    const two = song("t2", "One Love");
+
+    await settled((snapshot) => snapshot.ready);
+    await sync.request(ALBUM, DETAILS);
+    sync.offerManifest(pinIdOf(ALBUM), manifestOf([one, two]));
+    sync.offerKept(
+      new Map([
+        [one.id, at("s1")],
+        [two.id, at("s1")],
+      ]),
+    );
+
+    expect(asked(await settled((snapshot) => asked(snapshot).length === 2))).toEqual([
+      { trackId: one.id, rev: "s1" },
+      { trackId: two.id, rev: "s1" },
+    ]);
+
+    sync.offerLyrics([
+      LyricsChange.cases.Changed.make({ trackId: one.id, rev: at("s1"), lyrics: WORDS }),
+      LyricsChange.cases.Changed.make({ trackId: two.id, rev: at("s1"), lyrics: WORDS }),
+    ]);
+    await settled((snapshot) => snapshot.lyricsQuestions.length === 0);
+
+    sync.offerKept(
+      new Map([
+        [one.id, at("s1")],
+        [two.id, at("s2")],
+      ]),
+    );
+    const moved = await settled((snapshot) => asked(snapshot).length === 1);
+
+    expect(asked(moved)).toEqual([{ trackId: two.id, rev: "s2" }]);
+
+    // The answer to the question asked at s1 lands after the server moved on to s2.
+    sync.offerLyrics([
+      LyricsChange.cases.Changed.make({ trackId: two.id, rev: at("s1"), lyrics: WORDS }),
+    ]);
+    await settled(() => vault.view.lyrics.get(two.id)?.rev === "s1");
+
+    expect(asked(sync.getSnapshot())).toEqual([{ trackId: two.id, rev: "s2" }]);
+  });
+});
+
 describe("DownloadSync over the core", () => {
   it("keeps each song of a download on the core, fetches it with a ticket, and stores its revision", async () => {
     const one = song("t1", "Safe from Harm");
@@ -412,7 +465,7 @@ describe("DownloadSync over the core", () => {
     await sync.request(ALBUM, DETAILS);
     sync.offerManifest(pinIdOf(ALBUM), manifestOf([one]));
     await settled((snapshot) => snapshot.copies.size === 1);
-    sync.offerKept(new Set([one.id]));
+    sync.offerKept(new Map([[one.id, null]]));
     sync.offerManifest(pinIdOf(ALBUM), manifestOf([one]));
     await settled((snapshot) => snapshot.copies.size === 1);
 
@@ -427,7 +480,7 @@ describe("DownloadSync over the core", () => {
     await sync.request(ALBUM, DETAILS);
     sync.offerManifest(pinIdOf(ALBUM), manifestOf([one]));
     await settled((snapshot) => snapshot.copies.size === 1);
-    sync.offerKept(new Set([one.id]));
+    sync.offerKept(new Map([[one.id, null]]));
     await sync.remove(ALBUM);
     await settled((snapshot) => snapshot.copies.size === 0 && snapshot.pins.length === 0);
     await settled(() => core.calls.includes("release:t1"));

@@ -27,6 +27,7 @@ import {
 } from "./plan";
 import type {
   Desired,
+  ListedLyrics,
   LyricsQuestion,
   NewLyrics,
   StoredArt,
@@ -107,9 +108,9 @@ export interface DownloadsSnapshot {
   readonly copies: ReadonlyMap<TrackId, LocalCopy>;
   readonly usage: DownloadUsage;
   /**
-   * The kept songs to look up lyrics for, one batch per question, while the server answers; hand
-   * the lyrics found to `offerLyrics`. Recomputed once a plan has applied what it could, and the
-   * same array until a question changes.
+   * The kept songs whose lyrics here are behind the server's, one batch per question; hand the
+   * lyrics found to `offerLyrics`. Recomputed once a plan has applied what it could, and the same
+   * array until a question changes.
    */
   readonly lyricsQuestions: ReadonlyArray<LyricsQuestion>;
 }
@@ -246,8 +247,11 @@ export class DownloadSync {
   readonly #asked = new Set<DownloadPinId>();
   /** The songs the person tried again while Low Power Mode is on, which fetch all the same. */
   readonly #askedSongs = new Set<TrackId>();
-  /** What the core keeps on this device, as `core.downloads.list` answered; none until it does. */
-  #listed: Option.Option<ReadonlySet<TrackId>> = Option.none();
+  /**
+   * What the core keeps on this device, with each song's lyrics revision, as
+   * `core.downloads.list` answered; none until it does.
+   */
+  #listed: Option.Option<ListedLyrics> = Option.none();
   readonly #releasing = new Set<TrackId>();
   readonly #manifests = new Map<DownloadPinId, DownloadManifest>();
   readonly #lyrics = new Map<TrackId, LyricsChange>();
@@ -305,11 +309,13 @@ export class DownloadSync {
   }
 
   /**
-   * The songs the core keeps on this device, as `core.downloads.list` answered. A song it keeps
-   * that no download here holds any more is released, as after a removal made offline.
+   * The songs the core keeps on this device, with the revision of each one's lyrics, as
+   * `core.downloads.list` answered. A song it keeps that no download here holds any more is
+   * released, as after a removal made offline. A kept song's lyrics are asked for only while
+   * this phone keeps them at another revision (`lyricsQuestions`).
    */
-  offerKept(trackIds: ReadonlySet<TrackId>): void {
-    this.#listed = Option.some(trackIds);
+  offerKept(listed: ListedLyrics): void {
+    this.#listed = Option.some(listed);
     this.#plan();
   }
 
@@ -573,9 +579,9 @@ export class DownloadSync {
   #release(kept: ReadonlySet<TrackId>): void {
     if (!this.#online) return;
 
-    const listed = Option.getOrElse(this.#listed, (): ReadonlySet<TrackId> => new Set());
+    const listed = Option.getOrElse(this.#listed, (): ListedLyrics => new Map());
 
-    for (const trackId of listed) {
+    for (const trackId of listed.keys()) {
       if (kept.has(trackId) || this.#releasing.has(trackId) || this.#fetching.has(trackId)) {
         continue;
       }
@@ -701,7 +707,11 @@ export class DownloadSync {
   }
 
   #askAgain(): void {
-    const questions = lyricsQuestions(this.#desired(), this.#view);
+    const questions = lyricsQuestions(
+      this.#desired(),
+      this.#view,
+      Option.getOrElse(this.#listed, (): ListedLyrics => new Map()),
+    );
 
     if (!Equal.equals(questions, this.#questions)) this.#questions = questions;
   }

@@ -9,7 +9,7 @@ import type { Id } from "../../convex/_generated/dataModel";
 import { insertByHand, patchByHand, runFunction } from "../admin";
 import { eventually, retrying } from "../core/jobs/driver";
 import { listedJob } from "../core/jobs/listed";
-import { member } from "../devices";
+import { enroll, member } from "../devices";
 import type { Member } from "../devices";
 import { runServer } from "../service";
 import { refusal } from "../sign-in";
@@ -436,6 +436,41 @@ describe.skipIf(stack === undefined)("music lyrics lookups", { timeout: 180_000 
       source: "file",
       main: { body: { type: "synced", lines: [{ text: "own line" }] } },
     });
+  });
+
+  it("move a downloaded song's lyrics revision when an LRCLIB answer lands, and only then", async () => {
+    const owner = await admin;
+
+    await enroll(owner.signedIn, "Lyrics phone");
+    const { ids } = await library(core, owner, "Kept lyrics", (root) => [song(root, "Kept")]);
+    const kept = ids[0] ?? never();
+
+    const revision = async (): Promise<string | null> => {
+      const { page } = await owner.signedIn.client.query(api.core.downloads.list, {
+        paginationOpts: { numItems: 200, cursor: null },
+      });
+
+      const entry = page.find((one) => one.item.id === kept);
+
+      return entry?.state === "available" ? entry.extrasRevision : null;
+    };
+
+    await owner.signedIn.client.mutation(api.core.downloads.add, {
+      item: { kind: "track", id: kept },
+    });
+    const before = await revision();
+
+    expect(before).toMatch(/^[0-9a-f]{64}$/u);
+    expect(await revision()).toBe(before);
+
+    // The download asked for a lookup; its answer changes what lyrics.get answers.
+    await settle(core, await claimLookup(core, kept), found(52, "kept offline"));
+    const after = await revision();
+
+    expect(after).toMatch(/^[0-9a-f]{64}$/u);
+    expect(after).not.toBe(before);
+    expect(await revision()).toBe(after);
+    expect(await lyricsAs(owner, kept)).toMatchObject({ status: "synced", source: "lrclib" });
   });
 
   it("go on listing an admin's libraries in later steps and backfill each found", async () => {

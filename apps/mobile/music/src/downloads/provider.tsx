@@ -8,7 +8,6 @@ import { isFailure } from "@media/mobile-core/failure";
 import { lastPerson } from "@media/mobile-core/sign-in";
 import { Equal, Option, Schema } from "effect";
 import { useLowPowerMode } from "expo-battery";
-import { CryptoDigestAlgorithm, digestStringAsync } from "expo-crypto";
 import {
   createContext,
   use,
@@ -47,7 +46,8 @@ import type {
   StreamProfile,
   TrackId,
 } from "./sync/models";
-import type { HeldLyrics, SyncPolicy } from "./sync/plan";
+import { PENDING_LYRICS } from "./sync/plan";
+import type { HeldLyrics, ListedLyrics, SyncPolicy } from "./sync/plan";
 import { canToggleDownload, downloadStatus, trackDownloadState } from "./sync/status";
 import type { DownloadStatus } from "./sync/status";
 import { observedTransfer } from "./sync/finished-file";
@@ -183,6 +183,24 @@ const keptOf = (rows: ReadonlyArray<KeptRow>): ReadonlyMap<TrackId, KeptRow> => 
   return kept;
 };
 
+const makeRevision = Schema.decodeSync(LyricsRevision);
+
+/** Each kept song with the revision of its lyrics on the server; null for a song it can't serve. */
+const listedLyricsOf = (kept: ReadonlyMap<TrackId, KeptRow>): ListedLyrics => {
+  const listed = new Map<TrackId, LyricsRevision | null>();
+
+  for (const [trackId, row] of kept) {
+    listed.set(
+      trackId,
+      row.state === "available" && row.extrasRevision !== null
+        ? makeRevision(row.extrasRevision)
+        : null,
+    );
+  }
+
+  return listed;
+};
+
 function PinWatcher({
   sync,
   pin,
@@ -277,12 +295,10 @@ const refusedOrNull = (cause: Error): PinRead | null =>
 
 const decodeLyrics = Schema.decodeUnknownOption(OfflineLyrics);
 
-const makeRevision = Schema.decodeSync(LyricsRevision);
-
 /** Lyrics lookups a watcher sends at once. */
 const LYRICS_BATCH = 50;
 
-/** How soon a song whose lookup failed or is still pending is asked again. */
+/** How soon a song whose lookup failed or is still pending on the server is asked again. */
 const LYRICS_RETRY_MS = 60_000;
 
 interface LyricsAnswer {
@@ -292,10 +308,10 @@ interface LyricsAnswer {
 }
 
 /**
- * Keeps the lyrics of kept songs current. Each song is asked once while the app runs, the lyrics
- * it keeps offered again only when their digest changed; one whose lookup failed or is still
- * pending on the server is asked again a minute later. Lyrics keep their revision, a digest of
- * their JSON.
+ * Brings the lyrics of the kept songs in `held` up to the server's revision, which each answer is
+ * kept at: one asked at a revision the server has since left stays behind it, so it is asked
+ * again. Lyrics from a lookup still pending are kept at `PENDING_LYRICS`. A song whose lookup
+ * failed or is pending is asked again a minute later, not each time its batch changes.
  */
 function LyricsWatcher({
   sync,
@@ -305,11 +321,11 @@ function LyricsWatcher({
   readonly held: ReadonlyArray<HeldLyrics>;
 }) {
   const platform = usePlatform();
-  const settled = useRef(new Set<TrackId>());
+  const asked = useRef(new Map<TrackId, LyricsRevision>());
   const [round, setRound] = useState(0);
 
   useEffect(() => {
-    const due = held.filter((song) => song.rev === null || !settled.current.has(song.trackId));
+    const due = held.filter((song) => asked.current.get(song.trackId) !== song.rev);
 
     if (due.length === 0) return undefined;
     const stop = new AbortController();
@@ -318,16 +334,15 @@ function LyricsWatcher({
     const lookUp = async ({ trackId, rev }: HeldLyrics): Promise<LyricsAnswer> => {
       try {
         const lyrics = await platform.music.lyrics.get({ trackId });
-        const kept = offlineLyricsOf(lyrics);
-        const digest = await digestStringAsync(CryptoDigestAlgorithm.SHA256, JSON.stringify(kept));
-        const next = makeRevision(digest);
+        const settled = lyrics.status !== "pending";
 
         return {
-          change:
-            next === rev
-              ? null
-              : LyricsChange.cases.Changed.make({ trackId, rev: next, lyrics: kept }),
-          settled: lyrics.status !== "pending",
+          change: LyricsChange.cases.Changed.make({
+            trackId,
+            rev: settled ? rev : PENDING_LYRICS,
+            lyrics: offlineLyricsOf(lyrics),
+          }),
+          settled,
         };
       } catch {
         return { change: null, settled: false };
@@ -348,17 +363,16 @@ function LyricsWatcher({
       const answers = await lookAll(due, []);
 
       if (stop.signal.aborted) return;
-      answers.forEach((answer, index) => {
-        const song = due[index];
+      const unsettled = due.filter((_, index) => answers[index]?.settled !== true);
 
-        if (answer.settled && song !== undefined) settled.current.add(song.trackId);
-      });
+      for (const song of due) asked.current.set(song.trackId, song.rev);
       sync.offerLyrics(
         answers.flatMap((answer) => (answer.change === null ? [] : [answer.change])),
       );
 
-      if (answers.some((answer) => !answer.settled)) {
+      if (unsettled.length > 0) {
         timer = setTimeout(() => {
+          for (const song of unsettled) asked.current.delete(song.trackId);
           setRound((count) => count + 1);
         }, LYRICS_RETRY_MS);
       }
@@ -413,7 +427,7 @@ function ServerFeed({ sync }: { readonly sync: DownloadSync }) {
   const snapshot = useSyncExternalStore(sync.subscribe, sync.getSnapshot);
 
   useEffect(() => {
-    if (kept !== null) sync.offerKept(new Set(kept.keys()));
+    if (kept !== null) sync.offerKept(listedLyricsOf(kept));
   }, [sync, kept]);
 
   if (kept === null) return null;

@@ -64,6 +64,7 @@ const listResult = v.object({
         ),
         state: v.literal("available"),
         revision: v.string(),
+        extrasRevision: v.union(v.string(), v.null()),
         quality: v.union(v.literal("standard"), v.literal("high")),
         bytes: v.number(),
         label: v.string(),

@@ -32,6 +32,7 @@ const available = (id: string, revision: string): KeptRow => ({
   item: { kind: "track", id: trackOf(id).id },
   state: "available",
   revision,
+  extrasRevision: null,
   quality: "standard",
   bytes: 1,
   label: id,
