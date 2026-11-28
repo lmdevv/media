@@ -350,7 +350,30 @@ describe("the fetch observer", () => {
     expect(globalThis.fetch).toBe(original);
   });
 
-  it("keeps one wrapper while module copies listen at once, and the newest hears", async () => {
+  it("keeps one wrapper while module copies listen at once, and each hears", async () => {
+    const original = globalThis.fetch;
+    const heard: Array<string> = [];
+
+    vi.resetModules();
+    const older = await import("./media-requests");
+    const stopOlder = older.listenForMediaRequests(media.base, { hear: () => heard.push("older") });
+    const wrapped = globalThis.fetch;
+
+    vi.resetModules();
+    const newer = await import("./media-requests");
+    const stopNewer = newer.listenForMediaRequests(media.base, { hear: () => heard.push("newer") });
+
+    expect(globalThis.fetch).toBe(wrapped);
+
+    await fetch(`${media.base}/media/music/stream/a`);
+    stopOlder();
+    stopNewer();
+
+    expect(heard.toSorted()).toEqual(["newer", "older"]);
+    expect(globalThis.fetch).toBe(original);
+  });
+
+  it("keeps an older copy hearing when a newer one stops first", async () => {
     const original = globalThis.fetch;
     const heard: Array<string> = [];
 
@@ -362,11 +385,14 @@ describe("the fetch observer", () => {
     const newer = await import("./media-requests");
     const stopNewer = newer.listenForMediaRequests(media.base, { hear: () => heard.push("newer") });
 
-    await fetch(`${media.base}/media/music/stream/a`);
-    stopOlder();
     stopNewer();
+    await fetch(`${media.base}/media/music/stream/a`);
 
-    expect(heard).toEqual(["newer"]);
+    expect(heard).toEqual(["older"]);
+    expect(globalThis.fetch).not.toBe(original);
+
+    stopOlder();
+
     expect(globalThis.fetch).toBe(original);
   });
 });

@@ -88,51 +88,87 @@ export const mediaRequest = (url: string, once?: string): ((status: number | nul
 const urlOf = (input: RequestInfo | URL): string =>
   input instanceof Request ? input.url : String(input);
 
-/** Names the `fetch` each observer wraps, on the global itself, which every copy of this module shares. */
-const SENDS: unique symbol = Symbol.for("lar.music.mediaRequests.sends");
+/** Starts observing one request for one copy of this module; returns how to tell it ended. */
+type Start = (url: string) => (status: number | null) => void;
 
-type ObservingFetch = typeof fetch & { readonly [SENDS]: typeof fetch };
+/** What the observing `fetch` on the global wraps, and the module copies it reports to. */
+interface Observed {
+  readonly send: typeof fetch;
+  readonly starts: Set<Start>;
+}
 
-const isObserving = (send: typeof fetch): send is ObservingFetch => SENDS in send;
+/** Names that record on the observing `fetch` itself, which every copy of this module shares. */
+const OBSERVED: unique symbol = Symbol.for("lar.music.mediaRequests.observed");
 
-/** This copy's observing `fetch`, while it is on the global; null otherwise. */
-let observing: ObservingFetch | null = null;
+type ObservingFetch = typeof fetch & { readonly [OBSERVED]: Observed };
+
+const isObserving = (send: typeof fetch): send is ObservingFetch => OBSERVED in send;
 
 /**
- * Puts this copy's observing `fetch` on the global, around the `fetch` that was there first, in
- * place of any other copy's, as a fast refresh loads the module again: one wrapper at most.
+ * The record of the observing `fetch` on the global, putting one there around the current `fetch`
+ * when none is: one wrapper at most, however many copies of the module a fast refresh has loaded.
  */
-const observeFetch = (): void => {
+const observedFetch = (): Observed => {
   const current = globalThis.fetch;
 
-  if (current === observing) return;
-  const send = isObserving(current) ? current[SENDS] : current;
+  if (isObserving(current)) return current[OBSERVED];
+  const observed: Observed = { send: current, starts: new Set() };
 
   const observe = async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
-    const told = mediaRequest(urlOf(input));
+    const url = urlOf(input);
+    const tolds = [...observed.starts].map((start) => start(url));
     const signal = init?.signal ?? (input instanceof Request ? input.signal : null);
 
-    try {
-      const response = await send(input, init);
+    const tell = (status: number | null): void => {
+      if (signal?.aborted === true) return;
 
-      if (!response.ok && signal?.aborted !== true) told(response.status);
+      for (const told of tolds) told(status);
+    };
+
+    try {
+      const response = await observed.send(input, init);
+
+      if (!response.ok) tell(response.status);
 
       return response;
     } catch (error) {
-      if (signal?.aborted !== true) told(null);
+      tell(null);
 
       throw error;
     }
   };
 
-  observing = Object.assign(observe, { [SENDS]: send });
-  globalThis.fetch = observing;
+  globalThis.fetch = Object.assign(observe, { [OBSERVED]: observed });
+
+  return observed;
 };
 
-/** Gives the global back the `fetch` this copy wrapped, unless another copy's wrapper replaced it. */
+const start: Start = (url) => mediaRequest(url);
+
+/** The record this copy reports through while it listens; null otherwise. */
+let joined: Observed | null = null;
+
+/** Has the observing `fetch` report to this copy too. */
+const observeFetch = (): void => {
+  joined = observedFetch();
+  joined.starts.add(start);
+};
+
+/**
+ * Stops the reports to this copy. The global gets back the `fetch` that was there first once no
+ * copy listens, in whatever order the copies stop.
+ */
 const stopObservingFetch = (): void => {
-  if (observing !== null && globalThis.fetch === observing) globalThis.fetch = observing[SENDS];
-  observing = null;
+  if (joined === null) return;
+  const left = joined;
+
+  joined = null;
+  left.starts.delete(start);
+  const current = globalThis.fetch;
+
+  if (left.starts.size === 0 && isObserving(current) && current[OBSERVED] === left) {
+    globalThis.fetch = left.send;
+  }
 };
 
 /**
