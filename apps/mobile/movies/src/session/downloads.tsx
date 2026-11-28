@@ -17,12 +17,13 @@ import { accountFolder } from "@/lib/downloads/files";
 import { appKeychains } from "@/lib/keychains";
 import { downloadFor } from "@/lib/downloads/model";
 import type { DownloadRecord, NetworkNow } from "@/lib/downloads/model";
+import { prepareDownloads } from "@/lib/downloads/storage";
 
 import { useServer } from "./connection";
 import { DownloadEngine } from "./download-engine";
 import type { DownloadsSnapshot } from "./download-engine";
 import { useDownloadSettings } from "./download-settings";
-import { expoDisk } from "./expo-disk";
+import { expoDisk, expoRoot } from "./expo-disk";
 import type { Person } from "./me";
 
 const DownloadsContext = createContext<DownloadEngine | null>(null);
@@ -52,7 +53,9 @@ const networkOf = (state: Network.NetworkState): NetworkNow => ({
 /**
  * Runs the downloads engine of the person signed in here for the screens below: from who the core
  * says is signed in, else, while it cannot be reached, who this app last signed in as. The engine
- * starts working only once the core confirms the person.
+ * starts working only once the core confirms the person on this phone's device. Whenever the person changes, signed out
+ * included, it first prepares the downloads: excludes them from backup and finishes the removals
+ * of anyone who signed out here.
  */
 export function DownloadsProvider({ children }: { readonly children: ReactNode }) {
   const platform = usePlatform();
@@ -64,7 +67,13 @@ export function DownloadsProvider({ children }: { readonly children: ReactNode }
     ...(status === "signedIn" ? [] : (["skip"] as const)),
   );
 
-  const confirmed = status === "signedIn" && me.status === "success" ? me.data.userId : null;
+  // The core keeps downloads per device and refuses a session on none, so the engine starts only
+  // once the sign-in has put the session on this phone's device.
+  const confirmed =
+    status === "signedIn" && me.status === "success" && me.data.device !== null
+      ? me.data.userId
+      : null;
+
   const last = useOfflinePerson();
   const userId = confirmed ?? last?.userId ?? null;
   const settings = useDownloadSettings();
@@ -72,6 +81,8 @@ export function DownloadsProvider({ children }: { readonly children: ReactNode }
   const [initialSettings] = useState(settings);
 
   useEffect(() => {
+    prepareDownloads(expoRoot(Paths.document));
+
     if (userId === null) {
       setEngine(null);
 

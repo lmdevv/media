@@ -1,7 +1,9 @@
+import { requireNativeModule } from "expo";
 import { Directory, DownloadTask, File, Paths } from "expo-file-system";
 
 import { byteCount, onDisk } from "@/lib/downloads/disk";
-import type { DownloadDisk } from "@/lib/downloads/disk";
+import type { DownloadDisk, DownloadsRoot } from "@/lib/downloads/disk";
+import { DOWNLOADS_FOLDER } from "@/lib/downloads/files";
 
 /** The phone's free space in bytes. */
 export const freeSpace = (): number => byteCount(Paths.availableDiskSpace);
@@ -84,5 +86,32 @@ export const expoDisk = (root: Directory, folderPath: string): DownloadDisk => {
       }
     },
     freeBytes: freeSpace,
+  };
+};
+
+const foldersIn = (directory: Directory): ReadonlyArray<Directory> =>
+  directory.list().filter((entry) => entry instanceof Directory);
+
+/** `downloads/` under the documents folder `root`, with every person's folder in it. */
+export const expoRoot = (root: Directory): DownloadsRoot => {
+  const folder = new Directory(root, DOWNLOADS_FOLDER);
+
+  return {
+    excludeFromBackup: () =>
+      onDisk("excludeFromBackup", "", () => {
+        folder.create({ intermediates: true, idempotent: true });
+        requireNativeModule<{ excludeFromBackup: (uri: string) => void }>(
+          "VaultFiles",
+        ).excludeFromBackup(folder.uri);
+      }),
+    people: () =>
+      onDisk("list", "", () =>
+        folder.exists
+          ? foldersIn(folder).flatMap((server) =>
+              foldersIn(server).map((person) => `${server.name}/${person.name}`),
+            )
+          : [],
+      ),
+    disk: (person) => expoDisk(root, `${DOWNLOADS_FOLDER}/${person}`),
   };
 };

@@ -36,8 +36,9 @@ minimizes the bar to a Home circle and the Search circle.
 
 Movies and episodes download to the iPhone from their `…` sheets and play offline in the same
 player. The core keeps the list of what this device holds and says when an item expired; the files
-live under the app's documents folder, per server and person, and the media service prepares an MP4
-when the original does not play on the iPhone within Download Settings' quality. When the server cannot be reached at launch, Go to Downloads opens what is kept.
+live under the app's documents folder, per server and person, out of backups, and the media
+service prepares an MP4 when the original does not play on the iPhone within Download Settings'
+quality. Signing out removes the person's downloads from the iPhone and from the server's count. When the server cannot be reached at launch, Go to Downloads opens what is kept.
 
 ## Develop
 

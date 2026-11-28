@@ -51,6 +51,7 @@ import {
   holdingsOf,
   keepRecord,
   keepRecords,
+  markSignedOut,
   readIndex,
   recordRemoval,
   saveIndex,
@@ -144,6 +145,9 @@ const SHOW_EVERY_MS = 500;
  * app is in front. The delay doubles after each try, from the first up to the last.
  */
 const TELL_RETRY_MS = { first: 5_000, last: 60_000 } as const;
+
+/** How long a sign-out waits for the core to acknowledge the person's removals. */
+const SIGN_OUT_WAIT_MS = 5_000;
 
 /**
  * The core's answers that refuse a removal for good. Asking again changes nothing until the app or
@@ -372,9 +376,9 @@ export class DownloadEngine {
 
   #load(launch: Launch): void {
     Launch.$match(launch, {
-      Held: ({ shown }) => {
+      Held: ({ shown, signOuts }) => {
         this.#held ??= [];
-        this.#seeClock(shown, []);
+        this.#seeClock(shown, [], signOuts);
         this.#snapshot = {
           ...this.#snapshot,
           store: this.#held.reduce(reduce, requeued(shown)),
@@ -391,11 +395,11 @@ export class DownloadEngine {
 
         this.#notify();
       },
-      Loaded: ({ store, removals, leftovers, misplaced, changed }) => {
+      Loaded: ({ store, removals, signOuts, leftovers, misplaced, changed }) => {
         const changes = this.#held ?? [];
 
         this.#held = null;
-        this.#seeClock(store, removals);
+        this.#seeClock(store, removals, signOuts);
         clearTimeout(this.#readTimer);
         this.#unreadableInPlace = misplaced;
         this.#settled.clear();
@@ -525,6 +529,36 @@ export class DownloadEngine {
   /** Removes every download (Remove All Downloads). */
   async removeAll(): Promise<void> {
     await Promise.all(this.#snapshot.store.downloads.map((download) => this.remove(download.id)));
+  }
+
+  /**
+   * Removes every download of a person signing out of this iPhone. It records the sign-out first,
+   * so a launch after a kill finishes the removals, then removes each download the way Remove does.
+   * Once the person is confirmed signed in and the phone has a network, it waits up to
+   * `SIGN_OUT_WAIT_MS` for the core to acknowledge them, since the core takes a removal only from
+   * the person's session; otherwise the core is told nothing, and hears of them the next time the
+   * person signs in here.
+   */
+  async signOut(): Promise<void> {
+    if (this.#disposed) return;
+
+    const tell = this.#confirmed && this.#snapshot.network.connected;
+
+    markSignedOut(this.#options.disk, this.#now());
+
+    for (const download of this.#snapshot.store.downloads) this.#remove(download.id, tell);
+
+    if (!tell) return;
+
+    let timer: ReturnType<typeof setTimeout> | undefined;
+
+    await Promise.race([
+      Promise.all([...this.#removals.values()].map((removal) => this.#tell(removal))),
+      new Promise((resolve) => {
+        timer = setTimeout(resolve, SIGN_OUT_WAIT_MS);
+      }),
+    ]);
+    clearTimeout(timer);
   }
 
   /** Records where a download was played to, and sends it on when the server is reachable. */
@@ -750,9 +784,10 @@ export class DownloadEngine {
 
   /**
    * Removes download `id`: records the removal on disk first, then stops it, forgets its row,
-   * deletes its files, and tells the core. A removal that cannot be recorded leaves it as it is.
+   * deletes its files, and tells the core unless `tell` is false. A removal that cannot be recorded
+   * leaves it as it is.
    */
-  #remove(id: FileId): void {
+  #remove(id: FileId, tell = true): void {
     if (this.#disposed) return;
 
     const recorded = recordRemoval(this.#options.disk, id, this.#now());
@@ -767,7 +802,8 @@ export class DownloadEngine {
     this.#dispatch(DownloadEvent.Removed({ id }));
     clearRemoval(this.#options.disk, removal);
     this.#removals.set(removal.folder, removal);
-    void this.#tell(removal);
+
+    if (tell) void this.#tell(removal);
     this.#pump();
   }
 
@@ -782,11 +818,20 @@ export class DownloadEngine {
     return this.#clock;
   }
 
-  /** Moves the clock past the downloads in `store` and the stamps of `removals`. */
-  #seeClock(store: DownloadStore, removals: ReadonlyArray<Removal>): void {
+  /**
+   * Moves the clock past the downloads in `store`, the stamps of `removals`, and the sign-outs at
+   * `signOuts`, so a download added after a sign-out a launch has not finished is never taken for
+   * one added before it.
+   */
+  #seeClock(
+    store: DownloadStore,
+    removals: ReadonlyArray<Removal>,
+    signOuts: ReadonlyArray<number>,
+  ): void {
     this.#clock = [
       ...store.downloads.map((download) => download.addedAt),
       ...removals.map((removal) => removal.stamp),
+      ...signOuts,
     ].reduce((latest, time) => Math.max(latest, time), this.#clock);
   }
 

@@ -1,7 +1,7 @@
 import { Data, Option, Result, Struct } from "effect";
 
 import { DiskFailed } from "./disk";
-import type { DownloadDisk } from "./disk";
+import type { DownloadDisk, DownloadsRoot } from "./disk";
 import {
   RECORD_FILE,
   STORE_FILE,
@@ -11,6 +11,8 @@ import {
   nextOf,
   removalFolder,
   removalNamed,
+  signedOutFolder,
+  signedOutNamed,
   videoFile,
 } from "./files";
 import {
@@ -81,6 +83,10 @@ const removalAt = (folder: string): Option.Option<Removal> =>
   Option.flatMap(Option.fromNullishOr(removalNamed(folder)), ({ id, stamp }) =>
     Option.map(fileIdOf(id), (file): Removal => ({ id: file, stamp, folder, recorded })),
   );
+
+/** The stamps of the sign-outs recorded in the person's folder, whose names are `names`. */
+const signOutsIn = (names: ReadonlyArray<string>): ReadonlyArray<number> =>
+  names.flatMap((name) => Option.toArray(Option.fromNullishOr(signedOutNamed(name))));
 
 /** The removals recorded in the person's folder, whose names are `names`. */
 const removalsIn = (names: ReadonlyArray<string>): ReadonlyArray<Removal> =>
@@ -190,19 +196,26 @@ export type Launch = Data.TaggedEnum<{
   /**
    * The index, or the folder that holds it, could not be read: nothing is decided, deleted, or
    * saved until it can. `shown` holds what could be read and proven, the index's rows or the
-   * downloads rebuilt from their own copies, to play meanwhile.
+   * downloads rebuilt from their own copies, to play meanwhile. `signOuts` as in `Loaded`, from a
+   * listing of the folder when one worked.
    */
-  Held: { readonly shown: DownloadStore; readonly cause: DiskFailed };
+  Held: {
+    readonly shown: DownloadStore;
+    readonly cause: DiskFailed;
+    readonly signOuts: ReadonlyArray<number>;
+  };
   /**
    * The downloads, and the removals still to carry out. `leftovers` are folders made again under a
    * removed download's name after its removal, such as by a transfer that landed late, which go
    * with the removal. `misplaced` when the index at `index.json` did not read whole and must move
    * aside before a save replaces it; `changed` when the store differs from the index, which a save
-   * then catches up.
+   * then catches up. `signOuts` are the stamps of the person's sign-outs whose removals a launch
+   * has not finished yet.
    */
   Loaded: {
     readonly store: DownloadStore;
     readonly removals: ReadonlyArray<Removal>;
+    readonly signOuts: ReadonlyArray<number>;
     readonly leftovers: ReadonlyArray<string>;
     readonly misplaced: boolean;
     readonly changed: boolean;
@@ -378,6 +391,7 @@ const held = (
       pendingProgress: store.pendingProgress,
     },
     cause,
+    signOuts: signOutsIn(Result.getOrNull(listing) ?? []),
   });
 };
 
@@ -394,6 +408,7 @@ const loaded = (
   return Launch.Loaded({
     store: { downloads, pendingProgress: indexed.pendingProgress },
     removals,
+    signOuts: signOutsIn(names),
     leftovers,
     misplaced,
     changed:
@@ -504,3 +519,68 @@ export const keepRecords = (
       Result.getOrNull(disk.read(itemPath(download.id, RECORD_FILE))) ===
         serializeRecord(download) || Result.isSuccess(keepRecord(disk, download)),
   );
+
+/**
+ * Records that the person signed out of this iPhone at `stamp`, on the engine's clock: a folder
+ * named for it in their folder, made in one step. Until every download added before it is
+ * removed, any launch on this iPhone finishes the removals.
+ */
+export const markSignedOut = (disk: DownloadDisk, stamp: number): Result.Result<void, DiskFailed> =>
+  disk.createFolder(signedOutFolder(stamp));
+
+/**
+ * Finishes the person's sign-out, when one is recorded: records the removal of every download
+ * added before it, deletes the files of every removal, and deletes the folders made again after a
+ * removal; then deletes the sign-out's record. It tells the core nothing, which needs the person's
+ * session: their removals wait in their folder for the next time they sign in here. A read or a
+ * listing that fails, or a removal that cannot be recorded, keeps the record, and the next launch
+ * tries again. A download added after the sign-out stays.
+ */
+const finishSignOut = (disk: DownloadDisk): Result.Result<void, DiskFailed> =>
+  Result.flatMap(disk.list(), (listed) => {
+    const names = listed ?? [];
+    const stamps = signOutsIn(names);
+
+    if (stamps.length === 0) return Result.void;
+
+    const stamp = Math.max(...stamps);
+
+    return Launch.$match(readIndex(disk), {
+      Held: ({ cause }) => Result.fail(cause),
+      Loaded: ({ store, removals, leftovers }) => {
+        const removed = store.downloads
+          .filter((download) => download.addedAt <= stamp)
+          .map((download) => recordRemoval(disk, download.id, stamp));
+
+        for (const removal of [
+          ...removals,
+          ...removed.flatMap((result) => Option.toArray(Result.getSuccess(result))),
+        ]) {
+          clearRemoval(disk, removal);
+        }
+
+        for (const leftover of leftovers) disk.remove(leftover);
+
+        const failed = removed.find(Result.isFailure);
+
+        if (failed !== undefined) return Result.map(failed, () => undefined);
+
+        return stamps.reduce<Result.Result<void, DiskFailed>>(
+          (done, signedOut) => Result.flatMap(done, () => disk.remove(signedOutFolder(signedOut))),
+          Result.void,
+        );
+      },
+    });
+  });
+
+/**
+ * Prepares the downloads at launch, before any engine runs: excludes `downloads/` from backup, the
+ * same on every launch, so downloads an earlier version kept are excluded at the first launch
+ * after updating, and finishes the sign-out recorded in each person's folder. A step that fails is
+ * tried again at the next launch.
+ */
+export const prepareDownloads = (root: DownloadsRoot): void => {
+  root.excludeFromBackup();
+
+  for (const person of Result.getOrNull(root.people()) ?? []) finishSignOut(root.disk(person));
+};
