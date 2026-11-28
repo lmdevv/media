@@ -1,5 +1,5 @@
 import type { Data } from "effect";
-import { Equal, Option } from "effect";
+import { Option } from "effect";
 
 import { DownloadResult, fetchFinishedFile, FetchOutcome } from "./finished-file";
 import type { Transfer } from "./finished-file";
@@ -27,6 +27,8 @@ import {
 } from "./plan";
 import type {
   Desired,
+  HeldLyrics,
+  ListedLyrics,
   LyricsQuestion,
   NewLyrics,
   StoredArt,
@@ -34,6 +36,8 @@ import type {
   StoredMember,
   SyncPolicy,
 } from "./plan";
+import { transferGate } from "./transfer-gate";
+import type { StartedBy, TransferConditions } from "./transfer-gate";
 import { applyChange, artFile, audioFile, emptyVault, VaultChange } from "./vault";
 import type { VaultRows, VaultStore } from "./vault";
 
@@ -50,6 +54,9 @@ const MAX_RETRY_MS = 10 * 60_000;
 const VAULT_RETRY_MS = 30_000;
 
 const LYRICS_CACHE_SIZE = 4;
+
+/** How soon a song whose lyrics lookup was pending on the server, or failed, is asked again. */
+export const LYRICS_RETRY_MS = 60_000;
 
 /** A song this device can play from its own storage. */
 export interface LocalCopy {
@@ -95,6 +102,8 @@ export interface DownloadsSnapshot {
   readonly online: boolean;
   /** Free space ran low, so fetching waits. */
   readonly lowSpace: boolean;
+  /** Wi-Fi only holds every transfer: the phone is on mobile data, a hotspot, or Low Data Mode. */
+  readonly waitingForWifi: boolean;
   /** Downloads in the server's order (the vault's before it answers), less those being removed. */
   readonly pins: ReadonlyArray<PinView>;
   /** Every song this device holds or is getting. */
@@ -103,9 +112,14 @@ export interface DownloadsSnapshot {
   readonly copies: ReadonlyMap<TrackId, LocalCopy>;
   readonly usage: DownloadUsage;
   /**
-   * The kept songs to look up lyrics for, one batch per question, while the server answers; hand
-   * the lyrics found to `offerLyrics`. Recomputed once a plan has applied what it could, and the
-   * same array until a question changes.
+   * The kept songs whose lyrics here are behind the server's, one batch per question; hand the
+   * lyrics found to `offerLyrics`. A lyrics lookup is work the sync starts on its own, so a snapshot
+   * holds none when, as it is published, the sync has stopped, the server is out of reach, or
+   * `transferGate` holds the sync's work (Wi-Fi only on a metered network, Low Power Mode); each of
+   * those changes publishes at once. None either for a song whose lookup was pending or failed
+   * less than `LYRICS_RETRY_MS` ago at the same revision. Worked out from the sync's state as each
+   * snapshot is published, and the same array, of the same question objects, until a question
+   * changes.
    */
   readonly lyricsQuestions: ReadonlyArray<LyricsQuestion>;
 }
@@ -176,12 +190,25 @@ export const EMPTY_DOWNLOADS: DownloadsSnapshot = {
   ready: false,
   online: false,
   lowSpace: false,
+  waitingForWifi: false,
   pins: [],
   tracks: new Map(),
   copies: new Map(),
   usage: { tracks: 0, bytes: 0, freeBytes: null },
   lyricsQuestions: [],
 };
+
+/** The questions of a snapshot while the sync may not ask: one array, so nothing re-renders. */
+const NO_QUESTIONS: ReadonlyArray<LyricsQuestion> = [];
+
+/** Whether two questions under one key ask about the same songs at the same revisions. */
+const sameQuestion = (left: LyricsQuestion, right: LyricsQuestion): boolean =>
+  left.held.length === right.held.length &&
+  left.held.every((song, index) => {
+    const other = right.held[index];
+
+    return song.trackId === other?.trackId && song.rev === other.rev;
+  });
 
 const delay = (ms: number, signal: AbortSignal): Promise<void> =>
   new Promise((resolve) => {
@@ -232,16 +259,33 @@ export class DownloadSync {
   #stopped = false;
   #online = false;
   #lowSpace = false;
-  #lowPower = false;
+  /**
+   * What starting a transfer depends on besides the server (`transferGate`). A sync no one told
+   * otherwise transfers on any network; the app sets them before `start`.
+   */
+  #conditions: TransferConditions = { metered: false, wifiOnly: false, lowPower: false };
   /** The downloads the person started while Low Power Mode is on, which fetch all the same. */
   readonly #asked = new Set<DownloadPinId>();
   /** The songs the person tried again while Low Power Mode is on, which fetch all the same. */
   readonly #askedSongs = new Set<TrackId>();
-  /** What the core keeps on this device, as `core.downloads.list` answered; none until it does. */
-  #listed: Option.Option<ReadonlySet<TrackId>> = Option.none();
+  /**
+   * What the core keeps on this device, with each song's lyrics revision, as
+   * `core.downloads.list` answered; none until it does.
+   */
+  #listed: Option.Option<ListedLyrics> = Option.none();
   readonly #releasing = new Set<TrackId>();
   readonly #manifests = new Map<DownloadPinId, DownloadManifest>();
   readonly #lyrics = new Map<TrackId, LyricsChange>();
+  /**
+   * Songs whose lyrics lookup was pending or failed: the revision it asked at, and when to ask
+   * again. One the server has moved to another revision since is asked at once.
+   */
+  readonly #lyricsRetries = new Map<
+    TrackId,
+    { readonly rev: LyricsRevision; readonly at: number }
+  >();
+  #lyricsWake: ReturnType<typeof setTimeout> | null = null;
+  /** The questions last published, whose objects `#currentQuestions` keeps while they hold. */
   #questions: ReadonlyArray<LyricsQuestion> = [];
   readonly #readLyrics = new Map<
     TrackId,
@@ -296,11 +340,36 @@ export class DownloadSync {
   }
 
   /**
-   * The songs the core keeps on this device, as `core.downloads.list` answered. A song it keeps
-   * that no download here holds any more is released, as after a removal made offline.
+   * Stops every fetch and plan, then, while the server answers, releases on the core every song
+   * it keeps on this device for this account: those it listed, and those this phone holds or
+   * was fetching. Resolves once every release answered. For signing out: the vault is deleted
+   * next, so nothing here would release them later. Offline it only stops, and the core keeps
+   * them until this account opens an empty vault here and its first plan releases them.
    */
-  offerKept(trackIds: ReadonlySet<TrackId>): void {
-    this.#listed = Option.some(trackIds);
+  async releaseAll(): Promise<void> {
+    const releasing = this.#online;
+
+    const songs = new Set([
+      ...Option.getOrElse(this.#listed, (): ListedLyrics => new Map()).keys(),
+      ...this.#view.copies.keys(),
+      ...this.#wanted,
+    ]);
+
+    await this.stop();
+
+    if (!releasing) return;
+
+    await Promise.allSettled([...songs].map((trackId) => this.#options.core.release(trackId)));
+  }
+
+  /**
+   * The songs the core keeps on this device, with the revision of each one's lyrics, as
+   * `core.downloads.list` answered. A song it keeps that no download here holds any more is
+   * released, as after a removal made offline. A kept song's lyrics are asked for only while
+   * this phone keeps them at another revision (`lyricsQuestions`).
+   */
+  offerKept(listed: ListedLyrics): void {
+    this.#listed = Option.some(listed);
     this.#plan();
   }
 
@@ -310,8 +379,18 @@ export class DownloadSync {
     this.#plan();
   }
 
-  offerLyrics(changes: ReadonlyArray<LyricsChange>): void {
-    if (changes.length === 0) return;
+  /**
+   * Lyrics found for `lyricsQuestions`, and the songs asked whose lookup was pending or failed,
+   * which are asked again `LYRICS_RETRY_MS` later unless their revision moves first.
+   */
+  offerLyrics(
+    changes: ReadonlyArray<LyricsChange>,
+    unsettled: ReadonlyArray<HeldLyrics> = [],
+  ): void {
+    if (changes.length === 0 && unsettled.length === 0) return;
+    const at = this.#options.now() + LYRICS_RETRY_MS;
+
+    for (const { trackId, rev } of unsettled) this.#lyricsRetries.set(trackId, { rev, at });
 
     for (const change of changes) this.#lyrics.set(change.trackId, change);
     this.#plan();
@@ -331,11 +410,23 @@ export class DownloadSync {
    * running go on. Turning it off starts the rest.
    */
   setLowPower(on: boolean): void {
-    if (on === this.#lowPower) return;
-    this.#lowPower = on;
+    if (on === this.#conditions.lowPower) return;
     this.#asked.clear();
     this.#askedSongs.clear();
-    this.#plan();
+    this.#setConditions({ ...this.#conditions, lowPower: on });
+  }
+
+  /**
+   * Whether the phone's network is metered (`meteredOf`). With Wi-Fi only on, a metered network
+   * stops the transfers running, which start over once it is not.
+   */
+  setMetered(metered: boolean): void {
+    this.#setConditions({ ...this.#conditions, metered });
+  }
+
+  /** The Wi-Fi only setting: while it is on, no transfer runs on a metered network. */
+  setWifiOnly(on: boolean): void {
+    this.#setConditions({ ...this.#conditions, wifiOnly: on });
   }
 
   /**
@@ -368,7 +459,7 @@ export class DownloadSync {
       }),
     );
 
-    if (this.#lowPower) this.#asked.add(id);
+    if (this.#conditions.lowPower) this.#asked.add(id);
     this.#plan();
   }
 
@@ -402,7 +493,7 @@ export class DownloadSync {
     for (const trackId of members) {
       this.#trackFailures.delete(trackId);
 
-      if (this.#lowPower) this.#askedSongs.add(trackId);
+      if (this.#conditions.lowPower) this.#askedSongs.add(trackId);
     }
 
     this.#plan();
@@ -552,9 +643,9 @@ export class DownloadSync {
   #release(kept: ReadonlySet<TrackId>): void {
     if (!this.#online) return;
 
-    const listed = Option.getOrElse(this.#listed, (): ReadonlySet<TrackId> => new Set());
+    const listed = Option.getOrElse(this.#listed, (): ListedLyrics => new Map());
 
-    for (const trackId of listed) {
+    for (const trackId of listed.keys()) {
       if (kept.has(trackId) || this.#releasing.has(trackId) || this.#fetching.has(trackId)) {
         continue;
       }
@@ -589,6 +680,19 @@ export class DownloadSync {
 
     if (this.#wake !== null) clearTimeout(this.#wake);
     this.#wake = null;
+
+    if (this.#lyricsWake !== null) clearTimeout(this.#lyricsWake);
+    this.#lyricsWake = null;
+    this.#publish();
+  }
+
+  /**
+   * Whether the sync's own lyrics lookups may run now: it hasn't stopped, the server answers, and
+   * `transferGate` runs the work the sync starts. Read when each snapshot is published, so a
+   * change to any of them withdraws the questions at once, not when a running plan ends.
+   */
+  #mayAsk(): boolean {
+    return !this.#stopped && this.#online && transferGate(this.#conditions, "sync") === "run";
   }
 
   #plan(): void {
@@ -609,7 +713,7 @@ export class DownloadSync {
       })
       .finally(() => {
         this.#planning = false;
-        this.#askAgain();
+        this.#restLyrics();
         this.#publish();
 
         if (this.#replan) this.#plan();
@@ -679,10 +783,72 @@ export class DownloadSync {
     this.#notify();
   }
 
-  #askAgain(): void {
-    const questions = lyricsQuestions(this.#desired(), this.#view);
+  /**
+   * Forgets the lyrics retries that are due or whose song the server moved to another revision, and
+   * wakes a plan when the next one falls due. A stopped sync starts no timer.
+   */
+  #restLyrics(): void {
+    if (this.#stopped) return;
+    const listed = Option.getOrElse(this.#listed, (): ListedLyrics => new Map());
+    const now = this.#options.now();
+    let next: number | null = null;
 
-    if (!Equal.equals(questions, this.#questions)) this.#questions = questions;
+    for (const [trackId, retry] of this.#lyricsRetries) {
+      if (listed.get(trackId) !== retry.rev || retry.at <= now) {
+        this.#lyricsRetries.delete(trackId);
+        continue;
+      }
+
+      next = Math.min(next ?? retry.at, retry.at);
+    }
+
+    this.#wakeForLyrics(next === null ? null : next - now);
+  }
+
+  /**
+   * The lyrics questions the sync's state asks now: from the downloads and manifests it holds, the
+   * vault's rows, the lyrics offered and not yet saved, the core's listed revisions, and the songs
+   * resting after a pending or failed lookup. `#publish` asks for them, so every snapshot's
+   * questions are those of the moment it is published. Returns the same array, and keeps each
+   * question that didn't change the same object, so a watcher keeps the lookups it has in flight.
+   */
+  #currentQuestions(): ReadonlyArray<LyricsQuestion> {
+    const listed = Option.getOrElse(this.#listed, (): ListedLyrics => new Map());
+    const now = this.#options.now();
+    const resting = new Set<TrackId>();
+
+    for (const [trackId, retry] of this.#lyricsRetries) {
+      if (listed.get(trackId) === retry.rev && retry.at > now) resting.add(trackId);
+    }
+
+    const questions = lyricsQuestions(this.#desired(), this.#view, listed, resting);
+    const before = new Map(this.#questions.map((question) => [question.key, question]));
+    let changed = questions.length !== this.#questions.length;
+
+    const kept = questions.map((question, index) => {
+      const same = before.get(question.key);
+      const next = same !== undefined && sameQuestion(same, question) ? same : question;
+
+      if (next !== this.#questions[index]) changed = true;
+
+      return next;
+    });
+
+    if (changed) this.#questions = kept;
+
+    return this.#questions;
+  }
+
+  #wakeForLyrics(ms: number | null): void {
+    if (this.#lyricsWake !== null) clearTimeout(this.#lyricsWake);
+    this.#lyricsWake = null;
+
+    if (ms === null || this.#stopped) return;
+
+    this.#lyricsWake = setTimeout(() => {
+      this.#lyricsWake = null;
+      this.#plan();
+    }, ms);
   }
 
   #desired(): Desired {
@@ -719,12 +885,42 @@ export class DownloadSync {
     }
   }
 
+  #setConditions(next: TransferConditions): void {
+    const before = this.#conditions;
+
+    if (
+      next.metered === before.metered &&
+      next.wifiOnly === before.wifiOnly &&
+      next.lowPower === before.lowPower
+    ) {
+      return;
+    }
+
+    this.#conditions = next;
+
+    // Wi-Fi only stops what runs as well as what would start: mobile data spent on a transfer
+    // already running is spent all the same. Low Power Mode lets running transfers finish.
+    if (transferGate(next, "person") === "wifi") {
+      for (const { stop } of this.#fetching.values()) stop.abort();
+
+      for (const stop of this.#fetchingArt.values()) stop.abort();
+    }
+
+    this.#publish();
+    this.#plan();
+  }
+
   /**
-   * Which songs and covers may start a transfer now: any, or in Low Power Mode only those of the
-   * downloads and songs the person asked for while it is on.
+   * Which songs and covers may start a transfer now, by `transferGate`: those the person asked for
+   * while Low Power Mode is on count as theirs, every other one as the sync's.
    */
   #mayStart(): Startable {
-    if (!this.#lowPower) return { song: () => true, art: () => true };
+    const gate = (startedBy: StartedBy): boolean =>
+      transferGate(this.#conditions, startedBy) === "run";
+
+    if (gate("sync")) return { song: () => true, art: () => true };
+
+    if (!gate("person")) return { song: () => false, art: () => false };
 
     const songs = new Set(this.#askedSongs);
     const art = new Set<string>();
@@ -803,6 +999,9 @@ export class DownloadSync {
       const outcome = await fetchFinishedFile(this.#options.transfer, {
         sign: async () => {
           await core.keep(trackId);
+
+          // Stopped while the core kept the song: no ticket is asked for a fetch that won't run.
+          if (stop.signal.aborted) throw new Error("The fetch stopped");
           const ticket = await core.ticket(trackId, profile);
           fetched.rev = ticket.revision;
 
@@ -868,7 +1067,11 @@ export class DownloadSync {
     this.#fetchingArt.set(hash, stop);
 
     const fail = async (message: string): Promise<void> => {
-      this.#artFailures.set(hash, nextFailure(this.#artFailures.get(hash), message, true, now()));
+      // A cover stopped on purpose, by Wi-Fi only or because nothing shows it, didn't fail.
+      if (!stop.signal.aborted) {
+        this.#artFailures.set(hash, nextFailure(this.#artFailures.get(hash), message, true, now()));
+      }
+
       await this.#removeQuietly(file);
     };
 
@@ -964,6 +1167,9 @@ export class DownloadSync {
 
   #wakeIn(ms: number): void {
     if (this.#wake !== null) clearTimeout(this.#wake);
+    this.#wake = null;
+
+    if (this.#stopped) return;
 
     this.#wake = setTimeout(() => {
       this.#wake = null;
@@ -1041,11 +1247,12 @@ export class DownloadSync {
       ready: this.#ready,
       online: this.#online,
       lowSpace: this.#lowSpace,
+      waitingForWifi: transferGate(this.#conditions, "person") === "wifi",
       pins: this.#pinViews(),
       tracks: this.#trackStates(copies),
       copies,
       usage: { tracks: copies.size, bytes, freeBytes: this.#options.vault.freeBytes() },
-      lyricsQuestions: this.#questions,
+      lyricsQuestions: this.#mayAsk() ? this.#currentQuestions() : NO_QUESTIONS,
     };
 
     this.#notify();

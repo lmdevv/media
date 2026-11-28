@@ -1,7 +1,7 @@
 Pod::Spec.new do |s|
   s.name           = 'VaultFiles'
   s.version        = '1.0.0'
-  s.summary        = 'Keeps the Lar apps’ downloads out of iCloud and computer backups.'
+  s.summary        = 'Keeps the Lar apps’ downloads out of iCloud and computer backups, and reads what the network costs.'
   s.license        = 'MIT'
   s.author         = 'Lar'
   s.homepage       = 'https://github.com/lmdevv/media'

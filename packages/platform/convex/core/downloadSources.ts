@@ -31,6 +31,11 @@ export interface DownloadSource<K extends DownloadKind = DownloadKind> {
    * item, or a new size or change time. A device holding another revision fetches it again.
    */
   readonly revision: string;
+  /**
+   * Opaque, and changes whenever what a device keeps beside the item's file may change, such as a
+   * song's lyrics; null for an item that keeps nothing beside its file.
+   */
+  readonly extrasRevision: string | null;
   /** The domain's estimate of the bytes it packages for a device at `quality`; the core rounds it up. */
   readonly bytes: (quality: DownloadQuality) => number;
   /** A name to show for the item in lists. */

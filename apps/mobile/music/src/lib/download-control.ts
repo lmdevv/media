@@ -8,7 +8,7 @@ import { countOf, formatBytes } from "./format";
 /** What the ring draws. */
 export type DownloadRing =
   | { readonly kind: "idle" }
-  /** Queued, or waiting for the server or for space: a dashed ring with a stop square. */
+  /** Queued, or waiting for the server, Wi-Fi, or space: a dashed ring with a stop square. */
   | { readonly kind: "waiting" }
   /** The share of songs finished, from 0 to 1, so the ring never runs backwards. */
   | { readonly kind: "downloading"; readonly progress: number }
@@ -49,10 +49,12 @@ export const downloadControl = (
       waiting: ({ reason }): DownloadControl => ({
         ring: WAITING,
         press: "cancel",
-        label:
-          reason === "offline"
-            ? "Cancel download, waiting for a connection to the server"
-            : `Cancel download, waiting for space on this ${family}`,
+        label: Match.value(reason).pipe(
+          Match.when("offline", () => "Cancel download, waiting for a connection to the server"),
+          Match.when("wifi", () => "Cancel download, waiting for Wi-Fi"),
+          Match.when("space", () => `Cancel download, waiting for space on this ${family}`),
+          Match.exhaustive,
+        ),
       }),
       downloading: ({ done, total }): DownloadControl => ({
         ring: { kind: "downloading", progress: total === 0 ? 0 : done / total },

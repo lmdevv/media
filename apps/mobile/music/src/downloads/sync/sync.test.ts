@@ -6,12 +6,12 @@ import { NotFound } from "@media/contracts/errors";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { FakeMedia } from "./fake-media";
-import { AlbumId, ArtistId, TrackId } from "./models";
+import { AlbumId, ArtistId, LyricsChange, LyricsRevision, TrackId } from "./models";
 import type { DownloadManifest, OfflineTrack } from "./models";
 import { nodeTransfer } from "./node-transfer";
-import { pinIdOf, UNKNOWN_REVISION } from "./plan";
+import { PENDING_LYRICS as PENDING, pinIdOf, UNKNOWN_REVISION } from "./plan";
 import { downloadStatus } from "./status";
-import { DownloadSync } from "./sync";
+import { DownloadSync, LYRICS_RETRY_MS } from "./sync";
 import type { DownloadsCore, DownloadsSnapshot } from "./sync";
 import { applyChange, emptyVault, VaultChange } from "./vault";
 import type { KeptLyrics, VaultRows, VaultStore } from "./vault";
@@ -100,11 +100,14 @@ class FakeCore implements DownloadsCore {
     this.#base = base;
   }
 
-  keep = (trackId: TrackId): Promise<void> => {
+  /** Holds each keep's answer until it resolves; null answers at once. */
+  keepHeld: Promise<void> | null = null;
+
+  keep = async (trackId: TrackId): Promise<void> => {
     this.calls.push(`keep:${trackId}`);
     this.kept.set(trackId, this.kept.get(trackId) ?? `rev${trackId}`);
 
-    return Promise.resolve();
+    if (this.keepHeld !== null) await this.keepHeld;
   };
 
   release = (trackId: TrackId): Promise<void> => {
@@ -279,6 +282,554 @@ describe("DownloadSync in Low Power Mode", () => {
   });
 });
 
+describe("DownloadSync with Wi-Fi only", () => {
+  const SONG = "first song, long enough to send in two halves";
+
+  it("transfers nothing on a metered network, and everything once the phone is off it", async () => {
+    const one = song("t1", "Safe from Harm", COVER);
+
+    media.serve("/song/t1", SONG);
+    media.serve(COVER, "cover bytes", { contentType: "image/jpeg" });
+    sync.setWifiOnly(true);
+    sync.setMetered(true);
+    await settled((snapshot) => snapshot.ready);
+    await sync.request(ALBUM, DETAILS);
+    sync.offerManifest(pinIdOf(ALBUM), withCover(one, "Blue Lines"));
+    const waiting = await settled((snapshot) => snapshot.tracks.get(one.id) === "queued");
+    await new Promise((resolve) => setTimeout(resolve, 50));
+
+    expect(downloadStatus(waiting, ALBUM)).toEqual({ kind: "waiting", reason: "wifi" });
+    expect(media.bytesSent).toBe(0);
+    expect(core.calls).toEqual([]);
+
+    sync.setMetered(false);
+    const done = await settled((snapshot) => snapshot.copies.size === 1);
+    await settled(() => vault.view.art.size === 1);
+
+    expect(downloadStatus(done, ALBUM)).toMatchObject({ kind: "downloaded" });
+    expect(media.bytesSent).toBe(SONG.length + "cover bytes".length);
+  });
+
+  it("holds a song the person retries in Low Power Mode as well", async () => {
+    const one = song("t1", "Safe from Harm");
+
+    media.serve("/song/t1", SONG);
+    sync.setWifiOnly(true);
+    sync.setMetered(true);
+    sync.setLowPower(true);
+    await settled((snapshot) => snapshot.ready);
+    await sync.request(ALBUM, DETAILS);
+    sync.offerManifest(pinIdOf(ALBUM), manifestOf([one]));
+    sync.retry(ALBUM);
+    await settled((snapshot) => snapshot.tracks.get(one.id) === "queued");
+    await new Promise((resolve) => setTimeout(resolve, 50));
+
+    expect(media.bytesSent).toBe(0);
+
+    sync.setMetered(false);
+    await settled((snapshot) => snapshot.copies.size === 1);
+
+    expect(media.bytesSent).toBe(SONG.length);
+  });
+
+  it("transfers on a metered network once the setting is off", async () => {
+    const one = song("t1", "Safe from Harm");
+
+    media.serve("/song/t1", SONG);
+    sync.setWifiOnly(true);
+    sync.setMetered(true);
+    await settled((snapshot) => snapshot.ready);
+    await sync.request(ALBUM, DETAILS);
+    sync.offerManifest(pinIdOf(ALBUM), manifestOf([one]));
+    await settled((snapshot) => snapshot.tracks.get(one.id) === "queued");
+    sync.setWifiOnly(false);
+    const done = await settled((snapshot) => snapshot.copies.size === 1);
+
+    expect(done.waitingForWifi).toBe(false);
+    expect(media.bytesSent).toBe(SONG.length);
+  });
+
+  it("stops a transfer when the phone moves to a metered network, and starts it over on Wi-Fi", async () => {
+    const one = song("t1", "Safe from Harm");
+    const { promise: rest, resolve: sendRest } = Promise.withResolvers<void>();
+
+    media.serve("/song/t1", SONG, { held: rest });
+    sync.setWifiOnly(true);
+    await settled((snapshot) => snapshot.ready);
+    await sync.request(ALBUM, DETAILS);
+    sync.offerManifest(pinIdOf(ALBUM), manifestOf([one]));
+    await settled((snapshot) => snapshot.tracks.get(one.id) === "downloading");
+    await vi.waitFor(() => {
+      expect(media.bytesSent).toBe(Math.floor(SONG.length / 2));
+    });
+
+    sync.setMetered(true);
+    const stopped = await settled((snapshot) => snapshot.tracks.get(one.id) === "queued");
+    sendRest();
+    await new Promise((resolve) => setTimeout(resolve, 50));
+
+    expect(downloadStatus(stopped, ALBUM)).toEqual({ kind: "waiting", reason: "wifi" });
+    expect(sync.getSnapshot().copies.size).toBe(0);
+    expect(await vault.files()).toEqual([]);
+
+    sync.setMetered(false);
+    const done = await settled((snapshot) => snapshot.copies.size === 1);
+
+    expect(done.tracks.get(one.id)).toBe("downloaded");
+    expect(media.seen.filter((seen) => seen.method === "GET")).toHaveLength(2);
+  });
+});
+
+const WORDS = { status: "instrumental" } as const;
+
+const asked = (snapshot: DownloadsSnapshot) =>
+  snapshot.lyricsQuestions.flatMap((question) => question.held);
+
+const at = (rev: string) => LyricsRevision.make(rev);
+
+/** The album holding `tracks` as songs the core hasn't said it keeps: kept here, nothing fetched. */
+const heldManifest = (tracks: ReadonlyArray<OfflineTrack>): DownloadManifest => ({
+  pin: {
+    id: pinIdOf(ALBUM),
+    target: ALBUM,
+    createdAt: 1,
+    available: true,
+    ...DETAILS,
+    artHash: null,
+  },
+  entries: tracks.map((track) => ({ track, rev: UNKNOWN_REVISION, artHash: null, state: "held" })),
+});
+
+describe("DownloadSync's lyrics questions", () => {
+  it("asks only about songs the server's lyrics revision moved past, and keeps a late answer behind", async () => {
+    const one = song("t1", "Safe from Harm");
+    const two = song("t2", "One Love");
+
+    await settled((snapshot) => snapshot.ready);
+    await sync.request(ALBUM, DETAILS);
+    sync.offerManifest(pinIdOf(ALBUM), manifestOf([one, two]));
+    sync.offerKept(
+      new Map([
+        [one.id, at("s1")],
+        [two.id, at("s1")],
+      ]),
+    );
+
+    expect(asked(await settled((snapshot) => asked(snapshot).length === 2))).toEqual([
+      { trackId: one.id, rev: "s1" },
+      { trackId: two.id, rev: "s1" },
+    ]);
+
+    sync.offerLyrics([
+      LyricsChange.cases.Changed.make({ trackId: one.id, rev: at("s1"), lyrics: WORDS }),
+      LyricsChange.cases.Changed.make({ trackId: two.id, rev: at("s1"), lyrics: WORDS }),
+    ]);
+    await settled((snapshot) => snapshot.lyricsQuestions.length === 0);
+
+    sync.offerKept(
+      new Map([
+        [one.id, at("s1")],
+        [two.id, at("s2")],
+      ]),
+    );
+    const moved = await settled((snapshot) => asked(snapshot).length === 1);
+
+    expect(asked(moved)).toEqual([{ trackId: two.id, rev: "s2" }]);
+
+    // The answer to the question asked at s1 lands after the server moved on to s2.
+    sync.offerLyrics([
+      LyricsChange.cases.Changed.make({ trackId: two.id, rev: at("s1"), lyrics: WORDS }),
+    ]);
+    await settled(() => vault.view.lyrics.get(two.id)?.rev === "s1");
+
+    expect(asked(sync.getSnapshot())).toEqual([{ trackId: two.id, rev: "s2" }]);
+  });
+});
+
+describe("DownloadSync's lyrics question objects", () => {
+  it("keeps every other bucket's question the same object while one bucket's answers land", async () => {
+    const tracks = Array.from({ length: 150 }, (_, index) => song(`t${String(index)}`, "Bulk"));
+
+    await settled((snapshot) => snapshot.ready);
+    await sync.request(ALBUM, DETAILS);
+    sync.offerManifest(pinIdOf(ALBUM), heldManifest(tracks));
+    sync.offerKept(new Map(tracks.map((track) => [track.id, at("s1")])));
+    const before = await settled((snapshot) => asked(snapshot).length === tracks.length);
+    const [first, ...others] = before.lyricsQuestions;
+
+    expect(others.length).toBeGreaterThan(0);
+
+    sync.offerLyrics(
+      (first?.held ?? []).map(({ trackId }) =>
+        LyricsChange.cases.Changed.make({ trackId, rev: at("s1"), lyrics: WORDS }),
+      ),
+    );
+    const after = await settled((snapshot) => snapshot.lyricsQuestions.length === others.length);
+
+    expect(after.lyricsQuestions.every((question, index) => question === others[index])).toBe(true);
+  });
+});
+
+const none = (snapshot: DownloadsSnapshot) => snapshot.lyricsQuestions.length === 0;
+
+describe("DownloadSync's lyrics questions and the transfer gate", () => {
+  it("asks nothing while the gate holds the sync's own work, and asks once it opens", async () => {
+    const one = song("t1", "Safe from Harm");
+    const behind = (snapshot: DownloadsSnapshot) => asked(snapshot).length === 1;
+
+    await settled((snapshot) => snapshot.ready);
+    await sync.request(ALBUM, DETAILS);
+    sync.offerManifest(pinIdOf(ALBUM), heldManifest([one]));
+    sync.offerKept(new Map([[one.id, at("s1")]]));
+    await settled(behind);
+
+    sync.setWifiOnly(true);
+    sync.setMetered(true);
+    await settled(none);
+    sync.setMetered(false);
+    await settled(behind);
+
+    sync.setLowPower(true);
+    await settled(none);
+    sync.setLowPower(false);
+    await settled(behind);
+
+    sync.setOnline(false);
+    await settled(none);
+    sync.setOnline(true);
+
+    expect(asked(await settled(behind))).toEqual([{ trackId: one.id, rev: "s1" }]);
+  });
+});
+
+describe("DownloadSync's lyrics questions as each snapshot is published", () => {
+  const one = song("t1", "Safe from Harm");
+  const two = song("t2", "One Love");
+
+  /** Holds the next pin save, made by a plan that a new manifest starts, until `open`. */
+  const holdAPlan = async (): Promise<Gate> => {
+    await settled(() => vault.view.pins.get(pinIdOf(ALBUM))?.members.length === 1);
+
+    const held = gate();
+
+    vault.pinGate = held;
+    sync.offerManifest(pinIdOf(ALBUM), heldManifest([one, two]));
+    await vi.waitFor(() => {
+      expect(held.waiting).toBe(true);
+    });
+
+    return held;
+  };
+
+  it("withdraws its questions the moment the gate closes, while a plan waits on the vault", async () => {
+    await settled((snapshot) => snapshot.ready);
+    await sync.request(ALBUM, DETAILS);
+    sync.offerManifest(pinIdOf(ALBUM), heldManifest([one]));
+    sync.offerKept(new Map([[one.id, at("s1")]]));
+    await settled((snapshot) => asked(snapshot).length === 1);
+    const held = await holdAPlan();
+
+    sync.setWifiOnly(true);
+    sync.setMetered(true);
+
+    expect(sync.getSnapshot()).toMatchObject({ waitingForWifi: true, lyricsQuestions: [] });
+
+    sync.setMetered(false);
+
+    expect(asked(sync.getSnapshot())).toEqual([{ trackId: one.id, rev: "s1" }]);
+
+    sync.setLowPower(true);
+
+    expect(sync.getSnapshot().lyricsQuestions).toEqual([]);
+
+    sync.setLowPower(false);
+    sync.setOnline(false);
+
+    expect(sync.getSnapshot().lyricsQuestions).toEqual([]);
+
+    held.open();
+    await settled(() => held.passed);
+    await new Promise<void>((resolve) => {
+      setImmediate(resolve);
+    });
+
+    expect(sync.getSnapshot().lyricsQuestions).toEqual([]);
+  });
+
+  it("publishes no question once stopped, though a plan running then ends after", async () => {
+    await settled((snapshot) => snapshot.ready);
+    await sync.request(ALBUM, DETAILS);
+    sync.offerManifest(pinIdOf(ALBUM), heldManifest([one]));
+    const held = await holdAPlan();
+
+    sync.offerKept(new Map([[one.id, at("s1")]]));
+    const stopping = sync.stop();
+
+    expect(sync.getSnapshot().lyricsQuestions).toEqual([]);
+
+    held.open();
+    await stopping;
+    await new Promise<void>((resolve) => {
+      setImmediate(resolve);
+    });
+
+    expect(sync.getSnapshot().lyricsQuestions).toEqual([]);
+  });
+});
+
+describe("DownloadSync's lyrics questions from the state each snapshot is published in", () => {
+  const one = song("t1", "Safe from Harm");
+  const two = song("t2", "One Love");
+  const TWO = { kind: "track", id: two.id } as const;
+
+  const trackManifest = (title: string): DownloadManifest => ({
+    pin: {
+      id: pinIdOf(TWO),
+      target: TWO,
+      createdAt: 1,
+      available: true,
+      ...DETAILS,
+      title,
+      artHash: null,
+    },
+    entries: [{ track: two, rev: UNKNOWN_REVISION, artHash: null, state: "held" }],
+  });
+
+  /**
+   * Keeps `one` in the album with lyrics behind at s1, and `two` in a download of its own, then
+   * holds a plan on that second download's pin save and closes the gate.
+   */
+  const holdAPlanWithTheGateClosed = async (): Promise<Gate> => {
+    await settled((snapshot) => snapshot.ready);
+    await sync.request(ALBUM, DETAILS);
+    await sync.request(TWO, DETAILS);
+    sync.offerManifest(pinIdOf(ALBUM), heldManifest([one]));
+    sync.offerManifest(pinIdOf(TWO), trackManifest("One Love"));
+    sync.offerKept(new Map([[one.id, at("s1")]]));
+    await settled((snapshot) => asked(snapshot).length === 1);
+    await settled(() => vault.view.pins.get(pinIdOf(TWO))?.members.length === 1);
+
+    const held = gate();
+
+    vault.pinGate = held;
+    sync.offerManifest(pinIdOf(TWO), trackManifest("One Love, retitled"));
+    await vi.waitFor(() => {
+      expect(held.waiting).toBe(true);
+    });
+    sync.setWifiOnly(true);
+    sync.setMetered(true);
+
+    return held;
+  };
+
+  it("asks nothing for a song whose only download went while the gate was closed", async () => {
+    const held = await holdAPlanWithTheGateClosed();
+
+    await sync.remove(ALBUM);
+
+    expect(sync.getSnapshot().pins.map(({ pin }) => pin.id)).toEqual([pinIdOf(TWO)]);
+
+    sync.setMetered(false);
+
+    expect(sync.getSnapshot().lyricsQuestions).toEqual([]);
+
+    held.open();
+  });
+
+  it("asks at the revision offered while the gate was closed, never the one before", async () => {
+    const held = await holdAPlanWithTheGateClosed();
+
+    sync.offerKept(new Map([[one.id, at("s2")]]));
+    sync.setMetered(false);
+
+    expect(asked(sync.getSnapshot())).toEqual([{ trackId: one.id, rev: "s2" }]);
+
+    held.open();
+  });
+});
+
+describe("DownloadSync's lyrics retries", () => {
+  it("asks a pending song again a minute later, though a settled song of its batch was saved", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+
+    try {
+      let clock = 1_000;
+
+      const retrying = new DownloadSync({
+        core,
+        vault: new DirectoryVault(dir),
+        transfer: nodeTransfer,
+        policy: () => ({ profileFor: () => "aac-320" }),
+        now: () => clock,
+        sleep: () => Promise.resolve(),
+      });
+
+      const pending = song("t1", "Safe from Harm");
+      const done = song("t2", "One Love");
+
+      const settledOn = (check: (snapshot: DownloadsSnapshot) => boolean) =>
+        new Promise<DownloadsSnapshot>((resolve) => {
+          const look = () => {
+            if (!check(retrying.getSnapshot())) return;
+
+            stop();
+            resolve(retrying.getSnapshot());
+          };
+
+          const stop = retrying.subscribe(look);
+
+          look();
+        });
+
+      retrying.start();
+      retrying.setOnline(true);
+      await settledOn((snapshot) => snapshot.ready);
+      await retrying.request(ALBUM, DETAILS);
+      retrying.offerManifest(pinIdOf(ALBUM), heldManifest([pending, done]));
+      retrying.offerKept(
+        new Map([
+          [pending.id, at("s1")],
+          [done.id, at("s1")],
+        ]),
+      );
+      await settledOn((snapshot) => asked(snapshot).length === 2);
+
+      // Both revisions move together, as one change on the server does.
+      retrying.offerKept(
+        new Map([
+          [pending.id, at("s2")],
+          [done.id, at("s2")],
+        ]),
+      );
+      const both = await settledOn((snapshot) => asked(snapshot).every(({ rev }) => rev === "s2"));
+
+      expect(asked(both)).toEqual([
+        { trackId: pending.id, rev: "s2" },
+        { trackId: done.id, rev: "s2" },
+      ]);
+
+      retrying.offerLyrics(
+        [
+          LyricsChange.cases.Changed.make({ trackId: pending.id, rev: PENDING, lyrics: WORDS }),
+          LyricsChange.cases.Changed.make({ trackId: done.id, rev: at("s2"), lyrics: WORDS }),
+        ],
+        [{ trackId: pending.id, rev: at("s2") }],
+      );
+      await settledOn((snapshot) => snapshot.lyricsQuestions.length === 0);
+
+      // Nothing else asks it before the minute is up, however often the sync plans.
+      retrying.offerKept(
+        new Map([
+          [pending.id, at("s2")],
+          [done.id, at("s2")],
+        ]),
+      );
+      clock += LYRICS_RETRY_MS - 1;
+      await vi.advanceTimersByTimeAsync(LYRICS_RETRY_MS - 1);
+
+      expect(retrying.getSnapshot().lyricsQuestions).toEqual([]);
+
+      clock += 1;
+      await vi.advanceTimersByTimeAsync(1);
+
+      expect(asked(await settledOn((snapshot) => asked(snapshot).length === 1))).toEqual([
+        { trackId: pending.id, rev: "s2" },
+      ]);
+
+      await retrying.stop();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
+
+describe("DownloadSync stopping a fetch while the core keeps its song", () => {
+  const one = song("t1", "Safe from Harm");
+
+  /** Starts fetching `one` with its keep held, and resolves once the keep was asked. */
+  const keepHeld = async (): Promise<() => void> => {
+    const { promise, resolve } = Promise.withResolvers<void>();
+
+    core.keepHeld = promise;
+    media.serve("/song/t1", "first song");
+    await settled((snapshot) => snapshot.ready);
+    await sync.request(ALBUM, DETAILS);
+    sync.offerManifest(pinIdOf(ALBUM), manifestOf([one]));
+    await vi.waitFor(() => {
+      expect(core.calls).toContain("keep:t1");
+    });
+
+    return resolve;
+  };
+
+  it("asks for no ticket once stopped", async () => {
+    const answer = await keepHeld();
+    const stopping = sync.stop();
+
+    answer();
+    await stopping;
+
+    expect(core.calls).toEqual(["keep:t1"]);
+  });
+
+  it("asks for no ticket, and records no failure, once Wi-Fi only stops it", async () => {
+    const answer = await keepHeld();
+
+    sync.setWifiOnly(true);
+    sync.setMetered(true);
+    answer();
+    await new Promise((resolve) => setTimeout(resolve, 50));
+
+    expect(core.calls).toEqual(["keep:t1"]);
+    expect(sync.getSnapshot().tracks.get(one.id)).toBe("queued");
+  });
+});
+
+describe("DownloadSync.releaseAll", () => {
+  it("releases every song the core keeps here for the account, and stops fetching", async () => {
+    const one = song("t1", "Safe from Harm");
+    const two = song("t2", "One Love");
+
+    media.serve("/song/t1", "first song");
+    await settled((snapshot) => snapshot.ready);
+    await sync.request(ALBUM, DETAILS);
+    sync.offerManifest(pinIdOf(ALBUM), manifestOf([one]));
+    await settled((snapshot) => snapshot.copies.size === 1);
+    sync.offerKept(
+      new Map([
+        [one.id, null],
+        [two.id, null],
+      ]),
+    );
+    await sync.releaseAll();
+
+    expect(core.calls.filter((call) => call.startsWith("release:")).toSorted()).toEqual([
+      "release:t1",
+      "release:t2",
+    ]);
+    expect(core.kept.size).toBe(0);
+
+    sync.offerManifest(pinIdOf(ALBUM), manifestOf([one, two]));
+    await new Promise((resolve) => setTimeout(resolve, 50));
+
+    expect(core.calls.filter((call) => call.startsWith("keep:"))).toEqual(["keep:t1"]);
+  });
+
+  it("sends nothing while the server is out of reach", async () => {
+    const one = song("t1", "Safe from Harm");
+
+    media.serve("/song/t1", "first song");
+    await settled((snapshot) => snapshot.ready);
+    await sync.request(ALBUM, DETAILS);
+    sync.offerManifest(pinIdOf(ALBUM), manifestOf([one]));
+    await settled((snapshot) => snapshot.copies.size === 1);
+    sync.setOnline(false);
+    await sync.releaseAll();
+
+    expect(core.calls.filter((call) => call.startsWith("release:"))).toEqual([]);
+  });
+});
+
 describe("DownloadSync over the core", () => {
   it("keeps each song of a download on the core, fetches it with a ticket, and stores its revision", async () => {
     const one = song("t1", "Safe from Harm");
@@ -314,7 +865,7 @@ describe("DownloadSync over the core", () => {
     await sync.request(ALBUM, DETAILS);
     sync.offerManifest(pinIdOf(ALBUM), manifestOf([one]));
     await settled((snapshot) => snapshot.copies.size === 1);
-    sync.offerKept(new Set([one.id]));
+    sync.offerKept(new Map([[one.id, null]]));
     sync.offerManifest(pinIdOf(ALBUM), manifestOf([one]));
     await settled((snapshot) => snapshot.copies.size === 1);
 
@@ -329,7 +880,7 @@ describe("DownloadSync over the core", () => {
     await sync.request(ALBUM, DETAILS);
     sync.offerManifest(pinIdOf(ALBUM), manifestOf([one]));
     await settled((snapshot) => snapshot.copies.size === 1);
-    sync.offerKept(new Set([one.id]));
+    sync.offerKept(new Map([[one.id, null]]));
     await sync.remove(ALBUM);
     await settled((snapshot) => snapshot.copies.size === 0 && snapshot.pins.length === 0);
     await settled(() => core.calls.includes("release:t1"));

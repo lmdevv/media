@@ -13,6 +13,8 @@ interface Served {
   preparing: number;
   /** Statuses to answer with before anything else, one per request. */
   readonly refusals: Array<number>;
+  /** Sends half the body, then the rest once this resolves. */
+  readonly held: Promise<void> | null;
 }
 
 /** A request the fake answered. */
@@ -25,6 +27,8 @@ export class FakeMedia {
   readonly #files = new Map<string, Served>();
   readonly #server: Server;
   readonly seen: Array<Seen> = [];
+  /** Body bytes sent, over every request. */
+  bytesSent = 0;
 
   constructor() {
     this.#server = createServer((request, response) => {
@@ -59,7 +63,36 @@ export class FakeMedia {
         "Content-Length": String(served.body.length),
       });
 
-      response.end(method === "HEAD" ? undefined : served.body);
+      if (method === "HEAD") {
+        response.end();
+
+        return;
+      }
+
+      const half = Math.floor(served.body.length / 2);
+
+      const send = (part: Buffer): void => {
+        this.bytesSent += part.length;
+        response.write(part);
+      };
+
+      if (served.held === null) {
+        send(served.body);
+        response.end();
+
+        return;
+      }
+
+      const { held } = served;
+
+      send(served.body.subarray(0, half));
+      void (async () => {
+        await held;
+
+        if (response.destroyed) return;
+        send(served.body.subarray(half));
+        response.end();
+      })();
     });
   }
 
@@ -82,7 +115,10 @@ export class FakeMedia {
     });
   }
 
-  /** Serves `body` at `path` after `preparing` answers of `503`, and first `refusals`. */
+  /**
+   * Serves `body` at `path` after `preparing` answers of `503`, and first `refusals`; with `held`,
+   * each answer sends half the body and the rest once `held` resolves.
+   */
   serve(
     path: string,
     body: string,
@@ -90,6 +126,7 @@ export class FakeMedia {
       readonly contentType?: string;
       readonly preparing?: number;
       readonly refusals?: ReadonlyArray<number>;
+      readonly held?: Promise<void>;
     } = {},
   ): void {
     this.#files.set(path, {
@@ -97,6 +134,7 @@ export class FakeMedia {
       contentType: options.contentType ?? "audio/mp4",
       preparing: options.preparing ?? 0,
       refusals: [...(options.refusals ?? [])],
+      held: options.held ?? null,
     });
   }
 }

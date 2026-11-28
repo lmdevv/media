@@ -187,6 +187,11 @@ const downloadEntry = v.union(
     item: downloadItem,
     state: v.literal("available"),
     revision: v.string(),
+    /**
+     * Opaque, and changes whenever what a device keeps beside the item's file may change: a
+     * song's lyrics. Null for an item that keeps nothing beside its file.
+     */
+    extrasRevision: v.union(v.string(), v.null()),
     quality: downloadQuality,
     bytes: v.number(),
     label: v.string(),

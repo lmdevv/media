@@ -1,5 +1,6 @@
 export {
   DownloadsProvider,
+  releaseDownloads,
   useDownload,
   useDownloadedLyrics,
   useDownloadSettings,

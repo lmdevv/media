@@ -10,8 +10,8 @@ export type DownloadStatus =
   | { readonly kind: "queued" }
   | { readonly kind: "downloading"; readonly done: number; readonly total: number }
   | { readonly kind: "downloaded"; readonly bytes: number }
-  /** Fetching can't go on until the server answers or space frees up. */
-  | { readonly kind: "waiting"; readonly reason: "offline" | "space" }
+  /** Fetching can't go on until the server answers, the phone is on Wi-Fi, or space frees up. */
+  | { readonly kind: "waiting"; readonly reason: "offline" | "wifi" | "space" }
   /** Every song left to fetch failed; `retry` tries them again. */
   | { readonly kind: "failed"; readonly failed: number; readonly total: number }
   /** The album or playlist is gone, or no longer yours to read. */
@@ -81,6 +81,8 @@ export const progressOf = (
 
   if (!snapshot.online) return { kind: "waiting", reason: "offline" };
 
+  if (snapshot.waitingForWifi) return { kind: "waiting", reason: "wifi" };
+
   if (snapshot.lowSpace) return { kind: "waiting", reason: "space" };
 
   if (failed > 0 && done + failed === total) return { kind: "failed", failed, total };
@@ -103,7 +105,9 @@ export const downloadStatus = (
 
   if (view.members !== null) return progressOf(snapshot, view.members);
 
-  return snapshot.online ? { kind: "queued" } : { kind: "waiting", reason: "offline" };
+  if (!snapshot.online) return { kind: "waiting", reason: "offline" };
+
+  return snapshot.waitingForWifi ? { kind: "waiting", reason: "wifi" } : { kind: "queued" };
 };
 
 /**

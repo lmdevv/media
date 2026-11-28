@@ -51,9 +51,12 @@ export const downloadRows = (
       ],
       waiting: ({ reason }): ReadonlyArray<DownloadRowLabel> => [
         cancel(
-          reason === "offline"
-            ? "Waiting for a connection to the server"
-            : `Waiting for space on this ${family}`,
+          Match.value(reason).pipe(
+            Match.when("offline", () => "Waiting for a connection to the server"),
+            Match.when("wifi", () => "Waiting for Wi-Fi"),
+            Match.when("space", () => `Waiting for space on this ${family}`),
+            Match.exhaustive,
+          ),
         ),
       ],
       failed: ({ failed, total }): ReadonlyArray<DownloadRowLabel> => [

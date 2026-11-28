@@ -459,7 +459,7 @@ describe.skipIf(stack === undefined)("downloads", { timeout: 300_000 }, () => {
 
     const [listedAfter] = await listOf(aiko.signedIn);
 
-    expect(listedAfter).toMatchObject({ state: "available", bytes: 250 });
+    expect(listedAfter).toMatchObject({ state: "available", bytes: 250, extrasRevision: null });
     expect(listedAfter?.state === "available" ? listedAfter.revision : null).not.toBe(
       first.revision,
     );

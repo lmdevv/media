@@ -422,6 +422,24 @@ Old movies' Convex project, its SDK client, and its command registry were delete
   again. Another person's folder is never read. The engine starts only once the session is on this
   phone's device, which a sign-in sets after the session opens: the core refuses a removal from a
   session on no device, for good.
+- The music iOS app starts a transfer by one rule, `transferGate`: with Wi-Fi only on (the
+  default), nothing transfers on a metered network, whoever started it; in Low Power Mode only the
+  downloads and retries the person starts then transfer. A network is metered while iOS rates its
+  path expensive (cellular, a personal hotspot) or constrained (Low Data Mode), or before its first
+  report. Moving to a metered network stops the transfers running; they start over on Wi-Fi.
+- `core.downloads.list` gives each available item an `extrasRevision`: for a song, a revision of
+  what `music.lyrics.get` answers, read from the track alone (its own lyrics' hash, `lrclibAt`,
+  which each stored LRCLIB answer writes, and its lookup key); null for a movie file. The music
+  app keeps lyrics at the revision it asked at and asks only for songs listed at another one, so a
+  launch with current lyrics asks nothing. Lyrics answered while a lookup is pending are kept at a
+  revision no server one equals, and asked again a minute later, as is a lookup that failed. A
+  lyrics lookup is work the sync starts: `transferGate` holds it on a metered network with Wi-Fi
+  only on and in Low Power Mode, and it waits while the server is out of reach.
+- Music's sign-out releases the person's songs on the core (`core.downloads.remove`, waiting up to
+  5 seconds while the server answers), ends the session, then deletes the server's downloads for
+  every account on the phone, also when ending the session fails. Signed out offline, the core keeps the person's rows until they sign
+  in here again and the empty vault releases them; another account's rows wait for that account
+  the same way.
 
 ## Subtitle delay
 

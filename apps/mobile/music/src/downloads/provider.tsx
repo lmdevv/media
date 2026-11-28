@@ -3,11 +3,11 @@ import { streamUrl } from "@media/player/source-resolver";
 import { chooseStreamProfile } from "@media/player/stream-quality";
 import type { PlatformSdk } from "@media/sdk/promise";
 import { usePlatform, usePlatformStatus } from "@media/sdk/react";
+import { useDownloadSettingsOf } from "@media/mobile-core/download-settings";
 import { isFailure } from "@media/mobile-core/failure";
 import { lastPerson } from "@media/mobile-core/sign-in";
 import { Equal, Option, Schema } from "effect";
 import { useLowPowerMode } from "expo-battery";
-import { CryptoDigestAlgorithm, digestStringAsync } from "expo-crypto";
 import {
   createContext,
   use,
@@ -34,6 +34,7 @@ import { expoTransfer } from "./expo-transfer";
 import { openVault, wipeVaults } from "./expo-vault";
 import type { ExpoVault } from "./expo-vault";
 import { manifestOf } from "./manifest";
+import { downloadSettings, readNetwork, subscribeNetwork } from "./network";
 import type { CoreKept, PinRead } from "./manifest";
 import { freedBytesOf, offlineLibrary } from "./sync/library";
 import type { OfflineLibrary } from "./sync/library";
@@ -45,10 +46,12 @@ import type {
   StreamProfile,
   TrackId,
 } from "./sync/models";
-import type { HeldLyrics, SyncPolicy } from "./sync/plan";
+import { PENDING_LYRICS } from "./sync/plan";
+import type { HeldLyrics, ListedLyrics, SyncPolicy } from "./sync/plan";
 import { canToggleDownload, downloadStatus, trackDownloadState } from "./sync/status";
 import type { DownloadStatus } from "./sync/status";
 import { observedTransfer } from "./sync/finished-file";
+import { meteredOf } from "./sync/transfer-gate";
 import { DownloadSync, EMPTY_DOWNLOADS } from "./sync/sync";
 import type {
   DownloadsCore,
@@ -100,6 +103,9 @@ interface DownloadSettings {
   readonly quality: DownloadQuality;
   /** Saves the quality; songs already here keep theirs, and the next fetch uses the new one. */
   readonly setQuality: (quality: DownloadQuality) => void;
+  /** Downloads transfer only off mobile data, hotspots, and Low Data Mode. */
+  readonly wifiOnly: boolean;
+  readonly setWifiOnly: (wifiOnly: boolean) => void;
   readonly usage: DownloadUsage;
   /** How many downloads this phone keeps, finished or not, songs or none. */
   readonly downloads: number;
@@ -120,6 +126,31 @@ const DownloadsContext = createContext<Downloads | null>(null);
 
 const shutdowns = new Map<string, () => Promise<void>>();
 
+/** Each running sync's `releaseAll`, by the server's address. */
+const releasers = new Map<string, () => Promise<void>>();
+
+/** How long signing out waits for the core to answer the releases. */
+const RELEASE_WAIT_MS = 5000;
+
+/**
+ * Releases on the core the downloads the signed-in account keeps on this phone, before signing
+ * out ends the session the core takes them from. Stops the server's sync, and waits up to
+ * `RELEASE_WAIT_MS` for the core to answer; offline it only stops it (`DownloadSync.releaseAll`).
+ */
+export const releaseDownloads = async (origin: string): Promise<void> => {
+  const release = releasers.get(origin);
+
+  if (release === undefined) return;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+
+  const waited = new Promise<void>((resolve) => {
+    timer = setTimeout(resolve, RELEASE_WAIT_MS);
+  });
+
+  await Promise.race([release().catch(() => undefined), waited]);
+  clearTimeout(timer);
+};
+
 /**
  * Deletes every download kept for the server at `origin`, for any account: after its sync has
  * stopped and its vault closed, so no transfer still in flight writes a file back.
@@ -130,6 +161,10 @@ export const wipeDownloads = async (origin: string): Promise<void> => {
 };
 
 const subscribeToNothing = (): (() => void) => () => undefined;
+
+const subscribeToNetwork = (changed: () => void): (() => void) => subscribeNetwork(changed);
+
+const isMetered = (): boolean => meteredOf(readNetwork());
 
 const emptySnapshot = (): DownloadsSnapshot => EMPTY_DOWNLOADS;
 
@@ -171,6 +206,24 @@ const keptOf = (rows: ReadonlyArray<KeptRow>): ReadonlyMap<TrackId, KeptRow> => 
   for (const row of rows) if (row.item.kind === "track") kept.set(row.item.id, row);
 
   return kept;
+};
+
+const makeRevision = Schema.decodeSync(LyricsRevision);
+
+/** Each kept song with the revision of its lyrics on the server; null for a song it can't serve. */
+const listedLyricsOf = (kept: ReadonlyMap<TrackId, KeptRow>): ListedLyrics => {
+  const listed = new Map<TrackId, LyricsRevision | null>();
+
+  for (const [trackId, row] of kept) {
+    listed.set(
+      trackId,
+      row.state === "available" && row.extrasRevision !== null
+        ? makeRevision(row.extrasRevision)
+        : null,
+    );
+  }
+
+  return listed;
 };
 
 function PinWatcher({
@@ -267,25 +320,23 @@ const refusedOrNull = (cause: Error): PinRead | null =>
 
 const decodeLyrics = Schema.decodeUnknownOption(OfflineLyrics);
 
-const makeRevision = Schema.decodeSync(LyricsRevision);
-
 /** Lyrics lookups a watcher sends at once. */
 const LYRICS_BATCH = 50;
 
-/** How soon a song whose lookup failed or is still pending is asked again. */
-const LYRICS_RETRY_MS = 60_000;
-
 interface LyricsAnswer {
+  readonly song: HeldLyrics;
   readonly change: LyricsChange | null;
   /** Whether the answer is final: not a failure, and not a lookup the server still runs. */
   readonly settled: boolean;
 }
 
 /**
- * Keeps the lyrics of kept songs current. Each song is asked once while the app runs, the lyrics
- * it keeps offered again only when their digest changed; one whose lookup failed or is still
- * pending on the server is asked again a minute later. Lyrics keep their revision, a digest of
- * their JSON.
+ * Asks the server for the lyrics of the kept songs in `held`, which the sync hands out only while
+ * the transfer gate lets its own work run (`DownloadsSnapshot.lyricsQuestions`), and offers the
+ * answers back. Each answer is kept at the revision it was asked at: one asked at a revision the
+ * server has since left stays behind it, so it is asked again. Lyrics from a lookup still pending
+ * are kept at `PENDING_LYRICS`; the sync asks again about a song whose lookup was pending or
+ * failed a minute later.
  */
 function LyricsWatcher({
   sync,
@@ -295,32 +346,26 @@ function LyricsWatcher({
   readonly held: ReadonlyArray<HeldLyrics>;
 }) {
   const platform = usePlatform();
-  const settled = useRef(new Set<TrackId>());
-  const [round, setRound] = useState(0);
 
   useEffect(() => {
-    const due = held.filter((song) => song.rev === null || !settled.current.has(song.trackId));
-
-    if (due.length === 0) return undefined;
     const stop = new AbortController();
-    let timer: ReturnType<typeof setTimeout> | undefined;
 
-    const lookUp = async ({ trackId, rev }: HeldLyrics): Promise<LyricsAnswer> => {
+    const lookUp = async (song: HeldLyrics): Promise<LyricsAnswer> => {
       try {
-        const lyrics = await platform.music.lyrics.get({ trackId });
-        const kept = offlineLyricsOf(lyrics);
-        const digest = await digestStringAsync(CryptoDigestAlgorithm.SHA256, JSON.stringify(kept));
-        const next = makeRevision(digest);
+        const lyrics = await platform.music.lyrics.get({ trackId: song.trackId });
+        const settled = lyrics.status !== "pending";
 
         return {
-          change:
-            next === rev
-              ? null
-              : LyricsChange.cases.Changed.make({ trackId, rev: next, lyrics: kept }),
-          settled: lyrics.status !== "pending",
+          song,
+          change: LyricsChange.cases.Changed.make({
+            trackId: song.trackId,
+            rev: settled ? song.rev : PENDING_LYRICS,
+            lyrics: offlineLyricsOf(lyrics),
+          }),
+          settled,
         };
       } catch {
-        return { change: null, settled: false };
+        return { song, change: null, settled: false };
       }
     };
 
@@ -335,32 +380,21 @@ function LyricsWatcher({
     };
 
     const look = async (): Promise<void> => {
-      const answers = await lookAll(due, []);
+      const answers = await lookAll(held, []);
 
       if (stop.signal.aborted) return;
-      answers.forEach((answer, index) => {
-        const song = due[index];
-
-        if (answer.settled && song !== undefined) settled.current.add(song.trackId);
-      });
       sync.offerLyrics(
         answers.flatMap((answer) => (answer.change === null ? [] : [answer.change])),
+        answers.flatMap((answer) => (answer.settled ? [] : [answer.song])),
       );
-
-      if (answers.some((answer) => !answer.settled)) {
-        timer = setTimeout(() => {
-          setRound((count) => count + 1);
-        }, LYRICS_RETRY_MS);
-      }
     };
 
     void look();
 
     return () => {
       stop.abort();
-      clearTimeout(timer);
     };
-  }, [platform, sync, held, round]);
+  }, [platform, sync, held]);
 
   return null;
 }
@@ -403,7 +437,7 @@ function ServerFeed({ sync }: { readonly sync: DownloadSync }) {
   const snapshot = useSyncExternalStore(sync.subscribe, sync.getSnapshot);
 
   useEffect(() => {
-    if (kept !== null) sync.offerKept(new Set(kept.keys()));
+    if (kept !== null) sync.offerKept(listedLyricsOf(kept));
   }, [sync, kept]);
 
   if (kept === null) return null;
@@ -481,9 +515,10 @@ const useQuality = (): [DownloadQuality, (quality: DownloadQuality) => void] => 
 
 /**
  * Keeps the account's downloads on this phone while the app runs, and fetches new ones while the
- * server answers. In Low Power Mode it fetches only the downloads the person starts then. Mount it inside the platform provider, above the session phase, which opens the
- * app on the downloads when the server is out of reach, and above the player, which plays
- * downloaded songs from their files.
+ * server answers. With Wi-Fi only on, nothing transfers on a metered network; in Low Power Mode it
+ * fetches only the downloads the person starts then (`transferGate`). Mount it inside the platform
+ * provider, above the session phase, which opens the app on the downloads when the server is out
+ * of reach, and above the player, which plays downloaded songs from their files.
  */
 export function DownloadsProvider({ children }: { readonly children: ReactNode }) {
   const platform = usePlatform();
@@ -496,6 +531,10 @@ export function DownloadsProvider({ children }: { readonly children: ReactNode }
   const current = useRef<DownloadSync | null>(null);
   const lowPower = useLowPowerMode();
   const saving = useRef(lowPower);
+  const { wifiOnly } = useDownloadSettingsOf(downloadSettings());
+  const wifi = useRef(wifiOnly);
+  const metered = useSyncExternalStore(subscribeToNetwork, isMetered);
+  const costly = useRef(metered);
 
   useLayoutEffect(() => {
     chosen.current = quality;
@@ -507,9 +546,20 @@ export function DownloadsProvider({ children }: { readonly children: ReactNode }
   }, [lowPower]);
 
   useLayoutEffect(() => {
+    wifi.current = wifiOnly;
+    current.current?.setWifiOnly(wifiOnly);
+  }, [wifiOnly]);
+
+  useLayoutEffect(() => {
+    costly.current = metered;
+    current.current?.setMetered(metered);
+  }, [metered]);
+
+  useLayoutEffect(() => {
     if (userId === null) return undefined;
     let closed = false;
     let created: DownloadSync | null = null;
+    let releaser: (() => Promise<void>) | null = null;
     let shutting: Promise<void> | null = null;
     const opening = openVault(mediaUrl, userId);
 
@@ -551,7 +601,11 @@ export function DownloadsProvider({ children }: { readonly children: ReactNode }
       });
 
       created = opened;
+      releaser = () => opened.releaseAll();
+      releasers.set(mediaUrl, releaser);
       opened.setLowPower(saving.current);
+      opened.setWifiOnly(wifi.current);
+      opened.setMetered(costly.current);
       opened.start();
       current.current = opened;
       setSync(opened);
@@ -560,6 +614,7 @@ export function DownloadsProvider({ children }: { readonly children: ReactNode }
     void run();
 
     return () => {
+      if (releaser !== null && releasers.get(mediaUrl) === releaser) releasers.delete(mediaUrl);
       void shutdown().finally(() => {
         if (shutdowns.get(mediaUrl) === shutdown) shutdowns.delete(mediaUrl);
       });
@@ -681,14 +736,19 @@ export const useDownloadsLibrary = (): OfflineLibrary => {
   return useMemo(() => offlineLibrary(snapshot), [snapshot]);
 };
 
-/** Download quality, the space downloads take, and removing them all. */
+/** Download quality, Wi-Fi only, the space downloads take, and removing them all. */
 export const useDownloadSettings = (): DownloadSettings => {
   const { sync, quality, setQuality } = useDownloads("useDownloadSettings");
   const { usage, pins } = useSnapshot(sync);
+  const { wifiOnly } = useDownloadSettingsOf(downloadSettings());
 
   return {
     quality,
     setQuality,
+    wifiOnly,
+    setWifiOnly: (next) => {
+      downloadSettings().update({ wifiOnly: next });
+    },
     usage,
     downloads: pins.length,
     removeAll: async () => {

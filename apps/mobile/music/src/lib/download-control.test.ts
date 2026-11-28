@@ -58,6 +58,14 @@ describe("downloadControl", () => {
     );
   });
 
+  it("waits for Wi-Fi", () => {
+    expect(downloadControl({ kind: "waiting", reason: "wifi" }, true, "iPhone")).toEqual({
+      ring: { kind: "waiting" },
+      press: "cancel",
+      label: "Cancel download, waiting for Wi-Fi",
+    });
+  });
+
   it("never calls a download with no songs here downloaded", () => {
     expect(downloadControl({ kind: "failed", failed: 9, total: 9 }, true, "iPhone")).toEqual({
       ring: { kind: "waiting" },

@@ -135,6 +135,11 @@ export const musicTables = {
     lyricsHash: nullable(v.string()),
     /** Whether this file's own lyrics include synced main lyrics, which LRCLIB never replaces. */
     lyricsSynced: v.boolean(),
+    /**
+     * When the LRCLIB answer this track's `lrclibLyrics` row holds was stored (its `checkedAt`),
+     * so a read of the track alone sees that answer change; absent before its first answer.
+     */
+    lrclibAt: v.optional(v.number()),
     /** Whether the file's tags mark it explicit, which a kid's explicit filter hides (D17). */
     explicit: v.boolean(),
     /** A scan did not find the file; the row stays, so likes and playlists keep pointing at it. */

@@ -7,7 +7,7 @@ import type {
   QueryInitializer,
   WithoutSystemFields,
 } from "convex/server";
-import { getDocumentSize } from "convex/values";
+import { compareValues, getDocumentSize } from "convex/values";
 import type { Value } from "convex/values";
 
 import type { DataModel, Doc, Id } from "../_generated/dataModel";
@@ -532,6 +532,13 @@ export const musicStore = (db: Db, meter: Meter): MusicStore => {
         await patch("lrclibLyrics", row._id, fields);
         lrclibWalked(row._id);
       }
+
+      // Only another answer, or one for other tags, moves the track's `lrclibAt`: a re-check that
+      // stores the same answer leaves the track, and every read of it, as it was.
+      const unchanged =
+        row !== undefined && row.revision === revision && compareValues(row.answer, stored) === 0;
+
+      if (!unchanged) await patch("tracks", trackId, { lrclibAt: checkedAt });
 
       return stored.status;
     },

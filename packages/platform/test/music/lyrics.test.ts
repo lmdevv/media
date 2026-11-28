@@ -9,7 +9,7 @@ import type { Id } from "../../convex/_generated/dataModel";
 import { insertByHand, patchByHand, runFunction } from "../admin";
 import { eventually, retrying } from "../core/jobs/driver";
 import { listedJob } from "../core/jobs/listed";
-import { member } from "../devices";
+import { enroll, member } from "../devices";
 import type { Member } from "../devices";
 import { runServer } from "../service";
 import { refusal } from "../sign-in";
@@ -436,6 +436,88 @@ describe.skipIf(stack === undefined)("music lyrics lookups", { timeout: 180_000 
       source: "file",
       main: { body: { type: "synced", lines: [{ text: "own line" }] } },
     });
+  });
+
+  it("move a downloaded song's lyrics revision when its LRCLIB answer changes, and only then", async () => {
+    const owner = await admin;
+
+    await enroll(owner.signedIn, "Lyrics phone");
+
+    const { ids } = await library(core, owner, "Kept lyrics", (root) => [
+      song(root, "Kept"),
+      song(root, "Missed"),
+    ]);
+
+    const kept = ids[0] ?? never();
+    const missed = ids[1] ?? never();
+
+    const revision = async (trackId: Id<"tracks">): Promise<string | null> => {
+      const { page } = await owner.signedIn.client.query(api.core.downloads.list, {
+        paginationOpts: { numItems: 200, cursor: null },
+      });
+
+      const entry = page.find((one) => one.item.id === trackId);
+
+      return entry?.state === "available" ? entry.extrasRevision : null;
+    };
+
+    /** Ages the song's stored miss past its 30 days and asks LRCLIB again. */
+    const lookAgain = async (trackId: Id<"tracks">): Promise<Lease> => {
+      const [row] = await runFunction(
+        core,
+        internal.music.probe.lrclibRowIds,
+        { trackId },
+        Schema.Array(LrclibId),
+      );
+
+      await patchByHand(core, "lrclibLyrics", [row ?? never()], {
+        checkedAt: Date.now() - 31 * 24 * 60 * 60 * 1000,
+      });
+      await requestLookups(core, [trackId]);
+
+      return claimLookup(core, trackId);
+    };
+
+    await owner.signedIn.client.mutation(api.core.downloads.add, {
+      item: { kind: "track", id: kept },
+    });
+
+    const before = await revision(kept);
+
+    expect(before).toMatch(/^[0-9a-f]{64}$/u);
+    expect(await revision(kept)).toBe(before);
+
+    // The download asked for a lookup; its answer changes what lyrics.get answers.
+    await settle(core, await claimLookup(core, kept), found(52, "kept offline"));
+
+    const after = await revision(kept);
+
+    expect(after).toMatch(/^[0-9a-f]{64}$/u);
+    expect(after).not.toBe(before);
+    expect(await revision(kept)).toBe(after);
+    expect(await lyricsAs(owner, kept)).toMatchObject({ status: "synced", source: "lrclib" });
+
+    // A re-check that stores the same miss leaves the revision; a found answer moves it.
+    await owner.signedIn.client.mutation(api.core.downloads.add, {
+      item: { kind: "track", id: missed },
+    });
+    await settle(core, await claimLookup(core, missed), {
+      outcome: "answered",
+      answer: { status: "miss" },
+    });
+
+    const missedOnce = await revision(missed);
+
+    await settle(core, await lookAgain(missed), {
+      outcome: "answered",
+      answer: { status: "miss" },
+    });
+
+    expect(await revision(missed)).toBe(missedOnce);
+
+    await settle(core, await lookAgain(missed), found(53, "found at last"));
+
+    expect(await revision(missed)).not.toBe(missedOnce);
   });
 
   it("go on listing an admin's libraries in later steps and backfill each found", async () => {
