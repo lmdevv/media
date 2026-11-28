@@ -113,11 +113,12 @@ export interface DownloadsSnapshot {
   readonly usage: DownloadUsage;
   /**
    * The kept songs whose lyrics here are behind the server's, one batch per question; hand the
-   * lyrics found to `offerLyrics`. A lyrics lookup is work the sync starts on its own, so there are
-   * none while the server is out of reach or `transferGate` holds the sync's work (Wi-Fi only on a
-   * metered network, Low Power Mode), and none for a song whose lookup was pending or failed less
-   * than `LYRICS_RETRY_MS` ago at the same revision. Recomputed once a plan has applied what it
-   * could, and the same array, of the same question objects, until a question changes.
+   * lyrics found to `offerLyrics`. A lyrics lookup is work the sync starts on its own, so a snapshot
+   * holds none when, as it is published, the sync has stopped, the server is out of reach, or
+   * `transferGate` holds the sync's work (Wi-Fi only on a metered network, Low Power Mode); each of
+   * those changes publishes at once. None either for a song whose lookup was pending or failed
+   * less than `LYRICS_RETRY_MS` ago at the same revision. Recomputed once a plan has applied what
+   * it could, and the same array, of the same question objects, until a question changes.
    */
   readonly lyricsQuestions: ReadonlyArray<LyricsQuestion>;
 }
@@ -196,6 +197,9 @@ export const EMPTY_DOWNLOADS: DownloadsSnapshot = {
   lyricsQuestions: [],
 };
 
+/** The questions of a snapshot while the sync may not ask: one array, so nothing re-renders. */
+const NO_QUESTIONS: ReadonlyArray<LyricsQuestion> = [];
+
 const delay = (ms: number, signal: AbortSignal): Promise<void> =>
   new Promise((resolve) => {
     if (signal.aborted) {
@@ -271,6 +275,10 @@ export class DownloadSync {
     { readonly rev: LyricsRevision; readonly at: number }
   >();
   #lyricsWake: ReturnType<typeof setTimeout> | null = null;
+  /**
+   * The questions the last plan found. A snapshot carries them only while `#mayAsk` holds when it
+   * is published (`#publish`), whatever plan is running then.
+   */
   #questions: ReadonlyArray<LyricsQuestion> = [];
   readonly #readLyrics = new Map<
     TrackId,
@@ -668,6 +676,16 @@ export class DownloadSync {
 
     if (this.#lyricsWake !== null) clearTimeout(this.#lyricsWake);
     this.#lyricsWake = null;
+    this.#publish();
+  }
+
+  /**
+   * Whether the sync's own lyrics lookups may run now: it hasn't stopped, the server answers, and
+   * `transferGate` runs the work the sync starts. Read when each snapshot is published, so a
+   * change to any of them withdraws the questions at once, not when a running plan ends.
+   */
+  #mayAsk(): boolean {
+    return !this.#stopped && this.#online && transferGate(this.#conditions, "sync") === "run";
   }
 
   #plan(): void {
@@ -759,6 +777,7 @@ export class DownloadSync {
   }
 
   #askAgain(): void {
+    if (this.#stopped) return;
     const listed = Option.getOrElse(this.#listed, (): ListedLyrics => new Map());
     const now = this.#options.now();
     const resting = new Set<TrackId>();
@@ -776,9 +795,7 @@ export class DownloadSync {
 
     this.#wakeForLyrics(next === null ? null : next - now);
 
-    const asking = this.#online && transferGate(this.#conditions, "sync") === "run";
-
-    const questions = asking ? lyricsQuestions(this.#desired(), this.#view, listed, resting) : [];
+    const questions = lyricsQuestions(this.#desired(), this.#view, listed, resting);
 
     if (Equal.equals(questions, this.#questions)) return;
 
@@ -1118,6 +1135,9 @@ export class DownloadSync {
 
   #wakeIn(ms: number): void {
     if (this.#wake !== null) clearTimeout(this.#wake);
+    this.#wake = null;
+
+    if (this.#stopped) return;
 
     this.#wake = setTimeout(() => {
       this.#wake = null;
@@ -1200,7 +1220,7 @@ export class DownloadSync {
       tracks: this.#trackStates(copies),
       copies,
       usage: { tracks: copies.size, bytes, freeBytes: this.#options.vault.freeBytes() },
-      lyricsQuestions: this.#questions,
+      lyricsQuestions: this.#mayAsk() ? this.#questions : NO_QUESTIONS,
     };
 
     this.#notify();
