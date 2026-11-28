@@ -81,6 +81,7 @@ jobs:
       - run: pnpm knip
       - run: scripts/check-deploy.sh
       - run: scripts/check-history.sh apps packages scripts nix deploy .agents tools docs README.md AGENTS.md
+      - run: scripts/check-path-case.sh
       - if: contains(fromJSON(steps.scope.outputs.workspaces), 'apps/cli')
         run: pnpm --filter @lmdevv/media build:sea
       - if: contains(fromJSON(steps.scope.outputs.workspaces), 'apps/cli')
