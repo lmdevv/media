@@ -274,6 +274,28 @@ describe("the app's requests to the media service", () => {
     expect(health.sent).toBe(1);
   });
 
+  it("doubts each size of a cover on its own, though they share the cover's path", async () => {
+    const { health } = watchMedia();
+    const cover = `${media.base}/music/art/abc`;
+    const unanswered = { error: "Could not connect to the server." };
+
+    coverFailed(`${cover}?ticket=1`)(unanswered);
+    await clock.advance(1000);
+
+    expect(health.sent).toBe(1);
+
+    coverFailed(`${cover}?w=144&ticket=1`)(unanswered);
+    await clock.advance(1000);
+
+    expect(health.sent).toBe(2);
+
+    coverFailed(`${cover}?w=144&ticket=2`)(unanswered);
+    coverFailed(`${cover}?ticket=2`)(unanswered);
+    await clock.advance(1000);
+
+    expect(health.sent).toBe(2);
+  });
+
   it("reads a cover's status from iOS's words: a missing cover checks nothing, a 502 checks", async () => {
     const { health } = watchMedia();
 
