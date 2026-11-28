@@ -7,7 +7,12 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { CollectionCard } from "@/components/browse/collection-card";
 import { EmptyState } from "@/components/browse/empty-state";
-import { ROW_COLLECTIONS, useHomeRows, useRowCollections } from "@/components/browse/held-home";
+import {
+  ROW_COLLECTIONS,
+  SavedHomeContext,
+  useHomeRows,
+  useRowCollections,
+} from "@/components/browse/held-home";
 import { Hero } from "@/components/browse/hero";
 import { TAB_BAR_CLEARANCE } from "@/components/browse/layout";
 import { useActiveScans, useMovieLibraries } from "@/components/browse/libraries";
@@ -45,6 +50,7 @@ export default function Home() {
     home.status === "success" && libraries.status === "ready"
       ? {
           rows: home.data,
+          saved: home.saved === true,
           screen: homeScreen(home.data, {
             count: libraries.rows.length,
             scanning: scans.length > 0,
@@ -97,7 +103,7 @@ export default function Home() {
             />
           </View>
         ) : loaded === null ? null : (
-          <>
+          <SavedHomeContext value={loaded.saved}>
             {loaded.screen.fullBleed ? (
               <Hero
                 titles={loaded.screen.pages}
@@ -108,10 +114,10 @@ export default function Home() {
               <LargeTitle title="Home" />
             )}
             <HomeBody screen={loaded.screen} home={loaded.rows} scans={scans} />
-          </>
+          </SavedHomeContext>
         )}
       </View>
-      <HomeLaunchMarks content={loaded === null ? null : "network"} />
+      <HomeLaunchMarks content={loaded === null ? null : loaded.saved ? "saved" : "network"} />
     </ScrollView>
   );
 }

@@ -386,8 +386,11 @@ export const MAX_APP_TIMING_MS = 600_000;
 
 const TimingMs = Schema.Int.check(Schema.isBetween({ minimum: 0, maximum: MAX_APP_TIMING_MS }));
 
-/** Where the content a screen first showed came from: the server, or the downloads on the device. */
-export const ContentSource = Schema.Literals(["network", "downloads"]);
+/**
+ * Where the content a screen first showed came from: the server, the downloads on the device, or
+ * the answers the device saved at an earlier launch.
+ */
+export const ContentSource = Schema.Literals(["network", "downloads", "saved"]);
 
 /** Where the content a screen first showed came from. */
 export type ContentSource = typeof ContentSource.Type;

@@ -95,6 +95,12 @@ const ServerName = () => {
 - `usePlatformQuery` follows a query and returns a `QueryState` (`loading`, `success`, or
   `error`); pass `"skip"` in place of the arguments to wait. `usePlatformStatus` gives the
   session's status.
+- `saved` (`SaveAnswers`) names the queries whose answers the client saves to a file the app
+  keeps, so the next launch shows them, marked `saved: true`, until the server answers. A saved
+  answer shows only while the session that received it is signed in, on the same server and app
+  release, and within `maxAge`; a file or answer that fails any of these, or does not decode, reads
+  as nothing saved. Answers are saved only for the first session a client signs in as; when
+  another follows, the file is deleted and nothing more is saved until the next launch.
 - `src/platform/generated/` is written by `pnpm --filter @media/commands generate`. Never edit it.
 
 ## The media service

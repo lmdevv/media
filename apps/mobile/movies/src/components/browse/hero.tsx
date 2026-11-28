@@ -17,10 +17,12 @@ import { featuredDetailOf } from "@/lib/catalog";
 import type { FeaturedDetail, TitleCard } from "@/lib/catalog";
 import { billboardHeight, pageAt } from "@/lib/layout";
 import { openTitle } from "@/lib/open-title";
+import { watchHref } from "@/lib/routes";
 import { useThemeColor } from "@/lib/theme-color";
 import { useWidthClass } from "@/lib/use-width-class";
 import { useServer } from "@/session/connection";
 
+import { useSavedHome } from "./held-home";
 import { useTitleStates } from "./title-states";
 
 /** Props for `Hero`. */
@@ -268,6 +270,7 @@ function HeroActions({
 }) {
   const states = useTitleStates();
   const play = playTarget(title.id, detail === null ? null : { kind: title.kind, ...detail });
+  const playHref = useSavedHome() ? watchHref({ titleId: title.id }) : play.href;
   const inList = states.inMyList(title.id);
 
   return (
@@ -278,7 +281,7 @@ function HeroActions({
           icon={Play}
           iconFilled
           className={playClassName}
-          onPress={() => router.push(play.href)}
+          onPress={() => router.push(playHref)}
         />
       ) : (
         <Button

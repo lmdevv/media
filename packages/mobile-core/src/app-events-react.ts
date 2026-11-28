@@ -72,7 +72,9 @@ export function AppEventsSender({
     ...(status === "signedIn" ? [] : (["skip"] as const)),
   );
 
-  const account = status === "signedIn" && me.status === "success" ? me.data.userId : null;
+  // A saved answer names who was signed in at an earlier launch, not who the core says is now.
+  const account =
+    status === "signedIn" && me.status === "success" && me.saved !== true ? me.data.userId : null;
 
   useEffect(() => {
     if (status === "signedOut") events.signedOut();

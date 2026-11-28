@@ -5,11 +5,13 @@ import type { ThisApp } from "@media/mobile-core/server-release";
 import { signInUrlFor } from "@media/sdk/promise";
 import { PlatformProvider } from "@media/sdk/react";
 import Constants from "expo-constants";
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import type { ReactNode } from "react";
 import { AppState, Platform } from "react-native";
 
 import { appKeychains } from "@/lib/keychains";
+
+import { savedHome } from "./saved-home";
 
 const THIS_APP: ThisApp = {
   version: Constants.expoConfig?.version,
@@ -36,7 +38,8 @@ const useServerRelease = (mediaUrl: string): void => {
 /**
  * The platform client for `connection`, provided to everything below. Its session lives in this
  * app's own keychain group (D48), and every sign-in goes through the media server's sign-in boundary.
- * It also follows the server's release, so an answer this app can't read asks to update it.
+ * It saves Home's answers for the next launch to show at once. It also follows the server's
+ * release, so an answer this app can't read asks to update it.
  */
 export function SdkProvider({
   connection,
@@ -47,12 +50,16 @@ export function SdkProvider({
 }) {
   useServerRelease(connection.mediaUrl);
 
+  // Held for the provider's life, which its `key` ties to the server: a new object opens a new client.
+  const [saved] = useState(() => savedHome(connection, THIS_APP.version ?? "unknown"));
+
   return (
     <PlatformProvider
       url={connection.convexUrl}
       signInUrl={signInUrlFor(connection.mediaUrl)}
       storage={appKeychains().sessions}
       storageKey={sessionKeyFor(connection.mediaUrl)}
+      saved={saved}
     >
       {children}
     </PlatformProvider>

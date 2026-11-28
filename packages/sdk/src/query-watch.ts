@@ -1,5 +1,5 @@
 import type { ManagedRuntime } from "effect";
-import { Duration, Effect, Fiber, Schedule, Stream } from "effect";
+import { Duration, Effect, Fiber, Option, Schedule, Stream } from "effect";
 
 import type { CallError } from "./sdk-errors";
 import { isTransient } from "./sdk-errors";
@@ -10,7 +10,15 @@ import { isTransient } from "./sdk-errors";
  */
 export type QueryState<A> =
   | { readonly status: "loading" }
-  | { readonly status: "success"; readonly data: A }
+  | {
+      readonly status: "success";
+      readonly data: A;
+      /**
+       * The answer this device saved at an earlier launch, shown until the server answers
+       * (`SavedAnswers`); absent for the server's answer.
+       */
+      readonly saved?: true;
+    }
   | {
       readonly status: "error";
       readonly error: CallError;
@@ -42,17 +50,25 @@ const retryTransient: Schedule.Schedule<Duration.Duration, CallError> = Schedule
   Schedule.while(({ input }: { readonly input: CallError }) => isTransient(input)),
 );
 
+/** A saved answer, decoded when it is shown: none when it no longer decodes. */
+export type StandIn<A> = () => Option.Option<A>;
+
 /**
  * Builds a watch of `results`, run on `runtime`. Nothing runs until the first listener subscribes,
  * and the stream stops when the last one leaves.
+ *
+ * @param standIn - The saved answer that may show until `results` answers: some to show one, none
+ *   to take it back, as when the person signed in changes.
  */
 export const fromStream = <A, R>(
   runtime: ManagedRuntime.ManagedRuntime<R, unknown>,
   results: Stream.Stream<A, CallError, R>,
+  standIn: Stream.Stream<Option.Option<StandIn<A>>, never, R> = Stream.empty,
 ): QueryWatch<A> => {
   const listeners = new Set<() => void>();
   let state: QueryState<A> = LOADING;
   let running: Fiber.Fiber<void, unknown> | null = null;
+  let liveAnswered = false;
 
   const publish = (next: QueryState<A>): void => {
     state = next;
@@ -60,12 +76,35 @@ export const fromStream = <A, R>(
     for (const listener of listeners) listener();
   };
 
+  const answer = (next: QueryState<A>): void => {
+    liveAnswered = true;
+    publish(next);
+  };
+
+  const showSaved = (found: Option.Option<StandIn<A>>): void => {
+    if (liveAnswered) return;
+
+    const data = Option.flatMap(found, (decode) => decode());
+
+    if (Option.isSome(data)) publish({ status: "success", data: data.value, saved: true });
+    else if (state.status !== "loading") publish(LOADING);
+  };
+
   const start = (): void => {
     running = runtime.runFork(
-      results.pipe(
-        Stream.retry(retryTransient),
-        Stream.runForEach((data) => Effect.sync(() => publish({ status: "success", data }))),
-        Effect.catch((error) => Effect.sync(() => publish({ status: "error", error, retry }))),
+      Effect.gen(function* () {
+        if (!liveAnswered) {
+          yield* Effect.forkChild(
+            Stream.runForEach(standIn, (found) => Effect.sync(() => showSaved(found))),
+          );
+        }
+
+        yield* results.pipe(
+          Stream.retry(retryTransient),
+          Stream.runForEach((data) => Effect.sync(() => answer({ status: "success", data }))),
+        );
+      }).pipe(
+        Effect.catch((error) => Effect.sync(() => answer({ status: "error", error, retry }))),
       ),
     );
   };

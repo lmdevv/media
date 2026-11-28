@@ -1,7 +1,28 @@
 import { useFirstRows } from "@media/mobile-core/pages";
 import { usePlatform, usePlatformQuery } from "@media/sdk/react";
+import { createContext, useContext } from "react";
 
 import { useMovieLibraries } from "@/components/browse/libraries";
+
+/**
+ * Whether Home shows the rows this phone saved at an earlier launch, until the server answers. Its
+ * play buttons then leave the episode to the server, which knows where the person is now.
+ */
+export const SavedHomeContext = createContext(false);
+
+export const useSavedHome = (): boolean => useContext(SavedHomeContext);
+
+/**
+ * The queries a launch saves for the next one to show at once: who is signed in, and what Home
+ * draws first (its rows, the libraries that decide its layout, and the Collections row). The
+ * person's list and history, which Home's actions read, wait for the server.
+ */
+export const SAVED_QUERIES = [
+  "core.auth.sessions.current",
+  "movies.titles.home",
+  "core.libraries.list",
+  "movies.collections.list",
+] as const;
 
 /** Collections Home's Collections row shows. */
 export const ROW_COLLECTIONS = 20;

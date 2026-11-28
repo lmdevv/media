@@ -633,3 +633,26 @@ Old movies' Convex project, its SDK client, and its command registry were delete
   mount never leaves a disposed client in use; children render once the client exists.
 - The Promise facade and React commands reject with the same tagged errors the Effect API fails
   with; React queries return a `loading | success | error` state instead of throwing.
+- A client given `saved` keeps the answers of the queries it names in a file the app provides, and
+  the next launch shows them, marked `saved`, until the server answers; a saved answer never shows
+  after the server's. The file records the server, the app release, and the session (account and
+  session id) it belongs to, and each answer when it came; a file that matches none of these, an
+  answer older than its age limit or one its query's schema refuses, reads as nothing saved.
+  Answers are saved only for the first session a client signs in as: its connection has carried
+  no other token, so every answer then is that session's. When another session follows, its
+  saved answers are taken back and the file deleted, and a launch deletes a file that belongs to
+  no one signed in, which finishes a sign-out the app did not live through.
+- The movies iOS app saves who is signed in and what Home draws first (`movies.titles.home`, the
+  libraries, the Collections row) in `saved-answers.<server>.json` in its caches folder, which
+  iOS keeps out of backups and may empty. With no data-protection entitlement, the file takes
+  iOS's default class, readable once the phone was unlocked after it started. A launch whose
+  shared keychain names another person on the server than the app last signed in as saves and
+  shows nothing and deletes the file: that person's password sign-in in the other app took the
+  phone and ended this app's session (D64), which the app still holds until the core says so. A
+  saved answer
+  shows for a week at most, inside the 7 to 14 days an artwork ticket admits. A launch opens Home
+  from it, and while it shows, Continue Watching and the billboard play without naming an
+  episode, so the server picks where the person is now; the downloads engine and app events wait
+  for the server's own answer. A launch whose server stays silent for 2.5 seconds opens on the
+  downloads when the phone holds any, and goes back to Home if the server answers while the list
+  is on screen.
