@@ -7,10 +7,51 @@ import {
   rmSync,
   writeFileSync,
 } from "node:fs";
-import { dirname, join } from "node:path";
+import { dirname, join, sep } from "node:path";
 
 import { onDisk } from "./disk";
-import type { DownloadDisk, Transfer } from "./disk";
+import type { DownloadDisk, DownloadsRoot, Transfer } from "./disk";
+
+/**
+ * The files and folders on this computer that carry iOS's exclude-from-backup flag, kept the way
+ * iOS keeps it: on the item itself, so a rename carries it, a file moved over another brings its
+ * own and drops the other's, and a deleted item loses it. iOS leaves an item out of a backup when
+ * the item or a folder above it carries the flag.
+ */
+export class BackupFlags {
+  readonly #flagged = new Set<string>();
+
+  /** Flags the item at the absolute path `path`. */
+  flag(path: string): void {
+    this.#flagged.add(path);
+  }
+
+  /** Whether a backup leaves out the item at the absolute path `path`. */
+  excluded(path: string): boolean {
+    return path === dirname(path)
+      ? this.#flagged.has(path)
+      : this.#flagged.has(path) || this.excluded(dirname(path));
+  }
+
+  /** The item at `from`, with everything in it, now lives at `to`. */
+  moved(from: string, to: string): void {
+    for (const path of this.#under(from)) {
+      this.#flagged.delete(path);
+      this.#flagged.add(to + path.slice(from.length));
+    }
+  }
+
+  /** The item at `path`, with everything in it, is gone. */
+  removed(path: string): void {
+    for (const flagged of this.#under(path)) this.#flagged.delete(flagged);
+  }
+
+  #under(path: string): ReadonlyArray<string> {
+    return [...this.#flagged].filter(
+      (flagged) => flagged === path || flagged.startsWith(path + sep),
+    );
+  }
+}
 
 type Change = "lands" | "cut" | "dead";
 
@@ -33,9 +74,16 @@ export class NodeDisk implements DownloadDisk {
   #listFailures = 0;
   readonly #hidden = new Set<string>();
   #renamesFail = false;
+  readonly #flags: BackupFlags;
 
-  constructor(root: string) {
+  constructor(root: string, flags: BackupFlags = new BackupFlags()) {
     this.#root = root;
+    this.#flags = flags;
+  }
+
+  /** Whether the app was killed: nothing more reaches the disk. */
+  get dead(): boolean {
+    return this.#dead;
   }
 
   /** Kills the app during its `nth` file change from now, 1 being the next. */
@@ -125,10 +173,12 @@ export class NodeDisk implements DownloadDisk {
       if (existsSync(this.#at(to))) {
         if (this.#change() !== "lands") throw new Error("killed");
         rmSync(this.#at(to));
+        this.#flags.removed(this.#at(to));
       }
 
       if (this.#change() !== "lands") throw new Error("killed");
       renameSync(this.#at(from), this.#at(to));
+      this.#flags.moved(this.#at(from), this.#at(to));
     });
 
   readonly rename: DownloadDisk["rename"] = (path, name) =>
@@ -143,12 +193,14 @@ export class NodeDisk implements DownloadDisk {
 
       if (existsSync(to)) throw new Error(`EEXIST: ${name} already exists`);
       renameSync(this.#at(path), to);
+      this.#flags.moved(this.#at(path), to);
     });
 
   readonly remove: DownloadDisk["remove"] = (path) =>
     onDisk("remove", path, () => {
       if (this.#change() !== "lands") throw new Error("killed");
       rmSync(this.#at(path), { recursive: true, force: true });
+      this.#flags.removed(this.#at(path));
     });
 
   readonly list: DownloadDisk["list"] = (path = "") =>
@@ -186,4 +238,46 @@ export class NodeDisk implements DownloadDisk {
   readonly resume: DownloadDisk["resume"] = () => null;
 
   readonly freeBytes: DownloadDisk["freeBytes"] = () => 64 * 1024 ** 3;
+}
+
+/**
+ * `downloads/` in a directory on this computer, holding a `<server>/<person>` folder per person,
+ * with the backup flags of everything in it. It hands out one `NodeDisk` per person, so a test can
+ * kill or fail that person's folder.
+ */
+export class NodeRoot implements DownloadsRoot {
+  readonly path: string;
+  readonly flags: BackupFlags;
+  readonly #disks = new Map<string, NodeDisk>();
+
+  /** `flags` carries the flags an earlier launch left, as the disk keeps them. */
+  constructor(path: string, flags: BackupFlags = new BackupFlags()) {
+    this.path = path;
+    this.flags = flags;
+  }
+
+  readonly excludeFromBackup: DownloadsRoot["excludeFromBackup"] = () =>
+    onDisk("excludeFromBackup", "", () => {
+      mkdirSync(this.path, { recursive: true });
+      this.flags.flag(this.path);
+    });
+
+  readonly people: DownloadsRoot["people"] = () =>
+    onDisk("list", "", () =>
+      (existsSync(this.path) ? readdirSync(this.path) : []).flatMap((server) =>
+        readdirSync(join(this.path, server)).map((person) => `${server}/${person}`),
+      ),
+    );
+
+  readonly disk = (person: string): NodeDisk => {
+    const known = this.#disks.get(person);
+
+    if (known !== undefined) return known;
+
+    const disk = new NodeDisk(join(this.path, ...person.split("/")), this.flags);
+
+    this.#disks.set(person, disk);
+
+    return disk;
+  };
 }

@@ -7,7 +7,7 @@ export default function SignOut() {
   return (
     <ConfirmSheet
       title="Sign out of Lar Movies?"
-      description="This iPhone will need to sign in again."
+      description="This iPhone will need to sign in again, and your downloads will be removed from it."
       action="Sign Out"
       onConfirm={signOut}
       closesItself

@@ -375,6 +375,19 @@ Old movies' Convex project, its SDK client, and its command registry were delete
   had a folder while that folder is there, never one whose removal it can see.
 - A kept download plays from its local file with no server call, and the progress it makes is sent
   with `movies.play.reportOffline` when the server answers.
+- Downloads stay out of iCloud and computer backups: every launch marks `downloads/` excluded,
+  which covers everything in it, including files written or renamed later, and the downloads an
+  earlier version kept. A file's own flag would not last: a replaced `.new` file loses it. The
+  flag comes from the VaultFiles module in `@media/mobile-core`, which the music app loads too.
+- Signing out removes the person's downloads from this iPhone. The app first records the
+  sign-out as a `signed-out+<stamp>` folder in the person's folder, then removes each download as
+  the person's removal does, waits up to 5 seconds for the core to acknowledge them while the
+  person is confirmed and the phone has a network, and then ends the session. A launch, whoever is
+  signed in or no one, finishes each recorded sign-out before any engine runs: it records the
+  removal of every download added before the stamp, deletes the files, and deletes the record.
+  The core takes a removal only from the person's own session, so a removal it has not
+  acknowledged waits in the person's folder, holding no files, until that person signs in here
+  again. Another person's folder is never read.
 
 ## Subtitle delay
 

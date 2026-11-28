@@ -15,12 +15,13 @@ export type DiskOperation =
   | "rename"
   | "remove"
   | "list"
-  | "createFolder";
+  | "createFolder"
+  | "excludeFromBackup";
 
 /** A file operation on the person's downloads folder failed, such as a write to a full disk. */
 export class DiskFailed extends Data.TaggedError("DiskFailed")<{
   readonly operation: DiskOperation;
-  /** The file or folder, relative to the person's downloads folder. */
+  /** The file or folder, relative to the person's downloads folder, or to `downloads/`. */
   readonly path: string;
   readonly cause: unknown;
 }> {}
@@ -105,4 +106,20 @@ export interface DownloadDisk {
   readonly resume: (state: DownloadPauseState, onProgress: TransferProgress) => Transfer | null;
   /** The phone's free space in bytes. */
   readonly freeBytes: () => number;
+}
+
+/**
+ * The folder that holds every person's downloads folder on this iPhone, `downloads/` under the
+ * documents folder, as a launch prepares it.
+ */
+export interface DownloadsRoot {
+  /**
+   * Marks `downloads/` excluded from backup, making it first. iOS leaves out of a backup
+   * everything in a folder so marked, written before or after, under any name a rename gives it.
+   */
+  readonly excludeFromBackup: () => Result.Result<void, DiskFailed>;
+  /** Each person's folder in it, as `<server>/<person>`. */
+  readonly people: () => Result.Result<ReadonlyArray<string>, DiskFailed>;
+  /** The person's folder at `<server>/<person>`. */
+  readonly disk: (person: string) => DownloadDisk;
 }

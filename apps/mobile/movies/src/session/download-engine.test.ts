@@ -16,9 +16,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { asMediaFileId, asTitleId } from "@/lib/catalog";
 import {
+  DOWNLOADS_FOLDER,
   RECORD_FILE,
   STORE_FILE,
   UNREADABLE_STORE_FILE,
+  accountFolder,
   itemPath,
   removalFolder,
   videoFile,
@@ -26,7 +28,8 @@ import {
 import type { DownloadDisk } from "@/lib/downloads/disk";
 import { DownloadEvent, EMPTY_STORE, reduce, serializeStore } from "@/lib/downloads/model";
 import type { Delivery, DownloadStore, FileId, NewDownload } from "@/lib/downloads/model";
-import { NodeDisk } from "@/lib/downloads/node-disk";
+import { NodeDisk, NodeRoot } from "@/lib/downloads/node-disk";
+import { markSignedOut, prepareDownloads } from "@/lib/downloads/storage";
 
 import { DownloadEngine } from "./download-engine";
 import type { EnginePlatform } from "./download-engine";
@@ -227,6 +230,9 @@ const positionsOf = (engine: DownloadEngine): ReadonlyArray<number> =>
   engine.getSnapshot().store.downloads.map((download) => download.positionMs);
 
 const names = (path: string): ReadonlyArray<string> => readdirSync(path).toSorted();
+
+const everythingUnder = (path: string): ReadonlyArray<string> =>
+  readdirSync(path, { recursive: true, encoding: "utf8" }).map((name) => join(path, name));
 
 const settle = (): Promise<void> =>
   new Promise((resolve) => {
@@ -1433,5 +1439,277 @@ describe("DownloadEngine", () => {
         }
       },
     );
+  });
+
+  describe("backups and signing out", () => {
+    const server = "http://media.test";
+
+    /** The folder of `userId`'s downloads in `downloads/`, as `<server>/<person>`. */
+    const personOf = (userId: string): string =>
+      accountFolder(server, userId).slice(DOWNLOADS_FOLDER.length + 1);
+
+    const ana = personOf("ana");
+    const ben = personOf("ben");
+
+    let downloads = "";
+    let anaCore = new FakeCore();
+    let benCore = new FakeCore();
+
+    beforeEach(() => {
+      downloads = join(root, DOWNLOADS_FOLDER);
+      anaCore = new FakeCore();
+      benCore = new FakeCore();
+    });
+
+    const folderOf = (person: string): string => join(downloads, ...person.split("/"));
+
+    /** What an earlier run left in `person`'s folder: `ids` ready to play, and a subtitle of each. */
+    const keepFor = (person: string, ids: ReadonlyArray<FileId>): void => {
+      keep(ids, folderOf(person));
+
+      for (const id of ids)
+        writeFileSync(join(folderOf(person), itemPath(id, "subtitle-en.vtt")), "WEBVTT");
+    };
+
+    const run = (person: string, onCore: FakeCore, disk: DownloadDisk): DownloadEngine => {
+      const engine = new DownloadEngine(onCore, {
+        disk,
+        mediaUrl: server,
+        settings: { wifiOnly: false },
+      });
+
+      launched.push(engine);
+
+      return engine;
+    };
+
+    /** A launch: prepares `downloads/`, then runs the engine of whoever is signed in, started. */
+    const relaunch = async (
+      signedIn: "nobody" | "ana" | "ben",
+      folders = new NodeRoot(downloads),
+    ): Promise<{ readonly folders: NodeRoot; readonly engine: DownloadEngine | null }> => {
+      prepareDownloads(folders);
+
+      if (signedIn === "nobody") return { folders, engine: null };
+
+      const engine =
+        signedIn === "ana"
+          ? run(ana, anaCore, folders.disk(ana))
+          : run(ben, benCore, folders.disk(ben));
+
+      engine.setNetwork({ connected: true, wifi: true });
+      engine.start();
+      await settle();
+
+      return { folders, engine };
+    };
+
+    /** The media files in `person`'s folder, recorded removals included. */
+    const mediaOf = (person: string): ReadonlyArray<string> =>
+      readdirSync(folderOf(person), { recursive: true, encoding: "utf8" })
+        .filter((path) => /\.(?:mp4|vtt)$/u.test(path))
+        .toSorted();
+
+    /** What records an unfinished removal or sign-out in `person`'s folder. */
+    const recordsOf = (person: string): ReadonlyArray<string> =>
+      names(folderOf(person)).filter((name) => /^(?:removal|signed-out)\+/u.test(name));
+
+    /** Ben's downloads, untouched: his \`stranger\` lists, plays from its file, and the core still counts it. */
+    const expectBenUntouched = (engine: DownloadEngine | null): void => {
+      expect(mediaOf(ben)).toStrictEqual([
+        itemPath(stranger, "subtitle-en.vtt"),
+        itemPath(stranger, videoFile("mp4")),
+      ]);
+      expect(benCore.calls.filter((call) => call.startsWith("remove:"))).toStrictEqual([]);
+      expect(benCore.listing()).toStrictEqual([stranger]);
+
+      if (engine !== null) expect(listed(engine)).toStrictEqual([`${stranger}:ready`]);
+    };
+
+    it("excludes every file of every download from backup, kept before the update or written after, through a removal's rename", async () => {
+      keepFor(ana, [dune, arrival]);
+      keepFor(ben, [stranger]);
+      const folders = new NodeRoot(downloads);
+
+      expect(
+        everythingUnder(downloads).filter((path) => folders.flags.excluded(path)),
+      ).toStrictEqual([]);
+
+      anaCore.serves = true;
+      anaCore.lists([dune, arrival]);
+      const { engine } = await relaunch("ana", folders);
+
+      engine?.add(newDownload(asMediaFileId("file-heat")));
+      engine?.played(dune, 60_000, 9_960_000);
+      await engine?.remove(arrival);
+      await settle();
+
+      const paths = everythingUnder(downloads);
+
+      expect(paths.some((path) => path.endsWith(RECORD_FILE))).toBe(true);
+      expect(paths.some((path) => path.includes("file-heat"))).toBe(true);
+      expect(paths.filter((path) => !folders.flags.excluded(path))).toStrictEqual([]);
+    });
+
+    it("removes a person's downloads at sign-out, from this iPhone and from the core's count, and leaves another person's", async () => {
+      keepFor(ana, [dune, arrival]);
+      keepFor(ben, [stranger]);
+      anaCore.lists([dune, arrival]);
+      benCore.lists([stranger]);
+      const { engine } = await relaunch("ana");
+
+      await engine?.signOut();
+      engine?.dispose();
+      await relaunch("nobody");
+
+      expect(mediaOf(ana)).toStrictEqual([]);
+      expect(recordsOf(ana)).toStrictEqual([]);
+      expect(anaCore.listing()).toStrictEqual([]);
+
+      const back = await relaunch("ana");
+
+      expect(back.engine === null ? null : listed(back.engine)).toStrictEqual([]);
+      expectBenUntouched((await relaunch("ben")).engine);
+    });
+
+    it.each(["out of reach", "not confirmed"] as const)(
+      "removes the files at a sign-out while the core is %s, and tells it once the person signs in again",
+      async (offline) => {
+        keepFor(ana, [dune, arrival]);
+        keepFor(ben, [stranger]);
+        anaCore.lists([dune, arrival]);
+        benCore.lists([stranger]);
+        anaCore.online = false;
+        const folders = new NodeRoot(downloads);
+        const engine = run(ana, anaCore, folders.disk(ana));
+
+        engine.setNetwork({ connected: true, wifi: true });
+
+        if (offline === "out of reach") engine.start();
+        await settle();
+        await engine.signOut();
+        engine.dispose();
+        await relaunch("nobody");
+
+        expect(mediaOf(ana)).toStrictEqual([]);
+        expect(recordsOf(ana).filter((name) => name.startsWith("signed-out+"))).toStrictEqual([]);
+        expect(recordsOf(ana)).toHaveLength(2);
+        expect(anaCore.listing()).toStrictEqual([dune, arrival]);
+
+        anaCore.online = true;
+        expectBenUntouched((await relaunch("ben")).engine);
+        expect(anaCore.listing()).toStrictEqual([dune, arrival]);
+
+        await relaunch("ana");
+
+        expect(anaCore.listing()).toStrictEqual([]);
+        expect(recordsOf(ana)).toStrictEqual([]);
+        expect(mediaOf(ana)).toStrictEqual([]);
+      },
+    );
+
+    it("keeps a download added after a sign-out it could not finish", async () => {
+      keepFor(ana, [dune]);
+      markSignedOut(new NodeDisk(folderOf(ana)), 5);
+      writeFileSync(
+        join(folderOf(ana), STORE_FILE),
+        serializeStore(
+          [
+            DownloadEvent.Added({ download: newDownload(dune), at: 1 }),
+            DownloadEvent.Added({ download: newDownload(arrival), at: 10 }),
+          ].reduce(reduce, EMPTY_STORE),
+        ),
+      );
+      const { engine } = await relaunch("ana");
+
+      expect(engine?.getSnapshot().store.downloads.map((download) => download.id)).toStrictEqual([
+        arrival,
+      ]);
+      expect(mediaOf(ana)).toStrictEqual([]);
+      expect(recordsOf(ana)).toStrictEqual([]);
+    });
+
+    it("keeps a download added after an unfinished sign-out stamped ahead of the phone's clock", async () => {
+      keepFor(ana, [dune]);
+      markSignedOut(new NodeDisk(folderOf(ana)), Date.now() + 86_400_000);
+      const folders = new NodeRoot(downloads);
+
+      folders.disk(ana).failRenames();
+      const { engine } = await relaunch("ana", folders);
+
+      expect(recordsOf(ana)).toHaveLength(1);
+
+      engine?.add(newDownload(arrival));
+      engine?.dispose();
+      const back = await relaunch("ana", new NodeRoot(downloads, folders.flags));
+
+      expect(
+        back.engine?.getSnapshot().store.downloads.map((download) => download.id),
+      ).toStrictEqual([arrival]);
+      expect(mediaOf(ana)).toStrictEqual([]);
+      expect(recordsOf(ana)).toStrictEqual([]);
+      expect(anaCore.calls).toContain(`remove:${dune}`);
+      expect(anaCore.calls).not.toContain(`remove:${arrival}`);
+    });
+
+    describe.each(["online", "offline"] as const)("killed while signing out %s", (reach) => {
+      it.each(Array.from({ length: 24 }, (_, index) => index + 1))(
+        "removes the person's downloads and no one else's after a kill at file change %i",
+        async (nth) => {
+          keepFor(ana, [dune, arrival]);
+          keepFor(ben, [stranger]);
+          anaCore.lists([dune, arrival]);
+          benCore.lists([stranger]);
+          const { folders, engine } = await relaunch("ana");
+
+          anaCore.online = reach === "online";
+          const disk = folders.disk(ana);
+
+          disk.killAt(nth);
+          await engine?.signOut();
+
+          // The server's sign-out runs only when the app lives past the engine's part.
+          const signedOut = !disk.dead;
+
+          engine?.dispose();
+
+          if (signedOut) prepareDownloads(folders);
+
+          const flags = folders.flags;
+
+          anaCore.online = true;
+
+          if (nth === 1) {
+            // Killed while recording the sign-out: nothing of it landed, and Ana is still signed in.
+            const back = await relaunch("ana", new NodeRoot(downloads, flags));
+
+            expect(back.engine === null ? null : listed(back.engine)).toStrictEqual([
+              `${dune}:ready`,
+              `${arrival}:ready`,
+            ]);
+            expect(anaCore.listing()).toStrictEqual([dune, arrival]);
+            expectBenUntouched((await relaunch("ben", new NodeRoot(downloads, flags))).engine);
+
+            return;
+          }
+
+          if (signedOut) {
+            await relaunch("nobody", new NodeRoot(downloads, flags));
+
+            expect(mediaOf(ana)).toStrictEqual([]);
+            expectBenUntouched((await relaunch("ben", new NodeRoot(downloads, flags))).engine);
+            expect(mediaOf(ana)).toStrictEqual([]);
+          }
+
+          const back = await relaunch("ana", new NodeRoot(downloads, flags));
+
+          expect(back.engine === null ? null : listed(back.engine)).toStrictEqual([]);
+          expect(mediaOf(ana)).toStrictEqual([]);
+          expect(recordsOf(ana)).toStrictEqual([]);
+          expect(anaCore.listing()).toStrictEqual([]);
+          expectBenUntouched((await relaunch("ben", new NodeRoot(downloads, flags))).engine);
+        },
+      );
+    });
   });
 });

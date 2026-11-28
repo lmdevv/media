@@ -2,15 +2,20 @@
  * Where downloads live on this iPhone, under the app's documents folder, which iOS keeps:
  * `downloads/<server>/<person>/` holds the store (`index.json`) and one folder per download with
  * its video, WebVTT subtitles, picture, and its own copy of its row (`download.json`). A download
- * being removed has its folder moved to `removal+<stamp>+<id>` until the core forgets it.
+ * being removed has its folder moved to `removal+<stamp>+<id>` until the core forgets it, and a
+ * person who signed out has a `signed-out+<stamp>` folder until every download added before it is
+ * removed. `downloads/` is excluded from backup, which covers everything in it.
  * Names come only from IDs, never from titles, so they are always safe file names.
  */
 
 const segment = (text: string): string => text.replace(/[^\w.-]/gu, "_");
 
+/** The folder of every person's downloads on every server, in the documents folder. */
+export const DOWNLOADS_FOLDER = "downloads";
+
 /** The folder of one person's downloads on one server, relative to the documents folder. */
 export const accountFolder = (mediaUrl: string, userId: string): string =>
-  `downloads/${segment(mediaUrl.replace(/^https?:\/\//u, "").replace(/\/+$/u, ""))}/${segment(userId)}`;
+  `${DOWNLOADS_FOLDER}/${segment(mediaUrl.replace(/^https?:\/\//u, "").replace(/\/+$/u, ""))}/${segment(userId)}`;
 
 /** The store's file name in the person's folder. */
 export const STORE_FILE = "index.json";
@@ -63,6 +68,22 @@ export const removalNamed = (name: string): RemovalName | null => {
   } catch {
     return null;
   }
+};
+
+const SIGNED_OUT_NAME = /^signed-out\+(?<stamp>\d+)$/u;
+
+/**
+ * The name of the folder that records the person signing out of this iPhone at `stamp`, in
+ * milliseconds since the epoch on the engine's clock: every download added before it is to be
+ * removed. Neither a download's folder nor a removal's folder has this form.
+ */
+export const signedOutFolder = (stamp: number): string => `signed-out+${String(stamp)}`;
+
+/** When the sign-out whose folder is `name` was recorded; null when `name` is not one. */
+export const signedOutNamed = (name: string): number | null => {
+  const stamp = Number(SIGNED_OUT_NAME.exec(name)?.groups?.["stamp"]);
+
+  return Number.isSafeInteger(stamp) ? stamp : null;
 };
 
 /** The video's file name, by its container, so AVPlayer reads it by its extension. */
