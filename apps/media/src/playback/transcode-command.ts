@@ -16,7 +16,7 @@
 import { AudioPlan, VideoPlan } from "./playback-decision.ts";
 import type { LogOwners } from "./transcode-recovery.ts";
 import { type VideoPipeline } from "./video-pipeline.ts";
-import { graphArgs, type RenderedVideo, renderVideo } from "./video-render.ts";
+import { graphArgs, type RenderedVideo, renderVideo, type RunFiles } from "./video-render.ts";
 import { Op } from "./video-ops.ts";
 
 /** Everything one ffmpeg run needs; built only from server-side state. */
@@ -37,6 +37,8 @@ export interface HlsCommand {
   readonly copiedAudioEnd: number | undefined;
   /** Planned segment starts at or after `from`; transcodes force keyframes there. */
   readonly segmentStarts: ReadonlyArray<number>;
+  /** The files a burned-in text subtitle is drawn from, written under the stream's folder. */
+  readonly files: RunFiles;
   /**
    * The planned segment start before `from`, a keyframe when video is copied; none at the first.
    */
@@ -86,7 +88,9 @@ const burnedSubtitle = (pipeline: VideoPipeline) => {
  * the graph, so trimming them comes first and they skip the rest of the work. ffmpeg appears to
  * repeat the subtitle's current image as it reads packets, so a caption that started earlier
  * survives trimming the subtitle's own frames to shortly before `from`. Untrimmed, memory peaked
- * near 4 GB at 1080p, apparently scaled frames waiting on the overlay.
+ * near 4 GB at 1080p, apparently scaled frames waiting on the overlay. A text subtitle is drawn
+ * from the ASS file and fonts the stream wrote (`files`) on the source's timeline: libass holds
+ * the whole script, so a cue that began before a seek shows at once, and the run reads once.
  */
 const rendered = (command: EncodeSource, video: Encode): RenderedVideo => {
   const seeked = subtitleReading(command).seeked;
@@ -96,6 +100,7 @@ const rendered = (command: EncodeSource, video: Encode): RenderedVideo => {
     stream: command.videoIndex,
     trimPicture: seeked ? command.from : undefined,
     trimSubtitle: seeked ? command.from - SUBTITLE_MARGIN : undefined,
+    files: command.files,
   });
 };
 
@@ -378,6 +383,7 @@ export const mp4CommandArgs = (command: Mp4Command): ReadonlyArray<string> => {
     audioCodec: command.audioCodec,
     copiedAudioEnd: undefined,
     segmentStarts: [],
+    files: {},
     previousStart: undefined,
   };
 

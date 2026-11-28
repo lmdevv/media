@@ -6,8 +6,10 @@ import {
   sourceOf,
 } from "../playback/video-pipeline.ts";
 import {
+  type Burn,
   type CapabilityKey,
   type GpuDomain,
+  Op,
   OUTPUT_CODECS,
   sdrTarget,
 } from "../playback/video-ops.ts";
@@ -17,7 +19,8 @@ const DEVICE = "/dev/dri/renderD128";
 
 /**
  * A snapshot in which every key some chain for `probe`'s video could use on `domains` (and the
- * CPU) is verified, to any output codec, burning a subtitle in or not, except the keys `refused`
+ * CPU) is verified, to any output codec, burning an image subtitle in or not, and a text one for a
+ * file that has a text track, except the keys `refused`
  * picks: what planning may use on a test server whose devices do everything.
  */
 export const verifiedFor = (
@@ -36,7 +39,44 @@ export const verifiedFor = (
   if (video === undefined) return bound;
   const source = sourceOf(video);
 
-  const keys = [undefined, 0].flatMap((stream) =>
+  const burns: ReadonlyArray<Burn | undefined> = [
+    undefined,
+    Op.BurnImage({
+      subtitle: {
+        input: 0,
+        stream: 0,
+        codec: "dvd_subtitle",
+        frame: {
+          memory: "cpu",
+          device: undefined,
+          colour: "sdr",
+          depth: 8,
+          pixelFormat: "pal8",
+          scan: "progressive",
+          width: source.width,
+          height: source.height,
+        },
+      },
+    }),
+  ];
+
+  // A text track's keys only for a file with one, as planning every burn costs each test.
+  const burning: ReadonlyArray<Burn | undefined> = probe.subtitles.some(
+    (track) => track.kind === "text",
+  )
+    ? [
+        ...burns,
+        Op.BurnText({
+          subtitle: {
+            codec: "ass",
+            style: "styled",
+            storage: { width: source.width, height: source.height },
+          },
+        }),
+      ]
+    : burns;
+
+  const keys = burning.flatMap((burn) =>
     Array.from(
       candidateKeys(
         source,
@@ -46,24 +86,7 @@ export const verifiedFor = (
           bounds: { width: source.width, height: source.height },
           cpuEncodeBounds: { width: 1920, height: 1080 },
           maxBitrate: undefined,
-          burnImage:
-            stream === undefined
-              ? undefined
-              : {
-                  input: 0,
-                  stream,
-                  codec: "dvd_subtitle",
-                  frame: {
-                    memory: "cpu",
-                    device: undefined,
-                    colour: "sdr",
-                    depth: 8,
-                    pixelFormat: "pal8",
-                    scan: "progressive",
-                    width: source.width,
-                    height: source.height,
-                  },
-                },
+          burn,
         },
         bound,
       ).keys(),

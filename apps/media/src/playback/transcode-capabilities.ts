@@ -35,7 +35,7 @@ import {
 import * as MediaConfig from "../media-config.ts";
 import * as MediaTools from "../media/media-tools.ts";
 import * as Inventory from "./capability-inventory.ts";
-import { PROBE_CLIPS } from "./probe-clips.ts";
+import { PROBE_CLIPS, PROBE_SCRIPT, readbackVerdict } from "./probe-clips.ts";
 import {
   attribute,
   Attribution,
@@ -647,24 +647,53 @@ const make = Effect.gen(function* () {
     });
 
     if (Option.isNone(input)) return Option.none<Probed>();
-    const args = probeCommandArgs(plan.pipeline, plan.input, input.value.file, input.value.stream);
+
+    const script = path.join(clipFolder, "probe-script.ass");
+
+    const readback =
+      plan.readback === undefined ? undefined : path.join(clipFolder, "readback.gray");
+
+    const args = probeCommandArgs(plan.pipeline, plan.input, input.value.file, input.value.stream, {
+      files: { subtitle: script },
+      readback,
+    });
+
     const run = priority === "warmup" ? tools.ffmpegInBackground : tools.ffmpeg;
     const started = yield* now;
     let probed: Probed | undefined;
 
     for (let attempt = 0; attempt < plan.runs && probed?.outcome !== "rejected"; attempt += 1) {
-      const result = yield* queue.withPermits(1)(
-        run(args, { timeout: probeTimeout }).pipe(Effect.result),
+      const { result, shown } = yield* queue.withPermits(1)(
+        Effect.gen(function* () {
+          if (readback !== undefined) yield* fs.remove(readback).pipe(Effect.ignore);
+
+          if (plan.readback === "glyph")
+            yield* fs.writeFileString(script, PROBE_SCRIPT).pipe(Effect.ignore);
+          const ran = yield* run(args, { timeout: probeTimeout }).pipe(Effect.result);
+
+          // A subtitle row that ran must also have drawn as it should: the picture tells.
+          const read =
+            plan.readback === undefined || readback === undefined || probeOutcome(ran) !== "passed"
+              ? undefined
+              : readbackVerdict(
+                  plan.readback,
+                  yield* fs.readFile(readback).pipe(Effect.orElseSucceed(() => new Uint8Array())),
+                );
+
+          return { result: ran, shown: read };
+        }),
       );
 
-      const outcome = probeOutcome(result);
+      const outcome = shown?.passed === false ? "rejected" : probeOutcome(result);
 
       probed = {
         outcome,
         detail: Result.isSuccess(result)
           ? outcome === "passed"
             ? ""
-            : "no frames came out"
+            : shown?.passed === false
+              ? `the picture read back shows no subtitle drawn as it must be: ${shown.detail}`
+              : "no frames came out"
           : outcome === "crashed"
             ? `ffmpeg died of ${result.failure.signal ?? "a signal"}`
             : firstLine(

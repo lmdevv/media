@@ -10,7 +10,7 @@ import {
   planVideo,
   type VideoIntent,
 } from "./video-pipeline.ts";
-import { type OutputCodec, sdrTarget, type SourceVideo } from "./video-ops.ts";
+import { ImplId, Op, type OutputCodec, sdrTarget, type SourceVideo } from "./video-ops.ts";
 
 const hlsCommandArgs = (command: HlsCommand): ReadonlyArray<string> => hlsCommand(command).args;
 
@@ -25,6 +25,7 @@ const command = (audio: AudioPlan, audioCodec: string): HlsCommand => ({
   audioCodec,
   copiedAudioEnd: undefined,
   segmentStarts: [1.4, 3.4],
+  files: {},
   previousStart: undefined,
   outputDirectory: "/tmp/stream/1",
 });
@@ -45,6 +46,10 @@ interface EncodeOptions {
   readonly burnSubtitle?: number;
   readonly subtitleCodec?: string;
   readonly device?: string;
+  /** Rows the plan keeps off, as a file or session whose GPU stage failed does. */
+  readonly without?: ReadonlyArray<string>;
+  /** A text track drawn in, styled (ASS) or plain, in place of an image subtitle. */
+  readonly burnText?: "styled" | "plain";
 }
 
 const DEVICES = { qsv: "/dev/dri/renderD128", vaapi: "/dev/dri/renderD129" } as const;
@@ -74,24 +79,34 @@ const encode = (domain: "qsv" | "vaapi" | "software", options: EncodeOptions) =>
     bounds: { width: 1920, height: 1080 },
     cpuEncodeBounds: { width: 1920, height: 1080 },
     maxBitrate: undefined,
-    burnImage:
-      options.burnSubtitle === undefined
-        ? undefined
-        : {
-            input: 0,
-            stream: options.burnSubtitle,
-            codec: options.subtitleCodec ?? "hdmv_pgs_subtitle",
-            frame: {
-              memory: "cpu",
-              device: undefined,
-              colour: "sdr",
-              depth: 8,
-              pixelFormat: "pal8",
-              scan: "progressive",
-              width: 1920,
-              height: 1080,
+    burn:
+      options.burnText !== undefined
+        ? Op.BurnText({
+            subtitle: {
+              codec: options.burnText === "styled" ? "ass" : "subrip",
+              style: options.burnText,
+              storage: { width: 1920, height: 1080 },
             },
-          },
+          })
+        : options.burnSubtitle === undefined
+          ? undefined
+          : Op.BurnImage({
+              subtitle: {
+                input: 0,
+                stream: options.burnSubtitle,
+                codec: options.subtitleCodec ?? "hdmv_pgs_subtitle",
+                frame: {
+                  memory: "cpu",
+                  device: undefined,
+                  colour: "sdr",
+                  depth: 8,
+                  pixelFormat: "pal8",
+                  scan: "progressive",
+                  width: 1920,
+                  height: 1080,
+                },
+              },
+            }),
   };
 
   const domains: ReadonlyArray<DomainBinding> =
@@ -102,7 +117,7 @@ const encode = (domain: "qsv" | "vaapi" | "software", options: EncodeOptions) =>
   const planned = planVideo(source, intent, {
     domains,
     verified: new Set(keys.keys()),
-    excluded: new Set(),
+    excluded: new Set((options.without ?? []).map(ImplId)),
   });
 
   if (Result.isFailure(planned)) throw new Error(JSON.stringify(planned.failure));
@@ -116,6 +131,17 @@ const dvd = (from: number) =>
     from,
     video: encode("software", { burnSubtitle: 3, subtitleCodec: "dvd_subtitle" }),
   });
+
+/**
+ * Where a GPU overlay puts a PGS canvas: fitted inside the picture at its own aspect and centred,
+ * each comma of the expressions escaped for the graph.
+ */
+const FITTED = [
+  "x=(main_w-overlay_w)/2",
+  "y=(main_h-overlay_h)/2",
+  "w=if(gte(overlay_iw*main_h\\,main_w*overlay_ih)\\,main_w\\,overlay_iw*main_h/overlay_ih)",
+  "h=if(gte(overlay_iw*main_h\\,main_w*overlay_ih)\\,overlay_ih*main_w/overlay_iw\\,main_h)",
+].join(":");
 
 const after = (args: ReadonlyArray<string>, flag: string): string | undefined =>
   args[args.indexOf(flag) + 1];
@@ -293,13 +319,21 @@ describe("hlsCommandArgs", () => {
       video: encode("qsv", { burnSubtitle: 3 }),
     });
 
-    expect([scaled, toneMapped, burned].map((run) => restatements(run.args))).toStrictEqual([
-      1, 1, 1,
-    ]);
-    // It is the scale's, then the tone map's, so a failure in it reads back to that step.
+    const burnedOnCpu = hlsCommand({
+      ...command(AudioPlan.Copy({ index: 1 }), "aac"),
+      video: encode("qsv", { burnSubtitle: 3, without: ["burn-image.qsv"] }),
+    });
+
+    expect(
+      [scaled, toneMapped, burned, burnedOnCpu].map((run) => restatements(run.args)),
+    ).toStrictEqual([1, 1, 1, 1]);
+    // It is the scale's, then the tone map's, then the overlay's, so a failure in it reads back to
+    // that step; with the overlay on the CPU, the scale's again, before the download.
     expect(scaled.owners?.filters.get("Parsed_fps_3")).toStrictEqual([1]);
     expect(toneMapped.owners?.filters.get("Parsed_fps_6")).toStrictEqual([2]);
-    expect(after(burned.args, "-filter_complex")?.split(";")[2]).not.toContain("fps=");
+    expect(after(burned.args, "-filter_complex")?.split(";")[2]).toContain("fps=source_fps[video]");
+    expect(burned.owners?.filters.get("Parsed_fps_6")).toStrictEqual([2]);
+    expect(after(burnedOnCpu.args, "-filter_complex")?.split(";")[2]).not.toContain("fps=");
 
     // Each step the restatement follows needs the filter from the build, so a build without it
     // loses those rows; the decoder and the encoder do not.
@@ -357,6 +391,14 @@ describe("hlsCommandArgs", () => {
     expect(
       after(interlacedRun("qsv", { burnSubtitle: 3 }).args, "-filter_complex")?.split(";")[0],
     ).toBe(
+      "[0:0]hwmap,format=qsv,vpp_qsv=deinterlace=advanced:rate=frame:w=1920:h=1080:format=nv12[picture]",
+    );
+    expect(
+      after(
+        interlacedRun("qsv", { burnSubtitle: 3, without: ["burn-image.qsv"] }).args,
+        "-filter_complex",
+      )?.split(";")[0],
+    ).toBe(
       "[0:0]hwmap,format=qsv,vpp_qsv=deinterlace=advanced:rate=frame:w=1920:h=1080:format=nv12,fps=source_fps,hwdownload,format=nv12[picture]",
     );
   });
@@ -395,7 +437,7 @@ describe("hlsCommandArgs", () => {
     expect(after(args, "-c:v")).toBe("libx264");
   });
 
-  it("draws a burned-in subtitle on the SDR picture at the output size, on a GPU between transfers", () => {
+  it("draws a burned-in subtitle on the SDR picture at the output size, the PGS canvas fitted", () => {
     const software = hlsCommandArgs({
       ...command(AudioPlan.Copy({ index: 1 }), "aac"),
       video: encode("software", { burnSubtitle: 3 }),
@@ -405,12 +447,23 @@ describe("hlsCommandArgs", () => {
     expect(after(software, "-filter_complex")).toBe(
       [
         "[0:0]scale=1920:1080:flags=bicubic[picture]",
-        "[0:3]scale=1920:1080[subtitle]",
-        "[picture][subtitle]overlay=eof_action=pass:repeatlast=0,format=yuv420p[video]",
+        "[0:3]scale=1920:1080:force_original_aspect_ratio=decrease[subtitle]",
+        "[picture][subtitle]overlay=x=(main_w-overlay_w)/2:y=(main_h-overlay_h)/2:eof_action=pass:repeatlast=0,format=yuv420p[video]",
       ].join(";"),
     );
     expect(after(software, "-map")).toBe("[video]");
 
+    // A DVD canvas shares the picture's pixel grid, so it is stretched over it, as before.
+    expect(after(dvd(1.4), "-filter_complex")).toBe(
+      [
+        "[0:0]scale=1920:1080:flags=bicubic[picture]",
+        "[0:3]scale=1920:1080[subtitle]",
+        "[picture][subtitle]overlay=eof_action=pass:repeatlast=0,format=yuv420p[video]",
+      ].join(";"),
+    );
+  });
+
+  it("draws an image subtitle on the GPU, its canvas decoded on the CPU and uploaded", () => {
     const vaapi = hlsCommandArgs({
       ...command(AudioPlan.Copy({ index: 1 }), "aac"),
       videoCodec: "hevc",
@@ -420,15 +473,54 @@ describe("hlsCommandArgs", () => {
     expect(vaapi).toContain("-hwaccel");
     expect(after(vaapi, "-filter_complex")).toBe(
       [
-        "[0:0]scale_vaapi=w=1920:h=1080:format=p010,tonemap_vaapi=format=nv12:p=bt709:t=bt709:m=bt709,hwdownload,format=nv12[picture]",
-        "[0:3]scale=1920:1080[subtitle]",
-        "[picture][subtitle]overlay=eof_action=pass:repeatlast=0,format=nv12,hwupload[video]",
+        "[0:0]scale_vaapi=w=1920:h=1080:format=p010,tonemap_vaapi=format=nv12:p=bt709:t=bt709:m=bt709[picture]",
+        "[0:3]format=bgra,hwupload[subtitle]",
+        `[picture][subtitle]overlay_vaapi=${FITTED}:eof_action=pass:repeatlast=0[video]`,
       ].join(";"),
     );
 
     const qsv = hlsCommandArgs({
       ...command(AudioPlan.Copy({ index: 1 }), "aac"),
-      video: encode("qsv", { burnSubtitle: 3 }),
+      video: encode("qsv", { burnSubtitle: 3, subtitleCodec: "dvd_subtitle" }),
+    });
+
+    expect(after(qsv, "-filter_complex")).toBe(
+      [
+        "[0:0]hwmap,format=qsv,vpp_qsv=w=1920:h=1080:format=nv12[picture]",
+        "[0:3]format=bgra,hwupload[subtitle]",
+        "[picture][subtitle]overlay_qsv=w=main_w:h=main_h:eof_action=pass:repeatlast=0,fps=source_fps[video]",
+      ].join(";"),
+    );
+  });
+
+  it("draws an image subtitle on the CPU between transfers where the GPU overlay is kept off", () => {
+    const vaapi = hlsCommandArgs({
+      ...command(AudioPlan.Copy({ index: 1 }), "aac"),
+      videoCodec: "hevc",
+      video: encode("vaapi", {
+        codec: "hevc",
+        bitDepth: 10,
+        burnSubtitle: 3,
+        toneMap: true,
+        without: ["burn-image.vaapi"],
+      }),
+    });
+
+    expect(after(vaapi, "-filter_complex")).toBe(
+      [
+        "[0:0]scale_vaapi=w=1920:h=1080:format=p010,tonemap_vaapi=format=nv12:p=bt709:t=bt709:m=bt709,hwdownload,format=nv12[picture]",
+        "[0:3]scale=1920:1080:force_original_aspect_ratio=decrease[subtitle]",
+        "[picture][subtitle]overlay=x=(main_w-overlay_w)/2:y=(main_h-overlay_h)/2:eof_action=pass:repeatlast=0,format=nv12,hwupload[video]",
+      ].join(";"),
+    );
+
+    const qsv = hlsCommandArgs({
+      ...command(AudioPlan.Copy({ index: 1 }), "aac"),
+      video: encode("qsv", {
+        burnSubtitle: 3,
+        subtitleCodec: "dvd_subtitle",
+        without: ["burn-image.qsv"],
+      }),
     });
 
     expect(after(qsv, "-filter_complex")).toBe(
@@ -438,6 +530,48 @@ describe("hlsCommandArgs", () => {
         "[picture][subtitle]overlay=eof_action=pass:repeatlast=0,format=nv12,hwupload=extra_hw_frames=64,format=qsv[video]",
       ].join(";"),
     );
+  });
+
+  it("draws a text subtitle with libass from the files the run names, plain text in one style", () => {
+    const files = { subtitle: "/tmp/stream/a b/subtitle.ass", fonts: "/tmp/stream/a b/fonts" };
+
+    const styled = hlsCommandArgs({
+      ...command(AudioPlan.Copy({ index: 1 }), "aac"),
+      video: encode("software", { burnText: "styled" }),
+      files,
+    });
+
+    expect(after(styled, "-vf")).toBe(
+      "scale=1920:1080:flags=bicubic,subtitles=filename=/tmp/stream/a\\\\\\ b/subtitle.ass:fontsdir=/tmp/stream/a\\\\\\ b/fonts:original_size=1920x1080,format=yuv420p",
+    );
+    // libass holds the whole script, so a seek reads the file once, from the seek.
+    expect(styled).not.toContain("-canvas_size");
+
+    const plain = hlsCommandArgs({
+      ...command(AudioPlan.Copy({ index: 1 }), "aac"),
+      video: encode("software", { burnText: "plain" }),
+      files: { subtitle: files.subtitle },
+    });
+
+    expect(after(plain, "-vf")).toContain(
+      "subtitles=filename=/tmp/stream/a\\\\\\ b/subtitle.ass:original_size=1920x1080:force_style=FontName=DejaVu\\\\\\ Sans\\,FontSize=18\\,",
+    );
+
+    const qsv = hlsCommandArgs({
+      ...command(AudioPlan.Copy({ index: 1 }), "aac"),
+      video: encode("qsv", { burnText: "styled" }),
+      files,
+    });
+
+    expect(after(qsv, "-vf")).toMatch(
+      /^hwmap,format=qsv,vpp_qsv=w=1920:h=1080:format=nv12,fps=source_fps,hwdownload,format=nv12,subtitles=filename=.*,format=nv12,hwupload=extra_hw_frames=64,format=qsv$/u,
+    );
+    expect(() =>
+      hlsCommandArgs({
+        ...command(AudioPlan.Copy({ index: 1 }), "aac"),
+        video: encode("software", { burnText: "styled" }),
+      }),
+    ).toThrow("A text subtitle is drawn only from the ASS file its run names");
   });
 
   it("reads a burned-in DVD subtitle on its canvas, once from the start", () => {

@@ -20,7 +20,7 @@ import {
   planVideo,
   type VideoIntent,
 } from "./video-pipeline.ts";
-import { capabilityKey, ImplId, sdrTarget, type SourceVideo } from "./video-ops.ts";
+import { type Burn, capabilityKey, ImplId, Op, sdrTarget, type SourceVideo } from "./video-ops.ts";
 
 const AT = 1_760_000_000_000;
 
@@ -106,7 +106,7 @@ describe("the stage summary", () => {
       bounds: { width: 1920, height: 1080 },
       cpuEncodeBounds: { width: 1920, height: 1080 },
       maxBitrate: undefined,
-      burnImage: undefined,
+      burn: undefined,
     };
 
     const bound: CapabilitySnapshot = {
@@ -138,5 +138,83 @@ describe("the stage summary", () => {
       { op: "deinterlace", domain: "cpu", impl: "deinterlace.cpu" },
       { op: "move", domain: "vaapi", impl: "move.cpu>vaapi", move: { from: "cpu", to: "vaapi" } },
     ]);
+  });
+
+  it("names a subtitle stage, prepared on the CPU and drawn on the GPU, or drawn on the CPU", () => {
+    const source: SourceVideo = {
+      codec: "h264",
+      pixelFormat: "yuv420p",
+      depth: 8,
+      colour: "sdr",
+      scan: "progressive",
+      width: 1920,
+      height: 1080,
+    };
+
+    const image = Op.BurnImage({
+      subtitle: {
+        input: 0,
+        stream: 3,
+        codec: "hdmv_pgs_subtitle",
+        frame: {
+          memory: "cpu",
+          device: undefined,
+          colour: "sdr",
+          depth: 8,
+          pixelFormat: "pal8",
+          scan: "progressive",
+          width: 1920,
+          height: 1080,
+        },
+      },
+    });
+
+    const text = Op.BurnText({
+      subtitle: { codec: "ass", style: "styled", storage: { width: 1920, height: 1080 } },
+    });
+
+    const stagesOf = (burn: Burn, excluded: ReadonlyArray<string>) => {
+      const intent: VideoIntent = {
+        targets: [sdrTarget("h264")],
+        frameRate: 24,
+        bounds: { width: 1920, height: 1080 },
+        cpuEncodeBounds: { width: 1920, height: 1080 },
+        maxBitrate: undefined,
+        burn,
+      };
+
+      const bound: CapabilitySnapshot = {
+        domains: [{ domain: "qsv", device: "/dev/dri/renderD128" }],
+        verified: new Set(),
+        excluded: new Set(),
+      };
+
+      const planned = planVideo(source, intent, {
+        ...bound,
+        verified: new Set(candidateKeys(source, intent, bound).keys()),
+        excluded: new Set(excluded.map((id) => ImplId(id))),
+      });
+
+      if (Result.isFailure(planned)) throw new Error(JSON.stringify(planned.failure));
+
+      return summaryOf(VideoPlan.Encode({ intent, ...planned.success }), [], 1).stages;
+    };
+
+    assert.deepStrictEqual(stagesOf(image, [])[2], {
+      op: "burn-image",
+      domain: "qsv",
+      impl: "burn-image.qsv",
+      move: { from: "cpu", to: "qsv" },
+    });
+    assert.deepStrictEqual(stagesOf(image, ["burn-image.qsv"]).slice(2, 5), [
+      { op: "move", domain: "qsv", impl: "move.qsv>cpu", move: { from: "qsv", to: "cpu" } },
+      { op: "burn-image", domain: "cpu", impl: "burn-image.cpu" },
+      { op: "move", domain: "qsv", impl: "move.cpu>qsv", move: { from: "cpu", to: "qsv" } },
+    ]);
+    assert.deepStrictEqual(stagesOf(text, [])[3], {
+      op: "burn-text",
+      domain: "cpu",
+      impl: "burn-text.cpu",
+    });
   });
 });

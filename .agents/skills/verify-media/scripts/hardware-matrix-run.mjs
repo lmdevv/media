@@ -178,6 +178,7 @@ const prepareGenerated = async (name, fixture) => {
   let made = false;
   if (!existsSync(file)) {
     mkdirSync(folder, { recursive: true });
+    for (const [named, make] of Object.entries(generate.files ?? {})) writeFileSync(join(folder, named), make());
     say(`generating ${name} with ${flags.image}'s ffmpeg`);
     const result = docker([
       "run",
@@ -545,6 +546,41 @@ const analyseBurn = (obs, found, params, dir) => {
   return { shown: compare(params.shownAt), hidden: compare(params.hiddenAt) };
 };
 
+// A value as one option of a filter inside a graph, escaped for both of ffmpeg's parsers, as the
+// media service escapes it (`filterValue`).
+const filterValue = (value) =>
+  value.replace(/[\\':\s]/g, (character) => `\\${character}`).replace(/[\\'[\],;\s]/g, (character) => `\\${character}`);
+
+// The text each fetch shows a second into it, against the source frame at that time and the
+// reference: the side's own libass drawing the file's own track and attached fonts on that frame
+// at the output's size, as the service's CPU row does. Writes the three as PNGs beside the cell.
+const analyseText = (obs, found, params, dir) => {
+  const text = {};
+  for (const fetch of [obs.fetches.start, obs.fetches.seek]) {
+    if (!fetch?.ok || fetch.media === undefined) continue;
+    const { width, height } = fetch.media;
+    const at = spanOf(fetch).from + 1;
+    const raw = ["-frames:v", "1", "-pix_fmt", "rgb24", "-f", "rawvideo", "-"];
+    const output = tool("ffmpeg", ["-v", "error", "-nostdin", "-copyts", "-i", fetch.file, "-map", "0:v:0", "-vf", `select='gte(t\\,${at})'`, "-fps_mode", "passthrough", ...raw], { encoding: "buffer" });
+    const read = ["-v", "error", "-nostdin", "-ss", String(at), "-copyts", "-i", found.path, "-map", "0:v:0"];
+    const source = inContainer(["ffmpeg", ...read, "-vf", `scale=${width}:${height}`, ...raw], { encoding: "buffer" });
+    const drawing = `subtitles=filename=${filterValue(found.path)}:si=0:original_size=${found.source?.width}x${found.source?.height}`;
+    const reference = inContainer(["ffmpeg", ...read, "-vf", `scale=${width}:${height},${drawing}`, ...raw], { encoding: "buffer" });
+    const size = width * height * 3;
+    const failed = [["output", output], ["source", source], ["reference", reference]].find(([, run]) => run.status !== 0 || run.stdout.length < size);
+    if (failed !== undefined) {
+      text[fetch.name] = { at, error: `the ${failed[0]} frame: ${failed[1].stderr?.toString().trim().split("\n").at(-1) ?? "no picture"}` };
+      continue;
+    }
+    for (const [named, run] of [["output", output], ["source", source], ["reference", reference]]) {
+      tool("ffmpeg", ["-v", "error", "-nostdin", "-y", "-f", "rawvideo", "-pix_fmt", "rgb24", "-s", `${width}x${height}`, "-i", "-", "-frames:v", "1", join(dir, `${named}-${at}.png`)], { input: run.stdout.subarray(0, size) });
+    }
+    text[fetch.name] = { at, ...Matrix.measureText(output.stdout, source.stdout, reference.stdout, width, params.region) };
+  }
+  writeFileSync(join(dir, "text.json"), `${JSON.stringify(text, null, 2)}\n`);
+  return text;
+};
+
 // --------------------------------------------------------------------------------------- a cell
 
 const measure = async (cell, found, health, dir) => {
@@ -591,6 +627,7 @@ const measure = async (cell, found, health, dir) => {
     if (spec.check === "progressive") obs.analysis.idet = analyseProgressive(obs, found, dir);
     if (spec.check === "picture") obs.analysis.picture = analysePicture(obs, found, spec, dir);
     if (spec.check === "burned-in") obs.analysis.burn = analyseBurn(obs, found, spec, dir);
+    if (spec.check === "burned-text") obs.analysis.text = analyseText(obs, found, spec, dir);
   }
   return obs;
 };

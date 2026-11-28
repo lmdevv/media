@@ -11,13 +11,15 @@ import { Context, Duration, Effect, FileSystem, Layer, Option, Path } from "effe
 import type { Redacted } from "effect";
 
 import * as MediaConfig from "../media-config.ts";
-import { subtitleTracks } from "../subtitles/subtitle-tracks.ts";
+import { TextSource, textStyle } from "../subtitles/burned-text.ts";
+import { sidecarTrackId, subtitleTracks } from "../subtitles/subtitle-tracks.ts";
 import * as FileResolver from "./file-resolver.ts";
 import { resolveInsideRoots } from "./file-resolver.ts";
 import { sourceScope } from "./capability-inventory.ts";
 import * as KeyframeIndex from "./keyframe-index.ts";
 import {
   AudioPlan,
+  BurnRequest,
   decidePlayback,
   decideWithin,
   type DecisionOptions,
@@ -73,14 +75,43 @@ const reachesEncode = (plan: PlaybackPlan): boolean =>
       reason === "no-transcode-target" || reason === "hdr-tone-mapping-requires-hardware",
   });
 
-const burnedStreamIndex = (
-  file: FileResolver.ResolvedMediaFile,
-  trackId: string | undefined,
-): number | undefined => {
-  if (trackId === undefined) return undefined;
-  const track = subtitleTracks(file).find((candidate) => candidate.id === trackId);
+/** What drawing a subtitle track in asks of the decision, and of the stream for a text track. */
+interface Burning {
+  readonly request: BurnRequest;
+  readonly text: StreamSessions.StartRequest["burnText"];
+}
 
-  return track?.kind === "bitmap" && track.source === "embedded" ? Number(track.id.slice(1)) : -1;
+/**
+ * The subtitle track `trackId` names, as a burn: an embedded image track by its stream index, an
+ * embedded or sidecar text track libass draws, or refused when the file has no such track.
+ */
+const burningOf = (file: FileResolver.CheckedMediaFile, trackId: string): Burning => {
+  const track = subtitleTracks(file).find((candidate) => candidate.id === trackId);
+  const refused: Burning = { request: BurnRequest.Refused(), text: undefined };
+
+  if (track === undefined) return refused;
+
+  if (track.source === "embedded") {
+    const stream = Number(track.id.slice(1));
+
+    if (track.kind === "bitmap") return { request: BurnRequest.Image({ stream }), text: undefined };
+    const style = textStyle(track.codec);
+
+    return {
+      request: BurnRequest.Text({ subtitle: { codec: track.codec, style } }),
+      text: { text: TextSource.Embedded({ stream }), style },
+    };
+  }
+
+  const sidecar = file.subtitles.find((candidate) => sidecarTrackId(candidate.path) === trackId);
+
+  if (sidecar === undefined) return refused;
+  const style = textStyle(sidecar.format);
+
+  return {
+    request: BurnRequest.Text({ subtitle: { codec: sidecar.format, style } }),
+    text: { text: TextSource.Sidecar({ path: sidecar.readPath }), style },
+  };
 };
 
 /**
@@ -144,7 +175,11 @@ const make = Effect.gen(function* () {
     );
 
     yield* Effect.annotateCurrentSpan({ fileId: grant.fileId, sessionId: grant.sessionId });
-    const burnSubtitle = burnedStreamIndex(file, request.burnInSubtitle);
+
+    const burning =
+      request.burnInSubtitle === undefined ? undefined : burningOf(file, request.burnInSubtitle);
+
+    const burnSubtitle = burning?.request;
 
     const source = file.probe.video;
 
@@ -296,7 +331,7 @@ const make = Effect.gen(function* () {
           audioIndex: request.audioStreamIndex,
           startSeconds,
           quality: request.quality,
-          burnSubtitle,
+          burnText: burning?.text,
           keyframes: keyframeTimes,
         })
         .pipe(Effect.map((started) => ({ started, chosen })));

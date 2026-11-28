@@ -33,6 +33,8 @@ import {
   audioFrameSeconds,
   frameTiming,
   judgeFrames,
+  judgeText,
+  measureText,
   soundFrom,
   renderGrid,
   ROWS,
@@ -829,5 +831,60 @@ describe("verify-media.sh hardware", () => {
     const result = await onSide("cmd_hardware_matrix --side after");
     assert.equal(result.status, 1);
     assert.match(result.stderr, /the after side is not ready; run `up --side after` first/);
+  });
+});
+
+describe("the text check", () => {
+  const width = 200;
+  const height = 100;
+  const region = { x: 10, y: 10, width: 180, height: 80 };
+  const orange = [255, 128, 0];
+
+  /** A picture of the source's colour bars with `boxes` painted over it in `colour`. */
+  const picture = (boxes, colour = orange) => {
+    const rgb = Buffer.alloc(width * height * 3);
+    for (let y = 0; y < height; y += 1) {
+      for (let x = 0; x < width; x += 1) rgb.set(x < 100 ? [255, 0, 0] : [0, 255, 0], (y * width + x) * 3);
+    }
+    for (const box of boxes) {
+      for (let y = box.top; y <= box.bottom; y += 1) {
+        for (let x = box.left; x <= box.right; x += 1) rgb.set(colour, (y * width + x) * 3);
+      }
+    }
+    return rgb;
+  };
+
+  const block = { left: 40, top: 40, right: 140, bottom: 70 };
+  const source = picture([]);
+  const reference = picture([block]);
+  const params = { region, place: 2, colour: 12, edge: 16, minFill: 0.9 };
+  const frame = (output, drawn = reference) => ({ start: { at: 1, ...measureText(output, source, drawn, width, region) } });
+
+  test("passes the text the reference draws, where and as it draws it", () => {
+    const result = judgeText(frame(reference), params);
+    assert.equal(result.ok, true, result.evidence);
+    assert.match(result.evidence, /box 40,40-140,70 \(reference 40,40-140,70\), colour 255\/128\/0/);
+  });
+
+  test("fails a picture with no subtitle as a missing stage, and one it could not measure", () => {
+    const missing = judgeText(frame(source), params);
+    assert.equal(missing.ok, false);
+    assert.equal(missing.class, undefined);
+    assert.match(missing.evidence, /no subtitle drawn/);
+    assert.match(judgeText(undefined, params).evidence, /could not measure/);
+    assert.match(judgeText({ start: { at: 1, error: "the output frame: no picture" } }, params).evidence, /could not measure/);
+  });
+
+  test("fails text drawn elsewhere, in another colour, in another font, or with a halo", () => {
+    const moved = { left: 44, top: 40, right: 144, bottom: 70 };
+    assert.match(judgeText(frame(picture([moved])), params).evidence, /misplaced by 4 px/);
+    assert.match(judgeText(frame(picture([block], [255, 160, 40])), params).evidence, /off colour/);
+    const letters = picture([{ left: 40, top: 40, right: 45, bottom: 70 }, { left: 135, top: 40, right: 140, bottom: 70 }]);
+    assert.match(judgeText(frame(letters, letters), params).evidence, /not drawn in its own font/);
+    const halo = picture([{ left: 38, top: 38, right: 142, bottom: 72 }], [0, 0, 0]);
+    for (let y = block.top; y <= block.bottom; y += 1) {
+      for (let x = block.left; x <= block.right; x += 1) halo.set(orange, (y * width + x) * 3);
+    }
+    assert.match(judgeText(frame(halo), params).evidence, /misplaced|edges differ/);
   });
 });

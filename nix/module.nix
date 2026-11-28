@@ -47,6 +47,17 @@ let
   coreDataDir = "${cfg.dataDir}/core";
   secretsDir = "${coreDataDir}/secrets";
   serverDataDir = "${cfg.dataDir}/server";
+  # The fonts libass finds when ffmpeg burns in a text subtitle: DejaVu (the Bitstream Vera
+  # licence, free to use and redistribute) as the fallback, with its cache built here, since
+  # ffmpeg's user can write none and fontconfig otherwise logs an error for every run.
+  fontsConf = pkgs.writeText "media-fonts.conf" ''
+    <?xml version="1.0"?>
+    <!DOCTYPE fontconfig SYSTEM "urn:fontconfig:fonts.dtd">
+    <fontconfig>
+      <dir>${pkgs.dejavu_fonts}/share/fonts</dir>
+      <cachedir>${pkgs.makeFontsCache { fontDirectories = [ pkgs.dejavu_fonts ]; }}</cachedir>
+    </fontconfig>
+  '';
   convexDataDir = "${coreDataDir}/convex";
   # Root's folders. Parents first, so each is made with its own mode rather than as a folder on
   # the way to another. The core's database and secrets stay root's, and setup writes its records
@@ -1178,6 +1189,7 @@ in
         LOG_MAX_MB = toString cfg.logMaxMb;
         FFMPEG_PATH = lib.getExe' cfg.ffmpegPackage "ffmpeg";
         FFPROBE_PATH = lib.getExe' cfg.ffmpegPackage "ffprobe";
+        FONTCONFIG_FILE = fontsConf;
       }
       // lib.optionalAttrs (cfg.otlpEndpoint != null) {
         OTEL_EXPORTER_OTLP_ENDPOINT = cfg.otlpEndpoint;

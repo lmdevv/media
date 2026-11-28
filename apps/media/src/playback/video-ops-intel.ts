@@ -1,14 +1,16 @@
 /**
  * The rows of Intel's two GPU APIs, written for any Intel GPU and for AMD's VA-API: Quick Sync
  * (`qsv`, oneVPL derived from a VA-API device) and VA-API (`vaapi`). Each decodes, deinterlaces,
- * scales, tone-maps, and encodes H.264, HEVC, and AV1 (a row per codec) on the device, and moves
- * frames to and from CPU memory in NV12 or P010. Which of these a device does is evidence, never
- * assumed: a row only says what it may try.
+ * scales, tone-maps, draws an image subtitle, and encodes H.264, HEVC, and AV1 (a row per codec)
+ * on the device, and moves frames to and from CPU memory in NV12 or P010. Which of these a device
+ * does is evidence, never assumed: a row only says what it may try.
  */
 import { type Level, levelOf } from "./output-levels.ts";
 import { DECODE_CLIPS, PROBE_CLIPS } from "./probe-clips.ts";
 import {
+  BURN_IMAGE_PROBES,
   type BuildFeature,
+  canvasFit,
   DEINTERLACE_PROBES,
   deinterlaceVariant,
   type Domain,
@@ -299,6 +301,73 @@ const toneMapQsv: OpImpl<"ToneMap"> = {
 };
 
 /**
+ * Where an overlay on a GPU puts the subtitle's canvas, uploaded at its own size, as expressions of
+ * the picture's size (`main_w`) and the canvas's (`overlay_iw`): stretched over the picture, or
+ * fitted inside it at its own aspect and centred (`canvasFit`). On an Arc A380, under ffmpeg 7.1
+ * and 9, Quick Sync's and VA-API's scaling put each band edge of a 320x240 canvas over a 640x360
+ * picture on the same column as the CPU's `scale` and `overlay`.
+ */
+const overlayPlace = (codec: string): ReadonlyArray<readonly [string, string]> =>
+  canvasFit(codec) === "fit"
+    ? [
+        ["x", "(main_w-overlay_w)/2"],
+        ["y", "(main_h-overlay_h)/2"],
+        ["w", "if(gte(overlay_iw*main_h,main_w*overlay_ih),main_w,overlay_iw*main_h/overlay_ih)"],
+        ["h", "if(gte(overlay_iw*main_h,main_w*overlay_ih),overlay_ih*main_w/overlay_iw,main_h)"],
+      ]
+    : [
+        ["w", "main_w"],
+        ["h", "main_h"],
+      ];
+
+/**
+ * An image subtitle drawn on `domain`'s SDR NV12 surfaces by `overlay`, so the picture never leaves
+ * the device: the subtitle's own frames, small and sparse, are decoded on the CPU into BGRA at the
+ * canvas's size, uploaded, and scaled and blended on the device. Both
+ * overlays take BGRA with straight alpha per pixel, as ffmpeg hands image subtitles to filters:
+ * under ffmpeg 7.1 and 9 on an Arc A380, a band of white at half opacity over gray came out halfway
+ * between the two (193 for 191.5), and a premultiplied one gray. Between captions and before the
+ * first, ffmpeg repeats the subtitle's last frame as the picture advances, so the overlay never
+ * waits on the sparse stream; after its end the picture passes on alone. Those repeats run ahead
+ * of the picture while it decodes, and after a seek by the second of subtitle frames kept before
+ * the picture starts (`transcode-command.ts`), each holding an uploaded surface until the overlay
+ * pairs it: the upload's pool grows to that, where a fixed one of 16 surfaces ran out (ENOMEM) on
+ * a seek into a DVD caption and at the end of the file, under both builds.
+ */
+const burnImageOn = (
+  domain: GpuDomain,
+  overlay: "overlay_qsv" | "overlay_vaapi",
+): OpImpl<"BurnImage"> => ({
+  id: ImplId(`burn-image.${domain}`),
+  op: "BurnImage",
+  on: domain,
+  takes: domain,
+  needs: () => [`filter:${overlay}`, "filter:hwupload"],
+  variant: (op, frame) =>
+    frame.colour === "sdr" && frame.pixelFormat === "nv12" && op.subtitle.frame.memory === "cpu"
+      ? "bitmap/nv12"
+      : undefined,
+  output: (_, frame) => frame,
+  render: (op) => ({
+    ...NOTHING,
+    filters: [
+      filter(
+        overlay,
+        ...overlayPlace(op.subtitle.codec),
+        ["eof_action", "pass"],
+        ["repeatlast", "0"],
+      ),
+    ],
+    side: {
+      input: op.subtitle.input,
+      stream: op.subtitle.stream,
+      calls: [filter("format", "bgra"), filter("hwupload")],
+    },
+  }),
+  probes: BURN_IMAGE_PROBES,
+});
+
+/**
  * One codec's GPU encoder: its name, the options before and after the bitrate, and how it states a
  * level the plan has.
  */
@@ -500,6 +569,7 @@ export const INTEL_ROWS: ReadonlyArray<Row> = [
   row(deinterlaceQsv),
   row(scaleQsv),
   row(toneMapQsv),
+  row(burnImageOn("qsv", "overlay_qsv")),
   ...encodeQsv,
   row(uploadTo("qsv", [["extra_hw_frames", "64"]], "qsv")),
   row(downloadFrom("qsv")),
@@ -507,6 +577,7 @@ export const INTEL_ROWS: ReadonlyArray<Row> = [
   row(deinterlaceVaapi),
   row(scaleVaapi),
   row(toneMapVaapi),
+  row(burnImageOn("vaapi", "overlay_vaapi")),
   ...encodeVaapi,
   row(uploadTo("vaapi", [], undefined)),
   row(downloadFrom("vaapi")),

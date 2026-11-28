@@ -1,13 +1,16 @@
 /**
  * The CPU's rows: libavcodec's software decoders, the `bwdif` deinterlacer (`yadif` where a build
- * lacks it), `scale`, the `zscale` tone map, the image subtitle overlay, and libx264, libx265, and
- * libsvtav1, a row each. A build listing proves these present, as they touch no device.
- * They are the floor every source falls back to, so they take any layout and depth ffmpeg
- * decodes, as software transcoding always has; closed lists guard the GPU rows instead.
+ * lacks it), `scale`, the `zscale` tone map, the image subtitle overlay, libass for text subtitles,
+ * and libx264, libx265, and libsvtav1, a row each. A build listing proves these present, as they
+ * touch no device. They are the floor every source falls back to, so they take any layout and
+ * depth ffmpeg decodes, as software transcoding always has; closed lists guard the GPU rows instead.
  */
 import { type Level, levelOf } from "./output-levels.ts";
 import { DECODE_CLIPS, PROBE_CLIPS } from "./probe-clips.ts";
 import {
+  BURN_IMAGE_PROBES,
+  BURN_TEXT_PROBES,
+  canvasFit,
   DEINTERLACE_PROBES,
   deinterlaceVariant,
   encodeProbes,
@@ -113,7 +116,8 @@ const toneMapCpu: OpImpl<"ToneMap"> = {
 
 /**
  * Draws an image subtitle on the SDR picture at its size: the subtitle's canvas (720x576 for DVD)
- * is scaled to the picture it covers. Subtitles are SDR, so this comes after any tone map.
+ * is stretched to the picture it covers, or fitted inside it at its own aspect and centred
+ * (`canvasFit`). Subtitles are SDR, so this comes after any tone map.
  */
 const burnImageCpu: OpImpl<"BurnImage"> = {
   id: ImplId("burn-image.cpu"),
@@ -124,38 +128,87 @@ const burnImageCpu: OpImpl<"BurnImage"> = {
   variant: (op, input) =>
     input.colour === "sdr" && op.subtitle.frame.memory === "cpu" ? "bitmap" : undefined,
   output: (_, input) => ({ ...input, depth: 8, pixelFormat: "yuv420p" }),
-  render: (op, input) => ({
+  render: (op, input) => {
+    const size = [String(input.width), String(input.height)];
+    const fitted = canvasFit(op.subtitle.codec) === "fit";
+
+    return {
+      ...NOTHING,
+      filters: [
+        filter(
+          "overlay",
+          ...(fitted
+            ? [["x", "(main_w-overlay_w)/2"] as const, ["y", "(main_h-overlay_h)/2"] as const]
+            : []),
+          ["eof_action", "pass"],
+          ["repeatlast", "0"],
+        ),
+      ],
+      side: {
+        input: op.subtitle.input,
+        stream: op.subtitle.stream,
+        calls: [
+          filter(
+            "scale",
+            ...size,
+            ...(fitted ? [["force_original_aspect_ratio", "decrease"] as const] : []),
+          ),
+        ],
+      },
+    };
+  },
+  probes: BURN_IMAGE_PROBES,
+};
+
+/**
+ * The style plain text is drawn in, on the 384x288 script ffmpeg makes of SRT, WebVTT, and the
+ * other plain formats: DejaVu Sans (the fallback font the image and the NixOS module ship) at 18,
+ * a sixteenth of the picture's height, white with a black border a 240th of the height wide and a
+ * half-transparent shadow, centred 16 of the script's lines above the bottom. Players draw plain
+ * text near this size: mpv's default is 55 lines at 720, a thirteenth.
+ */
+const PLAIN_TEXT_STYLE = [
+  "FontName=DejaVu Sans",
+  "FontSize=18",
+  "PrimaryColour=&H00FFFFFF",
+  "OutlineColour=&H00000000",
+  "BackColour=&H80000000",
+  "BorderStyle=1",
+  "Outline=1.2",
+  "Shadow=0.6",
+  "MarginV=16",
+].join(",");
+
+/**
+ * Draws a text subtitle on the SDR picture with libass (`subtitles`), from the run's ASS file and
+ * the fonts the media file carries, in the picture's own layout: ASS and SSA keep their styles,
+ * positions, karaoke, and effects as libass renders them; plain text takes `PLAIN_TEXT_STYLE`.
+ * libass scales the script to the picture, with the source's size as the size it was made for.
+ */
+const burnTextCpu: OpImpl<"BurnText"> = {
+  id: ImplId("burn-text.cpu"),
+  op: "BurnText",
+  on: "cpu",
+  takes: "cpu",
+  needs: () => ["filter:subtitles"],
+  variant: (_, input) => (input.colour === "sdr" ? "ass" : undefined),
+  output: (_, input) => input,
+  render: (op) => ({
     ...NOTHING,
-    filters: [filter("overlay", ["eof_action", "pass"], ["repeatlast", "0"])],
-    side: {
-      input: op.subtitle.input,
-      stream: op.subtitle.stream,
-      calls: [filter("scale", String(input.width), String(input.height))],
-    },
+    filters: [
+      filter(
+        "subtitles",
+        ["filename", { file: "subtitle" }],
+        ["fontsdir", { file: "fonts" }],
+        [
+          "original_size",
+          `${String(op.subtitle.storage.width)}x${String(op.subtitle.storage.height)}`,
+        ],
+        ...(op.subtitle.style === "plain" ? [["force_style", PLAIN_TEXT_STYLE] as const] : []),
+      ),
+    ],
   }),
-  probes: [
-    {
-      op: Op.BurnImage({
-        subtitle: {
-          input: 1,
-          stream: 0,
-          codec: "rawvideo",
-          frame: {
-            memory: "cpu",
-            device: undefined,
-            colour: "sdr",
-            depth: 8,
-            pixelFormat: "yuva420p",
-            scan: "progressive",
-            width: 320,
-            height: 240,
-          },
-        },
-      }),
-      clip: "h264-8",
-      runs: 1,
-    },
-  ],
+  probes: BURN_TEXT_PROBES,
 };
 
 /**
@@ -270,5 +323,6 @@ export const CPU_ROWS: ReadonlyArray<Row> = [
   row(scaleCpu),
   row(toneMapCpu),
   row(burnImageCpu),
+  row(burnTextCpu),
   ...OUTPUT_CODECS.map((codec) => row(encodeCpu(codec))),
 ];

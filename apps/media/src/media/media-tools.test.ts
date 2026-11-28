@@ -50,11 +50,16 @@ describe("media tools", () => {
       MediaTools.toolEnvironment({
         PATH: "/usr/bin",
         LIBVA_DRIVERS_PATH: "/run/opengl-driver/lib/dri",
+        FONTCONFIG_FILE: "/nix/store/fonts.conf",
         MEDIA_SERVICE_API_KEY: "mk_service_secret",
         CONVEX_SELF_HOSTED_ADMIN_KEY: "convex-self-hosted|secret",
         TZ: undefined,
       }),
-      { PATH: "/usr/bin", LIBVA_DRIVERS_PATH: "/run/opengl-driver/lib/dri" },
+      {
+        PATH: "/usr/bin",
+        LIBVA_DRIVERS_PATH: "/run/opengl-driver/lib/dri",
+        FONTCONFIG_FILE: "/nix/store/fonts.conf",
+      },
     );
   });
 

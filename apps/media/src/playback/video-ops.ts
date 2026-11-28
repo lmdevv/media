@@ -106,6 +106,26 @@ export interface SubtitleInput {
   readonly frame: Frame;
 }
 
+/**
+ * A text subtitle libass draws into the picture. libass reads it from an ASS file each run names
+ * (`RunFile`), on the source's timeline, beside the fonts the media file carries.
+ */
+export interface TextSubtitle {
+  /** ffprobe's codec name or the sidecar's format, such as `ass`, `subrip`, or `srt`. */
+  readonly codec: string;
+  /**
+   * `styled` keeps the track's own styles, positions, effects, and fonts (ASS and SSA); `plain`
+   * text is drawn in the service's one default style.
+   */
+  readonly style: "styled" | "plain";
+  /**
+   * The source picture's size, which libass takes as the size the script was made for, so
+   * borders, shadows, and blur a script does not scale with its own resolution keep their share
+   * of a scaled picture.
+   */
+  readonly storage: { readonly width: number; readonly height: number };
+}
+
 /** One video operation. */
 export type Op = Data.TaggedEnum<{
   Decode: { readonly codec: string };
@@ -119,6 +139,7 @@ export type Op = Data.TaggedEnum<{
   /** HDR to SDR. */
   ToneMap: {};
   BurnImage: { readonly subtitle: SubtitleInput };
+  BurnText: { readonly subtitle: TextSubtitle };
   /**
    * `bitrate` is the target's: a cap on the CPU, the rate on a GPU. `level` is the level the
    * stream states, in ffprobe's units; none leaves it to the encoder.
@@ -137,6 +158,9 @@ export const Op = Data.taggedEnum<Op>();
 
 /** The name of an operation. */
 export type OpName = Op["_tag"];
+
+/** An operation that draws a subtitle into the picture: an image subtitle's or a text track's. */
+export type Burn = Extract<Op, { readonly _tag: "BurnImage" | "BurnText" }>;
 
 /** The operation named `T`. */
 type OpOf<T extends OpName> = Extract<Op, { readonly _tag: T }>;
@@ -173,11 +197,21 @@ export type BuildFeature =
   | `hwaccel:${string}`
   | `decodes:${string}`;
 
+/** A file each run names for itself that a filter reads: a text subtitle as ASS, and its fonts. */
+export type RunFile = "subtitle" | "fonts";
+
+/**
+ * A named option's value: text, or the path of a file the run names (`RenderOptions.files`). The
+ * renderer escapes every value as it writes it; an option whose file the run does not name is
+ * left out.
+ */
+export type OptionValue = string | { readonly file: RunFile };
+
 /** One filter of a graph, rendered as `name=arg:key=value`. */
 export interface FilterCall {
   readonly name: string;
   /** Positional values and named options, in order. */
-  readonly args: ReadonlyArray<string | readonly [string, string]>;
+  readonly args: ReadonlyArray<string | readonly [string, OptionValue]>;
   /**
    * Adjacent calls of one filter that both fuse become one call: their named options merge, and a
    * later option of the same name takes the earlier one's place.
@@ -227,7 +261,16 @@ export type ClipName =
   | "vp9-10"
   | "mpeg2-8"
   | "mpeg2-8-interlaced"
-  | "h264-10-interlaced";
+  | "h264-10-interlaced"
+  | "h264-8-gray";
+
+/**
+ * What a probe of a subtitle row reads back from its first output picture, since an overlay that
+ * runs can still ignore the subtitle's transparency: `blend`, that a canvas of a clear, an opaque,
+ * and a half-transparent band lands on the gray clip as each should; `glyph`, that libass drew a
+ * glyph of the default font where the probe's script puts it (`probe-clips.ts`).
+ */
+export type Readback = "blend" | "glyph";
 
 /** One variant a row proves ahead of use: the operation, run on frames of a generated clip. */
 export interface ProbeCase<T extends OpName> {
@@ -238,6 +281,8 @@ export interface ProbeCase<T extends OpName> {
    * decoder crashed in 3 of 8 runs, so one pass proves little.
    */
   readonly runs: number;
+  /** What the run's first picture must show; none proves the row by its frames alone. */
+  readonly readback?: Readback;
 }
 
 /** One way to do operation `T` in one domain. */
@@ -296,11 +341,11 @@ export const row = <T extends OpName>(impl: OpImpl<T>): Row => ({
           rendering: impl.render(op, input),
         };
   },
-  probes: impl.probes.map((probe): ProbeCase<OpName> => ({
-    op: probe.op,
-    clip: probe.clip,
-    runs: probe.runs,
-  })),
+  probes: impl.probes.map((probe): ProbeCase<OpName> => {
+    const proved: ProbeCase<OpName> = { op: probe.op, clip: probe.clip, runs: probe.runs };
+
+    return probe.readback === undefined ? proved : { ...proved, readback: probe.readback };
+  }),
 });
 
 /** What the transcoder knows about a GPU domain besides its rows. */
@@ -349,6 +394,62 @@ export const deinterlaceVariant = (frame: Frame): string | undefined =>
 export const DEINTERLACE_PROBES: ReadonlyArray<ProbeCase<"Deinterlace">> = [
   { op: Op.Deinterlace(), clip: "mpeg2-8-interlaced", runs: 1 },
   { op: Op.Deinterlace(), clip: "h264-10-interlaced", runs: 1 },
+];
+
+/**
+ * How an image subtitle's canvas covers the picture. DVD, DVB, and XSUB canvases share the video's
+ * own pixel grid (720x576 over an anamorphic picture), so they `stretch` to the picture's size. PGS
+ * draws on a square-pixel canvas (1920x1080 even over a picture cropped to 2.39:1, or a 4K one),
+ * so it is `fit` inside the picture at its own aspect and centred, as players place it.
+ */
+export const canvasFit = (codec: string): "stretch" | "fit" =>
+  codec === "hdmv_pgs_subtitle" ? "fit" : "stretch";
+
+/**
+ * The image subtitle a probe of an overlay reads: a 320x240 canvas in BGRA, the layout an image
+ * subtitle's frames take in ffmpeg (`PROBE_CANVAS`).
+ */
+export const PROBE_IMAGE_SUBTITLE: SubtitleInput = {
+  input: 1,
+  stream: 0,
+  codec: "rawvideo",
+  frame: {
+    memory: "cpu",
+    device: undefined,
+    colour: "sdr",
+    depth: 8,
+    pixelFormat: "bgra",
+    scan: "progressive",
+    width: 320,
+    height: 240,
+  },
+};
+
+/** What proves an image subtitle overlay: the probe canvas blended onto the gray clip. */
+export const BURN_IMAGE_PROBES: ReadonlyArray<ProbeCase<"BurnImage">> = [
+  {
+    op: Op.BurnImage({ subtitle: PROBE_IMAGE_SUBTITLE }),
+    clip: "h264-8-gray",
+    runs: 1,
+    readback: "blend",
+  },
+];
+
+/**
+ * What proves a text subtitle row: the probe's script drawn on the gray clip, a glyph read back. A
+ * CPU row is verified by the build listing, as every CPU row is, so this runs where a probe of it
+ * does (a chain's tests, and any GPU row that draws text); the fonts libass finds come from the
+ * image and the NixOS module, which both ship DejaVu.
+ */
+export const BURN_TEXT_PROBES: ReadonlyArray<ProbeCase<"BurnText">> = [
+  {
+    op: Op.BurnText({
+      subtitle: { codec: "ass", style: "styled", storage: { width: 320, height: 240 } },
+    }),
+    clip: "h264-8-gray",
+    runs: 1,
+    readback: "glyph",
+  },
 ];
 
 /** The id of the row that encodes `codec` in `domain`, such as `encode.qsv.hevc`. */

@@ -1,11 +1,11 @@
 # Hardware transcoding
 
 When a device can't play a file as it is, the media service converts the video for it: it decodes
-the source, deinterlaces, scales, maps HDR to SDR, burns in an image subtitle, and encodes H.264,
-HEVC, or AV1, on the CPU or on an Intel GPU through Quick Sync (`qsv`) or VA-API (`vaapi`). The
-hardware matrix plays one fixture per stage on each path through the service's own playback
-negotiation, reads the bytes it serves, and records which stage works on which path, with the
-evidence of where it ran.
+the source, deinterlaces, scales, maps HDR to SDR, burns in an image or a text subtitle, and
+encodes H.264, HEVC, or AV1, on the CPU or on an Intel GPU through Quick Sync (`qsv`) or VA-API
+(`vaapi`). The hardware matrix plays one fixture per stage on each path through the service's own
+playback negotiation, reads the bytes it serves, and records which stage works on which path, with
+the evidence of where it ran.
 
 ## Sub-features
 
@@ -16,7 +16,13 @@ evidence of where it ran.
   `scale-variable-rate` a generated phone-style MP4 (4 s at 60 fps, then 12 s at 15 fps) down to
   240 lines, through to its last segment.
 - `hw-hdr-to-sdr` maps the HDR10 HEVC version to BT.709 SDR for an SDR browser.
-- `hw-burn-in` draws the DVD (image) subtitle track into the picture.
+- `hw-burn-in` draws the DVD (image) subtitle track into the picture: on a GPU path with the GPU's
+  overlay (`overlay_qsv`, `overlay_vaapi`), the subtitle's frames decoded on the CPU and uploaded,
+  the picture never leaving the device. `subtitle-burn-in-pgs` does the same with a generated PGS
+  track (`pgs.mjs`) whose 1920x1080 canvas is fitted into a 1920x800 picture at its own aspect.
+  `subtitle-burn-in-text` draws a generated styled ASS track
+  (positioned, coloured, in the block font the file attaches) with libass, on the CPU on every path,
+  a GPU path downloading the picture for it and uploading it again.
 - `hw-encode-h264`, `hw-encode-hevc`, and `hw-encode-av1` encode for a device that plays only that
   codec (H.264 under a 4 Mb/s cap, since an H.264 browser plays the source as it is).
 - `hw-hybrid` runs one stage of a GPU path on the CPU where the device can't do it, as the service
@@ -32,8 +38,9 @@ evidence of where it ran.
 
 - The web and iOS players: play a title the device can't play as it is. The web player's `Stream
   info` names the mode (`Transcode`) and where each stage ran (`Stages`).
-- Terminal: `media movies stream <title> [--version N] [--max-height N]` prints the negotiated mode,
-  the stages (`stages: Decode · QSV, Encode · QSV`), and any change of the chain.
+- Terminal: `media movies stream <title> [--version N] [--max-height N] [--burn-subtitle e3]` prints
+  the negotiated mode, the stages (`stages: Decode · QSV, Subtitle · CPU → QSV, Encode · QSV`), the
+  subtitle tracks with the one burned in marked, and any change of the chain.
   `media admin server status` prints the ffmpeg build, the devices, and every capability with its
   status, evidence, and quarantine.
 - The owner: `HARDWARE_ACCELERATION` (`auto`, `none`, `qsv`, `vaapi`) with
@@ -193,4 +200,17 @@ Preconditions:
 - The burn-in compare counts pixels that differ from the source frame by more than 40 levels: 1 %
   of the bottom 30 % must change while the subtitle shows (108 s), and almost none above it or
   before it shows (105 s).
+- The text compare (`burned-text`) renders a reference a second into each fetch: the side's own
+  libass drawing the fixture's track and attached font on the source frame at the output size, as
+  the service's CPU row does. In the block's region, the subtitle is where the reference differs
+  from the source by more than 40 levels, and what was served is where the output does. The served
+  box must lie within 2 pixels of the reference's on every edge, its mean colour within 12 levels
+  per channel, the drawn pixels must fill 90 % of their box (the attached block font, where a
+  fallback font's letters fill far less), and a ring 3 pixels wide around it must differ by 16
+  levels at most, where a doubled or haloed edge shows. A frame with nothing drawn fails as a
+  missing stage; one it cannot measure fails with `could not measure`. `text.json` and the
+  `output-`, `source-`, and `reference-` PNGs of each fetch's frame are beside the cell.
+- It does not judge the glyphs of a real font, or effects that move: the block font's rectangles
+  are what make the place and colour measurable. The caption and the rotated word in the fixture
+  are there for the eye, in the cell's PNGs.
 - The cells start playback sessions as Lucía, which leaves her progress on the Feature Test.

@@ -55,7 +55,7 @@ const everything = (domain: "qsv" | "vaapi", source: SourceVideo): CapabilitySna
       bounds: { width: 1920, height: 1080 },
       cpuEncodeBounds: { width: 1920, height: 1080 },
       maxBitrate: undefined,
-      burnImage: undefined,
+      burn: undefined,
     },
     bound,
   );
@@ -82,8 +82,13 @@ const chain = (
 
 /** Which step owns each name in a log of `pipeline`'s runs, as the renderer lays a run out. */
 const ownersOf = (pipeline: VideoPipeline): LogOwners =>
-  renderVideo(pipeline, { input: 0, stream: 0, trimPicture: undefined, trimSubtitle: undefined })
-    .owners;
+  renderVideo(pipeline, {
+    input: 0,
+    stream: 0,
+    trimPicture: undefined,
+    trimSubtitle: undefined,
+    files: {},
+  }).owners;
 
 /**
  * decode.qsv (VA-API's decoder, mapped into Quick Sync by Parsed_hwmap_0 and Parsed_format_1),

@@ -215,6 +215,19 @@ const deinterlacerFailsLater = await writeFakeFfmpeg({
   logInvocations: true,
 });
 
+/** What ffmpeg prints when Quick Sync's overlay cannot start its composition. */
+const OVERLAY_FAILED =
+  "[Parsed_overlay_qsv_10 @ 0x1] Failed to create a VPP session: undefined behavior (-16)";
+
+/** The first stream run that draws the subtitle on Quick Sync fails; its probe then fails too. */
+const overlayFails = await writeFakeFfmpeg({
+  rules: [
+    { token: "overlay_qsv", runs: "hls", stderr: OVERLAY_FAILED, arm: "overlay", limit: 1 },
+    { token: "overlay_qsv", runs: "probe", stderr: OVERLAY_FAILED, armedBy: "overlay" },
+  ],
+  logInvocations: true,
+});
+
 /** Runs stall after their first fragment until killed, so a seek replaces a live run. */
 const stalling = await writeFakeFfmpeg({ hlsStallsAfterFragments: 1, logInvocations: true });
 
@@ -1171,6 +1184,56 @@ describe.skipIf(!hasFfmpeg)("stream recovery", () => {
           assert.notInclude(replacement.join(" "), "deinterlace=advanced");
           assert.include(replacement, "h264_qsv");
           assert.include(replacement, "-hwaccel");
+          assert.deepStrictEqual(kept(replacement), kept(first));
+          assert.isTrue(kept(first).subtitle);
+        }),
+      120_000,
+    );
+  });
+
+  layer(
+    recovering(overlayFails),
+    options,
+  )((it) => {
+    it.effect(
+      "draws the subtitle on the CPU between Quick Sync's stages when its overlay fails, keeping what the viewer chose",
+      () =>
+        Effect.gen(function* () {
+          const fileId = yield* addFilm("overlay-lost");
+
+          const film = yield* negotiated({
+            token: signTestToken({ fid: fileId, sid: "film" }),
+            ...CHOICES,
+          });
+
+          assert.strictEqual(film.generation, 2);
+          assert.strictEqual(film.mode, "transcode-qsv", "the encode stays on the GPU");
+          assert.strictEqual(yield* fetchStatus(segmentOf(film.url, 3)), 200);
+          assert.deepInclude(film.transcode?.changes[0], {
+            generation: 2,
+            reason: "reproduced",
+            excluded: ["burn-image.qsv"],
+          });
+          assert.deepStrictEqual(
+            film.transcode?.stages.filter((stage) => stage.op !== "decode"),
+            [
+              { op: "scale", domain: "qsv", impl: "scale.qsv" },
+              { op: "tonemap", domain: "qsv", impl: "tonemap.qsv" },
+              { op: "move", domain: "qsv", impl: "move.qsv>cpu", move: { from: "qsv", to: "cpu" } },
+              { op: "burn-image", domain: "cpu", impl: "burn-image.cpu" },
+              { op: "move", domain: "qsv", impl: "move.cpu>qsv", move: { from: "cpu", to: "qsv" } },
+              { op: "encode", domain: "qsv", impl: "encode.qsv.h264" },
+            ],
+          );
+
+          const runs = yield* runsOf(overlayFails, film.streamId ?? "");
+          const [first = [], replacement = []] = runs;
+
+          assert.lengthOf(runs, 2);
+          assert.include(first.join(" "), "overlay_qsv");
+          assert.notInclude(replacement.join(" "), "overlay_qsv");
+          assert.include(replacement.join(" "), "hwdownload");
+          assert.include(replacement, "h264_qsv");
           assert.deepStrictEqual(kept(replacement), kept(first));
           assert.isTrue(kept(first).subtitle);
         }),

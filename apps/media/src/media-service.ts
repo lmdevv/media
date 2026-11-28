@@ -15,6 +15,7 @@ import * as PlaybackNegotiator from "./playback/playback-negotiator.ts";
 import * as StreamSessions from "./playback/stream-sessions.ts";
 import * as TranscodeCapabilities from "./playback/transcode-capabilities.ts";
 import * as TranscodeSpace from "./playback/transcode-space.ts";
+import * as BurnedText from "./subtitles/burned-text.ts";
 import * as SubtitleConverter from "./subtitles/subtitle-tracks.ts";
 import * as TrickplayStore from "./trickplay/trickplay-store.ts";
 
@@ -36,6 +37,7 @@ export const servicesLayerWith = (
     ClientDiagnostics.layer,
   ).pipe(
     Layer.provideMerge(StreamSessions.layer),
+    Layer.provideMerge(BurnedText.layer),
     Layer.provideMerge(TranscodeSpace.layer),
     Layer.provideMerge(KeyframeIndex.layer),
     Layer.provideMerge(TranscodeCapabilities.layer),

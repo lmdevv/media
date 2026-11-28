@@ -242,7 +242,7 @@ const viewer = (audience: PlaybackToken.PlaybackGrant["audience"]) =>
         audioIndex: undefined,
         startSeconds: 0,
         quality: undefined,
-        burnSubtitle: undefined,
+        burnText: undefined,
         keyframes: undefined,
       },
     };

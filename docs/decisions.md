@@ -180,12 +180,24 @@ Old movies' Convex project, its SDK client, and its command registry were delete
   and the scan finishes in the background for the next negotiation.
 - Picture subtitles (PGS, VobSub) are listed in negotiation without a URL. A client shows one by
   negotiating again with `burnInSubtitle`, which always transcodes: the picture is scaled and
-  tone-mapped as usual (on the GPU when one encodes), then the subtitle, its canvas scaled to the
-  output size (DVD subtitles carry none and are read on a 720x576 canvas), is drawn on the SDR
-  frame on the CPU; a GPU's frames are downloaded for that and uploaded again to encode. After a
-  seek the subtitle comes from a second reading of the file from 30 seconds earlier, so a line
-  already on screen is drawn. Choosing a text subtitle or none negotiates again without it, back to
-  the cheaper mode.
+  tone-mapped as usual (on the GPU when one encodes), then the subtitle is drawn on the SDR frame,
+  its canvas stretched over the picture (DVD subtitles carry none and are read on a 720x576 canvas)
+  or, for PGS, fitted inside it at its own aspect. On a GPU the subtitle's frames are decoded on the
+  CPU, uploaded at the canvas's size, and scaled and blended by the GPU's overlay, so the picture
+  stays on the device; a device or build without the overlay draws it on the CPU between a download
+  and an upload. After a seek the subtitle comes from a second reading of the file from 30 seconds
+  earlier, so a line already on screen is drawn. Choosing a text subtitle or none negotiates again
+  without it, back to the cheaper mode.
+- A text track can be burned in the same way, by naming it in `burnInSubtitle` (embedded `e<n>` or
+  sidecar `x<hash>`): libass draws it on the SDR frame at the output size, ASS and SSA with their
+  own styles, positions, effects, and attached fonts, plain text in one default style (DejaVu Sans,
+  white with a black border, a sixteenth of the picture tall). The stream converts the track into an
+  ASS file on the file's own timeline in its folder before it starts, cached for an embedded track,
+  so a seek shows a cue that began earlier at once. libass draws on the CPU on every path: on a GPU
+  the picture is downloaded for it and uploaded again: drawing on a transparent canvas for the
+  GPU's overlay renders translucent colours wrong under both ffmpeg builds, and on an Arc A380 it
+  was slower (1080p through Quick Sync, 144 frames a second against 212). The CLI asks for it
+  (`media movies stream --burn-subtitle`); the web and iOS apps' subtitle menus do not offer it.
 - A client may send a quality cap (`maxHeight`, `maxBitrate` in bits per second). A source above
   it is encoded down to the cap; one within it plays as before, and so does one the host cannot
   encode (HDR without tone mapping), rather than not at all.

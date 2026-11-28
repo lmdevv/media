@@ -143,7 +143,7 @@ layer(MediaTestServer.layer(), { excludeTestServices: true, timeout: "120 second
                   audioIndex: undefined,
                   startSeconds: 0,
                   quality: undefined,
-                  burnSubtitle: undefined,
+                  burnText: undefined,
                   keyframes: undefined,
                 }),
               ),

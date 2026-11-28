@@ -11,6 +11,7 @@ import {
 import { verifiedFor, withoutToneMaps } from "../testing/capability-snapshots.ts";
 import {
   AudioPlan,
+  BurnRequest,
   decidePlayback,
   type DecisionOptions,
   encodeIntent,
@@ -596,13 +597,27 @@ describe("decidePlayback", () => {
       ],
     });
 
-    const burned = hardware(withPgs, chrome, { burnSubtitle: 4 });
+    const burned = hardware(withPgs, chrome, { burnSubtitle: BurnRequest.Image({ stream: 4 }) });
 
     expect(burned).toMatchObject({
       mode: "transcode-qsv",
-      video: { intent: { burnImage: { stream: 4, codec: "hdmv_pgs_subtitle" } } },
+      video: { intent: { burn: { subtitle: { stream: 4, codec: "hdmv_pgs_subtitle" } } } },
     });
     expect(impls(burned)).toStrictEqual([
+      "decode.qsv",
+      "scale.qsv",
+      "burn-image.qsv",
+      "encode.qsv.h264",
+    ]);
+
+    const withoutGpuOverlay = deciding(
+      ["qsv"],
+      (key) => key.startsWith("tonemap.cpu") || key.startsWith("burn-image.qsv"),
+    );
+
+    expect(
+      impls(withoutGpuOverlay(withPgs, chrome, { burnSubtitle: BurnRequest.Image({ stream: 4 }) })),
+    ).toStrictEqual([
       "decode.qsv",
       "scale.qsv",
       "move.qsv>cpu",
@@ -610,10 +625,69 @@ describe("decidePlayback", () => {
       "move.cpu>qsv",
       "encode.qsv.h264",
     ]);
-    expect(software(withPgs, chrome, { burnSubtitle: 5 })).toStrictEqual(
+    expect(
+      software(withPgs, chrome, { burnSubtitle: BurnRequest.Image({ stream: 5 }) }),
+    ).toStrictEqual(PlaybackPlan.Unsupported({ reason: "subtitle-not-burnable" }));
+    expect(software(withPgs, chrome, { burnSubtitle: BurnRequest.Refused() })).toStrictEqual(
       PlaybackPlan.Unsupported({ reason: "subtitle-not-burnable" }),
     );
     expect(software(withPgs, chrome)).toStrictEqual(PlaybackPlan.Direct({ audioIndex: 1 }));
+  });
+
+  it("burns a text track in with libass, and refuses it where no row proved libass draws", () => {
+    const withText = probe("mp4", h264, [aac], 600, {
+      bitRate: undefined,
+      subtitles: [
+        {
+          index: 5,
+          codec: "ass",
+          kind: "text",
+          default: false,
+          forced: false,
+          hearingImpaired: false,
+        },
+      ],
+    });
+
+    const styled = BurnRequest.Text({ subtitle: { codec: "ass", style: "styled" } });
+    const burned = hardware(withText, chrome, { burnSubtitle: styled });
+
+    expect(burned).toMatchObject({
+      mode: "transcode-qsv",
+      video: {
+        intent: {
+          burn: {
+            _tag: "BurnText",
+            subtitle: { codec: "ass", style: "styled", storage: { width: 1920, height: 1080 } },
+          },
+        },
+      },
+    });
+    expect(impls(burned)).toStrictEqual([
+      "decode.qsv",
+      "scale.qsv",
+      "move.qsv>cpu",
+      "burn-text.cpu",
+      "move.cpu>qsv",
+      "encode.qsv.h264",
+    ]);
+    // Burning a track in always transcodes, though the client plays the file as it is.
+    expect(impls(software(withText, chrome, { burnSubtitle: styled }))).toStrictEqual([
+      "decode.cpu",
+      "scale.cpu",
+      "burn-text.cpu",
+      "encode.cpu.h264",
+    ]);
+
+    const withoutLibass = deciding(
+      [],
+      (key) => key.startsWith("tonemap.cpu") || key.startsWith("burn-text."),
+    );
+
+    expect(withoutLibass(withText, chrome, { burnSubtitle: styled })).toStrictEqual(
+      PlaybackPlan.Unsupported({ reason: "subtitle-not-burnable" }),
+    );
+    expect(withoutLibass(withText, chrome)).toStrictEqual(PlaybackPlan.Direct({ audioIndex: 1 }));
   });
 
   it("decodes on the CPU and keeps scaling and encoding on the GPU when the device cannot decode", () => {
@@ -812,6 +886,17 @@ describe("levels", () => {
 
 const Refusals = Schema.Array(Schema.Boolean);
 
+/** A file the replan property plays, and every key its chains could use, made once. */
+const replanFixture = (media: MediaProbe) => ({
+  media,
+  everything: verifiedFor(media, ["qsv", "vaapi"]),
+});
+
+const REPLANNED = {
+  hdr: replanFixture(probe("mkv", hevcHdr, [aac])),
+  sdr: replanFixture(probe("mkv", video("h264", { width: 3840, height: 2160 }), [aac])),
+};
+
 describe("replan", () => {
   it.prop(
     "never relaxes the cap, never returns a copy, and names its mode for the encode's domain",
@@ -821,10 +906,7 @@ describe("replan", () => {
       hdr: Schema.Boolean,
     },
     ({ refused, capHeight, hdr }) => {
-      const media = probe("mkv", hdr ? hevcHdr : video("h264", { width: 3840, height: 2160 }), [
-        aac,
-      ]);
-
+      const { media, everything } = hdr ? REPLANNED.hdr : REPLANNED.sdr;
       const stream = media.video;
 
       const intent =
@@ -833,7 +915,6 @@ describe("replan", () => {
           : encodeIntent(media, stream, chrome, { quality: { maxHeight: capHeight } });
 
       if (stream === undefined || intent === undefined) return;
-      const everything = verifiedFor(media, ["qsv", "vaapi"]);
       const keys = [...everything.verified];
 
       const allowed = new Set(
