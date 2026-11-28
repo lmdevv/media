@@ -221,3 +221,48 @@ export const renderPlaylist = (plan: SegmentPlan, uris: PlaylistUris): string =>
 
   return `${lines.join("\n")}\n`;
 };
+
+/**
+ * The one variant of an HDR stream's multivariant playlist, as its `EXT-X-STREAM-INF` tag states
+ * it (Apple's HLS authoring specification, section 9).
+ */
+export interface Variant {
+  /** The peak bitrate, in bits a second (9.13). */
+  readonly bandwidth: number;
+  /** The average bitrate, in bits a second (9.14). */
+  readonly averageBandwidth: number;
+  /** Every codec the stream holds, as RFC 6381 names them: video first, then audio (9.1). */
+  readonly codecs: ReadonlyArray<string>;
+  /** The picture's size (9.2). */
+  readonly resolution: { readonly width: number; readonly height: number };
+  /** The most frames a second; none when the source's rate is unknown (9.15). */
+  readonly frameRate: number | undefined;
+  /** The transfer of the stream's HDR: `PQ` for HDR10, `HLG` (9.16). */
+  readonly videoRange: "PQ" | "HLG";
+}
+
+/**
+ * Renders a multivariant playlist of one variant, `variant`, whose media playlist is at `uri`
+ * relative to it. Apple's players present a stream as HDR only from a variant that states its
+ * range (`VIDEO-RANGE`); its segments start with IDR frames, so it states them independent (9.11).
+ */
+export const renderMultivariant = (variant: Variant, uri: string): string => {
+  const attributes = [
+    `BANDWIDTH=${String(Math.round(variant.bandwidth))}`,
+    `AVERAGE-BANDWIDTH=${String(Math.round(variant.averageBandwidth))}`,
+    `CODECS="${variant.codecs.join(",")}"`,
+    `RESOLUTION=${String(variant.resolution.width)}x${String(variant.resolution.height)}`,
+    ...(variant.frameRate === undefined ? [] : [`FRAME-RATE=${variant.frameRate.toFixed(3)}`]),
+    `VIDEO-RANGE=${variant.videoRange}`,
+  ];
+
+  const lines = [
+    "#EXTM3U",
+    "#EXT-X-VERSION:7",
+    "#EXT-X-INDEPENDENT-SEGMENTS",
+    `#EXT-X-STREAM-INF:${attributes.join(",")}`,
+    uri,
+  ];
+
+  return `${lines.join("\n")}\n`;
+};

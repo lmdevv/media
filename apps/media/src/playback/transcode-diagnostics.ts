@@ -114,9 +114,25 @@ const causeCode = (cause: string): string =>
   cause.replaceAll(/(?<=[a-z])(?=[A-Z])/gu, "-").toLowerCase();
 
 /**
+ * Why `video` maps to SDR a source whose HDR its intent asked to keep (its first target is HDR):
+ * the subtitle it draws in, which no row draws on HDR frames, or else no HDR encode left to it.
+ * None for a copy, an encode that keeps HDR, and one for a client that asked for SDR alone.
+ */
+const sdrReasonOf = (video: VideoPlan): "subtitle" | "no-hdr-encode" | undefined => {
+  if (!VideoPlan.$is("Encode")(video)) return undefined;
+  const wanted = video.intent.targets[0];
+
+  if (wanted === undefined || wanted.colour === "sdr" || video.output.dynamicRange !== "sdr") {
+    return undefined;
+  }
+
+  return video.intent.burn === undefined ? "no-hdr-encode" : "subtitle";
+};
+
+/**
  * The summary of generation `generation`, which runs `video` from `source`: the source's kind of
- * colour, the stages in order, moves included, none for a copy, and the changes up to it, oldest
- * first.
+ * colour, the stages in order, moves included, none for a copy, the changes up to it, oldest
+ * first, and why it maps to SDR a source whose HDR the client asked to keep (`sdrReasonOf`).
  */
 export const summaryOf = (
   video: VideoPlan,
@@ -146,6 +162,10 @@ export const summaryOf = (
           },
         ],
   ),
+  ...Option.match(Option.fromUndefinedOr(sdrReasonOf(video)), {
+    onNone: () => ({}),
+    onSome: (sdrReason) => ({ sdrReason }),
+  }),
 });
 
 /**

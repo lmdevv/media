@@ -45,6 +45,7 @@ import type { MediaFileId, PlaybackSessionId, UserId } from "@media/contracts/id
 import { StreamId } from "@media/contracts/media-playback";
 import { LogEvent } from "../diagnostics/log-events.ts";
 import * as MediaConfig from "../media-config.ts";
+import type { AudioTrack } from "../media/media-probe.ts";
 import * as MediaTools from "../media/media-tools.ts";
 import * as BurnedText from "../subtitles/burned-text.ts";
 import { watchRenames } from "../platform/node-directories.ts";
@@ -64,7 +65,9 @@ import {
   reachOf,
   type SegmentPlan,
   segmentAt,
+  type Variant,
 } from "./hls-plan.ts";
+import { variantOf } from "./hls-variant.ts";
 import * as KeyframeIndex from "./keyframe-index.ts";
 import * as EncoderSlots from "./encoder-slots.ts";
 import { AudioPlan, modeOf, type PlaybackPlan, replan, VideoPlan } from "./playback-decision.ts";
@@ -127,6 +130,12 @@ interface StreamView {
   readonly plan: SegmentPlan;
 }
 
+/** What a generation's playlist says: its segments, and its variant when it keeps HDR. */
+interface PlaylistView extends StreamView {
+  /** The variant a multivariant playlist names (`variantOf`); none for SDR and copies. */
+  readonly variant: Variant | undefined;
+}
+
 /** Where a seek continues, and how that generation delivers the video. */
 interface MovedStream extends StreamView {
   readonly mode: Exclude<PlaybackMode, "direct">;
@@ -187,7 +196,7 @@ export interface Interface {
     streamId: StreamId,
     generation: number,
     grant: PlaybackGrant,
-  ) => Effect.Effect<StreamView, StreamRequestError>;
+  ) => Effect.Effect<PlaylistView, StreamRequestError>;
   readonly init: (
     streamId: StreamId,
     generation: number,
@@ -441,6 +450,14 @@ interface PipelineChange {
 }
 
 const isEncode = VideoPlan.$is("Encode");
+
+/** The audio track `session` plays, copied or converted; none without audio. */
+const audioTrackOf = (session: Session): AudioTrack | undefined =>
+  AudioPlan.$match(session.audio, {
+    None: () => undefined,
+    Aac: ({ index }) => session.file.probe.audio.find((track) => track.index === index),
+    Copy: ({ index }) => session.file.probe.audio.find((track) => track.index === index),
+  });
 
 /** Whether `video` runs any stage on a GPU. */
 const onGpu = (video: VideoPlan): boolean => isEncode(video) && usesGpu(video.pipeline);
@@ -967,18 +984,10 @@ const make = Effect.gen(function* () {
       videoCodec: video?.codec ?? "",
       video: videoPlan,
       audio: session.audio,
-      audioCodec: AudioPlan.$match(session.audio, {
-        None: () => "",
-        Aac: () => "",
-        Copy: ({ index }) =>
-          session.file.probe.audio.find((track) => track.index === index)?.codec ?? "",
-      }),
-      copiedAudioEnd: AudioPlan.$match(session.audio, {
-        None: () => undefined,
-        Aac: () => undefined,
-        Copy: ({ index }) =>
-          session.file.probe.audio.find((track) => track.index === index)?.endSeconds,
-      }),
+      audioCodec: AudioPlan.$is("Copy")(session.audio) ? (audioTrackOf(session)?.codec ?? "") : "",
+      copiedAudioEnd: AudioPlan.$is("Copy")(session.audio)
+        ? audioTrackOf(session)?.endSeconds
+        : undefined,
       segmentStarts: session.plan.starts.slice(startSegment),
       files: session.files,
       previousStart: session.plan.starts[startSegment - 1],
@@ -2305,7 +2314,15 @@ const make = Effect.gen(function* () {
   ) {
     return yield* using(streamId, grant, noSegment, (session) =>
       currentGeneration(session, generation).pipe(
-        Effect.as({ streamId, generation, plan: session.plan } satisfies StreamView),
+        Effect.map(
+          (current) =>
+            ({
+              streamId,
+              generation,
+              plan: session.plan,
+              variant: variantOf(current.video, session.audio, audioTrackOf(session)),
+            }) satisfies PlaylistView,
+        ),
       ),
     );
   });

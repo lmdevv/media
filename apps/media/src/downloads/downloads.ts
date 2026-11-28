@@ -47,7 +47,7 @@ import * as EndedSessions from "../playback/ended-sessions.ts";
 import * as PlaybackToken from "../playback/playback-grants.ts";
 import * as TranscodeSpace from "../playback/transcode-space.ts";
 import { mp4CommandArgs } from "../playback/transcode-command.ts";
-import { decideDownload, DownloadPlan } from "./download-plan.ts";
+import { decideDownload, downloadClient, DownloadPlan } from "./download-plan.ts";
 
 type PrepareError =
   | PlaybackTokenInvalid
@@ -389,7 +389,9 @@ const make = Effect.gen(function* () {
     const intent =
       source === undefined
         ? undefined
-        : encodeIntent(file.probe, source, request.capabilities, { quality: undefined });
+        : encodeIntent(file.probe, source, downloadClient(request.capabilities), {
+            quality: undefined,
+          });
 
     // Downloads encode on the CPU, so the build listing settles what they need without a probe.
     const known =

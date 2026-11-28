@@ -45,7 +45,7 @@ import * as MediaConfig from "../media-config.ts";
 import { modifiedAtMs } from "../platform/file-info.ts";
 import * as FileResolver from "../playback/file-resolver.ts";
 import { resolveInsideRoots } from "../playback/file-resolver.ts";
-import { renderPlaylist } from "../playback/hls-plan.ts";
+import { renderMultivariant, renderPlaylist } from "../playback/hls-plan.ts";
 import * as PlaybackToken from "../playback/playback-grants.ts";
 import * as StreamOwners from "../playback/stream-owners.ts";
 import * as StreamSessions from "../playback/stream-sessions.ts";
@@ -514,27 +514,38 @@ export const layer: Layer.Layer<
       };
     });
 
-    const playlist = observed(failures, "playlist", (authorize) =>
-      Effect.gen(function* () {
-        const request = yield* HttpServerRequest.HttpServerRequest;
-        const { streamId, generation } = yield* streamParams;
-        const token = yield* PlaybackToken.tokenOf(request, failures.tokens.param);
-        const grant = yield* authorize(token, PlaybackToken.PLAY, streamId);
+    /**
+     * A generation's playlist: at `index.m3u8`, which negotiation and seeks hand out, the media
+     * playlist of its segments, or for a stream that keeps HDR, a multivariant playlist whose one
+     * variant states it (`renderMultivariant`) and names the media playlist at `video.m3u8`, since
+     * Apple's players present HDR only from such a variant. Every relative URI resolves in the
+     * generation's folder either way.
+     */
+    const playlist = (entry: "index" | "video") =>
+      observed(failures, "playlist", (authorize) =>
+        Effect.gen(function* () {
+          const request = yield* HttpServerRequest.HttpServerRequest;
+          const { streamId, generation } = yield* streamParams;
+          const token = yield* PlaybackToken.tokenOf(request, failures.tokens.param);
+          const grant = yield* authorize(token, PlaybackToken.PLAY, streamId);
 
-        const view = yield* sessions.playlist(streamId, generation, grant);
-        const query = `?${failures.tokens.param}=${encodeURIComponent(Redacted.value(token))}`;
+          const view = yield* sessions.playlist(streamId, generation, grant);
+          const query = `?${failures.tokens.param}=${encodeURIComponent(Redacted.value(token))}`;
 
-        const body = renderPlaylist(view.plan, {
-          init: `init.mp4${query}`,
-          segment: (index) => `${index}.m4s${query}`,
-        });
+          const body =
+            entry === "index" && view.variant !== undefined
+              ? renderMultivariant(view.variant, `video.m3u8${query}`)
+              : renderPlaylist(view.plan, {
+                  init: `init.mp4${query}`,
+                  segment: (index) => `${index}.m4s${query}`,
+                });
 
-        return HttpServerResponse.text(body, {
-          contentType: "application/vnd.apple.mpegurl",
-          headers: { "cache-control": "no-store" },
-        });
-      }),
-    ).pipe(Effect.withSpan("MediaRoutes.playlist"));
+          return HttpServerResponse.text(body, {
+            contentType: "application/vnd.apple.mpegurl",
+            headers: { "cache-control": "no-store" },
+          });
+        }),
+      ).pipe(Effect.withSpan("MediaRoutes.playlist"));
 
     const hlsFile = observed(failures, "hls", (authorize) =>
       Effect.gen(function* () {
@@ -638,7 +649,8 @@ export const layer: Layer.Layer<
 
     yield* router.add("*", "/media/direct/:fileId", direct);
     yield* router.add("*", "/media/downloads/:fileId/:name", download);
-    yield* router.add("GET", "/media/hls/:streamId/:generation/index.m3u8", playlist);
+    yield* router.add("GET", "/media/hls/:streamId/:generation/index.m3u8", playlist("index"));
+    yield* router.add("GET", "/media/hls/:streamId/:generation/video.m3u8", playlist("video"));
     yield* router.add("GET", "/media/hls/:streamId/:generation/:file", hlsFile);
     yield* router.add("GET", "/media/subtitles/:fileId/:track", subtitle);
   }),

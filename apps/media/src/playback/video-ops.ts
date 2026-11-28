@@ -36,12 +36,14 @@ export const BITRATE_SHARE: Readonly<Record<OutputCodec, number>> = {
 
 /**
  * One stream an encode may produce, as the decision asks for it and encode rows read it. Rows take
- * the codec, depth, and colour as data and accept only the entries they register: 8-bit SDR.
+ * the codec, depth, and colour as data and accept only the entries they register
+ * (`encodesTarget`): 8-bit SDR in every codec, and 10-bit HDR10 and HLG in HEVC.
  */
 export interface OutputTarget {
   readonly codec: OutputCodec;
   /** Bits per component of the encoded picture. */
   readonly depth: number;
+  /** SDR, or the source's own HDR10 or HLG, which the encode keeps without a tone map. */
   readonly colour: DynamicRange;
   /** Whether an encoder on the CPU may produce it, or only one on a GPU. */
   readonly cpuEncode: "allowed" | "refused";
@@ -105,6 +107,19 @@ export const dynamicRangeOf = (colour: Colour): DynamicRange => RANGE_OF_SIGNAL[
 export const toneMapsTo = (colour: Colour, target: OutputTarget): boolean =>
   colour.signal !== "sdr" && target.colour === "sdr";
 
+/**
+ * The signal the frames an encode of `target` takes carry: SDR for an SDR target, PQ for HDR10,
+ * HLG for HLG; none for Dolby Vision, which no encode produces.
+ */
+const signalOf = (target: OutputTarget): Signal | undefined => SIGNAL_OF_RANGE[target.colour];
+
+const SIGNAL_OF_RANGE: Readonly<Record<DynamicRange, Signal | undefined>> = {
+  sdr: "sdr",
+  hdr10: "pq",
+  hlg: "hlg",
+  "dolby-vision": undefined,
+};
+
 /** `codec` at 8-bit SDR, from any encoder and at any size: what probes encode. */
 export const sdrTarget = (codec: OutputCodec): OutputTarget => ({
   codec,
@@ -113,6 +128,18 @@ export const sdrTarget = (codec: OutputCodec): OutputTarget => ({
   cpuEncode: "allowed",
   level: undefined,
 });
+
+/** HEVC Main 10 in `range`, from any encoder and at any size: what the HDR encode probes encode. */
+export const hdrTarget = (range: HdrRange): OutputTarget => ({
+  codec: "hevc",
+  depth: 10,
+  colour: range,
+  cpuEncode: "allowed",
+  level: undefined,
+});
+
+/** The dynamic ranges an encode keeps from an HDR source: HDR10's PQ and HLG. */
+export type HdrRange = "hdr10" | "hlg";
 
 /** Whether a frame holds a whole picture or two fields. */
 export type Scan = "progressive" | "interlaced";
@@ -392,6 +419,11 @@ export interface OpImpl<T extends OpName = OpName> {
    * the step is the cheaper choice. None when the row keeps up at any size.
    */
   readonly throughput?: ReadonlyArray<readonly [height: number, framesPerSecond: number]>;
+  /**
+   * For an encoder, the codec string (RFC 6381) of the stream it writes for `op`, as an HLS
+   * variant names it (`hls-variant.ts`); none where no playlist names it.
+   */
+  readonly codecString?: (op: OpOf<T>) => string | undefined;
 }
 
 /**
@@ -450,6 +482,8 @@ export interface Row {
   readonly fallbackFor: ImplId | undefined;
   /** What the row sustains by output height (`OpImpl.throughput`). */
   readonly throughput: OpImpl["throughput"];
+  /** The codec string of the stream an encoder writes for `op` (`OpImpl.codecString`). */
+  readonly codecString: (op: Op) => string | undefined;
 }
 
 /** `impl` as a table row. */
@@ -479,6 +513,7 @@ export const row = <T extends OpName>(impl: OpImpl<T>): Row => ({
   transfers: impl.transfers,
   fallbackFor: impl.fallbackFor,
   throughput: impl.throughput,
+  codecString: (op) => (Op.$is(impl.op)(op) ? impl.codecString?.(op) : undefined),
 });
 
 /** What the transcoder knows about a GPU domain besides its rows. */
@@ -558,6 +593,16 @@ export const STRIP_DYNAMIC_HDR_METADATA: ReadonlyArray<FilterCall> = strip(DYNAM
 
 /** Filters that remove Dolby Vision's RPU, which only a map of Dolby Vision's IPT may read. */
 export const STRIP_DOLBY_VISION_METADATA: ReadonlyArray<FilterCall> = strip(DOLBY_VISION_METADATA);
+
+/**
+ * Filters that remove the dynamic metadata of `HDR_METADATA` from frames, HDR10+'s, HDR Vivid's,
+ * and Dolby Vision's, and keep HDR10's static metadata: an HDR encode carries the mastering
+ * display and content light levels and claims no dynamic metadata it does not apply.
+ */
+export const STRIP_DYNAMIC_METADATA: ReadonlyArray<FilterCall> = strip([
+  ...DYNAMIC_HDR_METADATA,
+  ...DOLBY_VISION_METADATA,
+]);
 
 /**
  * Tags frames SDR BT.709 in limited range, whatever a filter before left on them, so encoders and
@@ -697,17 +742,76 @@ export const encodeRowId = (domain: Domain, codec: OutputCodec): ImplId =>
   ImplId(`encode.${domain}.${codec}`);
 
 /**
- * Whether the encode row of `codec` takes `target`: that codec at 8-bit SDR, the one entry encode
- * rows register.
+ * Whether the encode row of `codec` takes `target`: that codec at 8-bit SDR, which every codec's
+ * rows register, or for HEVC, Main 10 in HDR10 or HLG. AV1 HDR is not registered.
  */
-export const encodesTarget = (codec: OutputCodec, target: OutputTarget): boolean =>
-  target.codec === codec && target.depth === 8 && target.colour === "sdr";
+const encodesTarget = (codec: OutputCodec, target: OutputTarget): boolean =>
+  target.codec === codec &&
+  ((target.depth === 8 && target.colour === "sdr") ||
+    (codec === "hevc" &&
+      target.depth === 10 &&
+      (target.colour === "hdr10" || target.colour === "hlg")));
 
-/** What proves the encode row of `codec`: one 8-bit SDR encode of the 8-bit H.264 clip. */
+/**
+ * The variant an encode row of `codec` exercises encoding `frame` to `op`'s target in `rate` (`crf`
+ * on the CPU, `cbr` on a GPU): the depth and rate for SDR, as `8/cbr`, and the transfer after them
+ * for HDR, as `10/cbr/pq`, so an encoder that cannot write HDR loses only that key. None when the
+ * row does not take the target, the frame's signal is not the target's, or the frame is not
+ * progressive.
+ */
+export const encodeVariant = (
+  codec: OutputCodec,
+  rate: "crf" | "cbr",
+  op: OpOf<"Encode">,
+  frame: Frame,
+): string | undefined => {
+  const signal = signalOf(op.target);
+
+  if (
+    !encodesTarget(codec, op.target) ||
+    frame.colour.signal !== signal ||
+    frame.scan !== "progressive"
+  ) {
+    return undefined;
+  }
+
+  const depthRate = `${String(op.target.depth)}/${rate}`;
+
+  return signal === "sdr" ? depthRate : `${depthRate}/${signal}`;
+};
+
+/**
+ * The codec string of an HEVC encode of `op` from an encoder that writes `constraints`, its
+ * general constraint flags as hex bytes with trailing zero bytes left out (ISO/IEC 14496-15, E.3):
+ * for a Main 10 HDR target at a stated level, `hvc1.2.4.L123.90`, profile 2 in the Main tier,
+ * compatible with Main 10 alone, as libx265, `hevc_qsv`, and `hevc_vaapi` write it; none for an
+ * SDR target or an unstated level, which no playlist names.
+ */
+export const hevcCodecString = (op: OpOf<"Encode">, constraints: string): string | undefined =>
+  op.target.codec !== "hevc" || op.target.depth !== 10 || op.level === undefined
+    ? undefined
+    : `hvc1.2.4.L${String(op.level)}.${constraints}`;
+
+/**
+ * What proves the encode row of `codec`: one 8-bit SDR encode of the 8-bit H.264 clip, and for
+ * HEVC, a Main 10 HDR10 encode of the PQ clip, with its mastering display metadata, and an HLG
+ * encode of the HLG clip.
+ */
 export const encodeProbes = (codec: OutputCodec): ReadonlyArray<ProbeCase<"Encode">> => [
   {
     op: Op.Encode({ target: sdrTarget(codec), bitrate: 1_000_000, level: undefined }),
     clip: "h264-8",
     runs: 1,
   },
+  ...(codec === "hevc"
+    ? ([
+        ["hdr10", "hevc-pq"],
+        ["hlg", "hevc-hlg"],
+      ] as const)
+    : []
+  ).map(([range, clip]): ProbeCase<"Encode"> => ({
+    op: Op.Encode({ target: hdrTarget(range), bitrate: 1_000_000, level: undefined }),
+    clip,
+    runs: 1,
+  })),
 ];

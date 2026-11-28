@@ -96,6 +96,21 @@ const AudioCodecSupport = Schema.Struct({
   maxChannels: Schema.optional(Schema.Int),
 });
 
+/** An HDR format a screen shows: HDR10 (PQ) or HLG. */
+export const HdrScreenRange = Schema.Literals(["hdr10", "hlg"]);
+
+/** An HDR format a newer client lists, which this side's list lacks, kept as it came. */
+const NewerHdrScreenRange = Schema.String.pipe(Schema.brand("NewerHdrScreenRange"));
+
+/**
+ * An HDR format as the wire carries it in `hdrScreen`: one of `HdrScreenRange`'s, or one a newer
+ * client added, kept as it came and matched by nothing, so the rest of the request still decodes.
+ */
+export const HdrScreenRangeCode = Schema.Union([HdrScreenRange, NewerHdrScreenRange]);
+
+/** An HDR format as the wire carries it in `hdrScreen`. */
+export type HdrScreenRangeCode = typeof HdrScreenRangeCode.Type;
+
 /** What a client can play. Browser checks are hints; a failed direct path renegotiates. */
 export const ClientCapabilities = Schema.Struct({
   /** Containers the client plays progressively over byte ranges. */
@@ -108,6 +123,14 @@ export const ClientCapabilities = Schema.Struct({
   hls: Schema.Boolean,
   /** Has Media Source Extensions, so a script player (hls.js) can play fMP4 HLS. */
   mse: Schema.Boolean,
+  /**
+   * The HDR formats the screen the client plays on shows as HDR now: `hdr10` (PQ), `hlg`. A video
+   * the service must re-encode keeps the source's HDR10 or HLG only when it is listed here and in
+   * the HEVC entry's `dynamicRanges`, as HEVC Main 10; otherwise the service maps it to SDR. A
+   * client that decodes HDR but shows it on an SDR screen leaves it out, as does one that cannot
+   * tell. Copies are unaffected: they follow `dynamicRanges` alone.
+   */
+  hdrScreen: Schema.optional(Schema.Array(HdrScreenRangeCode)),
 });
 
 /** What a client can play. */
@@ -326,6 +349,14 @@ export const TranscodeSummary = Schema.Struct({
   source: Schema.optionalKey(Schema.String),
   stages: Schema.Array(TranscodeStage),
   changes: Schema.Array(TranscodeChange),
+  /**
+   * Why a source whose HDR the client's screen shows reaches it as SDR: `subtitle` (a subtitle
+   * drawn into the picture is drawn on SDR only), or `no-hdr-encode` (no 10-bit HDR encode on this
+   * server's path is proven, the CPU's is kept for clients that play nothing else, or a failed run
+   * left none). Absent when the stream keeps the source's HDR or SDR was all the client asked
+   * for. A string, so a later code changes no contract.
+   */
+  sdrReason: Schema.optionalKey(Schema.String),
 });
 
 /** Where an HLS generation's video is made. */

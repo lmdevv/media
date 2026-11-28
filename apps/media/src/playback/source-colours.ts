@@ -2,8 +2,9 @@
  * What the transcoder does with each kind of source colour, as one table (`COLOUR_DECISIONS`) that
  * its test prints: whether the original may be copied and what a client must declare for it (the
  * shared direct-play check, `playableAs`), what a copy keeps of a Dolby Vision configuration, the
- * signal its decoded frames carry, which picks the tone map, and how an encode reaches SDR. The
- * rows read the signal; nothing else branches on a kind of source.
+ * signal its decoded frames carry, which picks the tone map and which HDR an encode may keep
+ * (`keptRange`), and how an encode reaches SDR. The rows read the signal; nothing else branches on
+ * a kind of source.
  */
 import {
   type BaseRange,
@@ -14,7 +15,7 @@ import {
 import type { DynamicRange } from "@media/contracts/media-playback";
 
 import type { VideoStream } from "../media/media-probe.ts";
-import type { Colour, Signal } from "./video-ops.ts";
+import type { Colour, HdrRange, Signal } from "./video-ops.ts";
 
 /** Each kind of source colour the table decides for, in the table's order. */
 export const SOURCE_KINDS = [
@@ -291,6 +292,22 @@ const decisionOf = (video: VideoStream): ColourDecision => COLOUR_DECISIONS[kind
 export const convertible = (video: VideoStream): boolean =>
   decisionOf(video).signal !== "dovi" || video.dolbyVisionRpu === true;
 
+/**
+ * The HDR an encode keeps of a source whose frames carry `signal`, for a client that plays HEVC
+ * Main 10 in it on a screen that shows it: HDR10 from PQ, which HDR10, HDR10+ (its static base),
+ * and the base layers of Dolby Vision 7 and 8.1 are; HLG from HLG, as HLG and Dolby Vision 8.4's
+ * base layer are; none for SDR, and for Dolby Vision's IPT, which only its RPU makes a picture of.
+ * A kept stream is the base layer alone, with no Dolby Vision or HDR10+ metadata.
+ */
+export const keptRange = (signal: Signal): HdrRange | undefined => KEPT_RANGES[signal];
+
+const KEPT_RANGES: Readonly<Record<Signal, HdrRange | undefined>> = {
+  sdr: undefined,
+  pq: "hdr10",
+  hlg: "hlg",
+  dovi: undefined,
+};
+
 /** The colour `video`'s decoded frames are in, as rows read it. */
 export const sourceColour = (video: VideoStream): Colour => ({
   signal: decisionOf(video).signal,
@@ -311,6 +328,8 @@ export interface TableLine {
   readonly copiedTo: string;
   readonly dolbyVisionCopy: ColourDecision["dolbyVisionCopy"];
   readonly signal: Signal;
+  /** The HDR an encode keeps for a client whose screen shows it, or `none`. */
+  readonly keeps: HdrRange | "none";
   readonly encode: string;
   readonly why: string;
 }
@@ -327,6 +346,7 @@ export const tableLines = (): ReadonlyArray<TableLine> =>
       copiedTo: playableAs(decision.example, "copied").join(" or "),
       dolbyVisionCopy: decision.dolbyVisionCopy,
       signal: decision.signal,
+      keeps: keptRange(decision.signal) ?? "none",
       encode: decision.encode,
       why: decision.why,
     };

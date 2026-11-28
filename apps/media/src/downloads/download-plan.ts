@@ -58,6 +58,21 @@ export interface DownloadOptions {
 }
 
 /**
+ * The client a download of `client`'s is planned for: its codecs, sizes, and MP4 and QuickTime
+ * containers, and no HDR screen, so an encode keeps SDR: the file plays later, on whatever screen
+ * the device has then.
+ */
+export const downloadClient = (client: ClientCapabilities): ClientCapabilities => ({
+  containers: client.containers.filter((container) => FILE_CONTAINERS.has(container)),
+  videoCodecs: client.videoCodecs,
+  audioCodecs: client.audioCodecs,
+  maxWidth: client.maxWidth,
+  maxHeight: client.maxHeight,
+  hls: true,
+  mse: false,
+});
+
+/**
  * Chooses what `client` downloads of `probe` at `quality`, by the decision streams use, strictly
  * within the quality's size and bitrate. A file another audio track was asked for, or in a
  * container the device cannot open, is written as an MP4 even when its streams play as they are.
@@ -70,23 +85,11 @@ export const decideDownload = (
   quality: DownloadQuality,
   options: DownloadOptions,
 ): DownloadPlan => {
-  const plan = decideWithin(
-    probe,
-    {
-      containers: client.containers.filter((container) => FILE_CONTAINERS.has(container)),
-      videoCodecs: client.videoCodecs,
-      audioCodecs: client.audioCodecs,
-      maxWidth: client.maxWidth,
-      maxHeight: client.maxHeight,
-      hls: true,
-      mse: false,
-    },
-    {
-      audioIndex: options.audioIndex,
-      capabilities: { ...options.capabilities, domains: [] },
-      quality: DOWNLOAD_CAPS[quality],
-    },
-  );
+  const plan = decideWithin(probe, downloadClient(client), {
+    audioIndex: options.audioIndex,
+    capabilities: { ...options.capabilities, domains: [] },
+    quality: DOWNLOAD_CAPS[quality],
+  });
 
   return PlaybackPlan.$match(plan, {
     Direct: () => DownloadPlan.Original(),

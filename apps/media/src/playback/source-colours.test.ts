@@ -86,8 +86,8 @@ describe("the table of source colours", () => {
     const lines = tableLines();
 
     const table = [
-      "| kind | source | played as stored by a client that declares | copied to a client that declares | Dolby Vision on a copy | decoded as | when encoded | why |",
-      "| --- | --- | --- | --- | --- | --- | --- | --- |",
+      "| kind | source | played as stored by a client that declares | copied to a client that declares | Dolby Vision on a copy | decoded as | encoded for an HDR screen as | when encoded for SDR | why |",
+      "| --- | --- | --- | --- | --- | --- | --- | --- | --- |",
       ...lines.map((line) =>
         [
           "",
@@ -97,6 +97,7 @@ describe("the table of source colours", () => {
           declared(line.copiedTo),
           line.dolbyVisionCopy,
           line.signal,
+          line.keeps === "none" ? "SDR" : `HEVC Main 10 ${line.keeps}`,
           line.encode,
           line.why,
           "",
@@ -109,22 +110,25 @@ describe("the table of source colours", () => {
 
     expect(
       Object.fromEntries(
-        lines.map((line) => [line.kind, [line.directPlayTo, line.copiedTo, line.signal]]),
+        lines.map((line) => [
+          line.kind,
+          [line.directPlayTo, line.copiedTo, line.signal, line.keeps],
+        ]),
       ),
     ).toStrictEqual({
-      sdr: ["sdr", "sdr", "sdr"],
-      "sdr-bt601": ["sdr", "sdr", "sdr"],
-      "sdr-bt2020": ["sdr", "sdr", "sdr"],
-      "sdr-full-range": ["sdr", "sdr", "sdr"],
-      hdr10: ["hdr10", "hdr10", "pq"],
-      hdr10plus: ["hdr10", "hdr10", "pq"],
-      hlg: ["hlg", "hlg", "hlg"],
-      "dolby-vision-5": ["dolby-vision", "dolby-vision", "dovi"],
-      "dolby-vision-7": ["", "hdr10", "pq"],
-      "dolby-vision-8.1": ["dolby-vision", "dolby-vision or hdr10", "pq"],
-      "dolby-vision-8.2": ["dolby-vision", "dolby-vision or sdr", "sdr"],
-      "dolby-vision-8.4": ["dolby-vision", "dolby-vision or hlg", "hlg"],
-      "dolby-vision-other": ["", "", "dovi"],
+      sdr: ["sdr", "sdr", "sdr", "none"],
+      "sdr-bt601": ["sdr", "sdr", "sdr", "none"],
+      "sdr-bt2020": ["sdr", "sdr", "sdr", "none"],
+      "sdr-full-range": ["sdr", "sdr", "sdr", "none"],
+      hdr10: ["hdr10", "hdr10", "pq", "hdr10"],
+      hdr10plus: ["hdr10", "hdr10", "pq", "hdr10"],
+      hlg: ["hlg", "hlg", "hlg", "hlg"],
+      "dolby-vision-5": ["dolby-vision", "dolby-vision", "dovi", "none"],
+      "dolby-vision-7": ["", "hdr10", "pq", "hdr10"],
+      "dolby-vision-8.1": ["dolby-vision", "dolby-vision or hdr10", "pq", "hdr10"],
+      "dolby-vision-8.2": ["dolby-vision", "dolby-vision or sdr", "sdr", "none"],
+      "dolby-vision-8.4": ["dolby-vision", "dolby-vision or hlg", "hlg", "hlg"],
+      "dolby-vision-other": ["", "", "dovi", "none"],
     });
   });
 

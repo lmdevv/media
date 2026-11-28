@@ -9,6 +9,7 @@ import {
   type Burn,
   type CapabilityKey,
   type GpuDomain,
+  hdrTarget,
   Op,
   OUTPUT_CODECS,
   SDR_BT709,
@@ -20,8 +21,8 @@ const DEVICE = "/dev/dri/renderD128";
 
 /**
  * A snapshot in which every key some chain for `probe`'s video could use on `domains` (and the
- * CPU) is verified, to any output codec, burning an image subtitle in or not, and a text one for a
- * file that has a text track, except the keys `refused`
+ * CPU) is verified, to any output codec in SDR and to HEVC in HDR10 and HLG, burning an image
+ * subtitle in or not, and a text one for a file that has a text track, except the keys `refused`
  * picks: what planning may use on a test server whose devices do everything.
  */
 export const verifiedFor = (
@@ -82,7 +83,7 @@ export const verifiedFor = (
       candidateKeys(
         source,
         {
-          targets: OUTPUT_CODECS.map(sdrTarget),
+          targets: [hdrTarget("hdr10"), hdrTarget("hlg"), ...OUTPUT_CODECS.map(sdrTarget)],
           frameRate: undefined,
           bounds: { width: source.width, height: source.height },
           cpuEncodeBounds: { width: 1920, height: 1080 },

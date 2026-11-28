@@ -20,10 +20,11 @@ import {
   type FilterCall,
   type Frame,
   encodeRowId,
-  encodesTarget,
+  encodeVariant,
   filter,
   fusing,
   type GpuDomain,
+  hevcCodecString,
   ImplId,
   NOTHING,
   Op,
@@ -641,20 +642,23 @@ const burnImageOn = (
 });
 
 /**
- * One codec's GPU encoder: its name, the options before and after the bitrate, and how it states a
- * level the plan has.
+ * One codec's GPU encoder: its name, the options before the bitrate for a target's depth and those
+ * after it, and how it states a level the plan has.
  */
 interface GpuEncoder {
   readonly name: string;
-  readonly before: ReadonlyArray<string>;
+  readonly before: (depth: number) => ReadonlyArray<string>;
   readonly after: ReadonlyArray<string>;
   readonly level: (level: Level) => ReadonlyArray<string>;
+  /** The HEVC constraint flags it writes, for its codec string (`hevcCodecString`). */
+  readonly constraints?: string;
 }
 
 /**
- * The row of `domain`'s encoder of `codec`: a fixed bitrate from 8-bit SDR NV12 surfaces. On the
- * Arc A380 every one of them, with ffmpeg 9 and Debian's 7.1, put an IDR frame (H.264, HEVC) or a
- * key frame (AV1) exactly at each forced keyframe.
+ * The row of `domain`'s encoder of `codec`: a fixed bitrate from surfaces of the target's depth
+ * and signal, 8-bit SDR in NV12, or for HEVC, Main 10 in the source's own HDR10 or HLG from P010.
+ * On the Arc A380 every one of them, with ffmpeg 9 and Debian's 7.1, put an IDR frame (H.264,
+ * HEVC) or a key frame (AV1) exactly at each forced keyframe.
  */
 const encodeOn = (
   domain: GpuDomain,
@@ -667,11 +671,8 @@ const encodeOn = (
   takes: domain,
   needs: () => [`encoder:${encoder.name}`],
   variant: (op, frame) =>
-    encodesTarget(codec, op.target) &&
-    frame.colour.signal === "sdr" &&
-    frame.scan === "progressive" &&
-    frame.pixelFormat === "nv12"
-      ? `${String(op.target.depth)}/cbr`
+    frame.pixelFormat === surfaceFormat(op.target.depth)
+      ? encodeVariant(codec, "cbr", op, frame)
       : undefined,
   output: (_, frame) => frame,
   render: (op) => ({
@@ -679,7 +680,7 @@ const encodeOn = (
     output: [
       "-c:v",
       encoder.name,
-      ...encoder.before,
+      ...encoder.before(op.target.depth),
       ...(op.level === undefined ? [] : levelArgs(codec, op.level, encoder)),
       "-b:v",
       String(op.bitrate),
@@ -691,6 +692,8 @@ const encodeOn = (
     ],
   }),
   probes: encodeProbes(codec),
+  codecString: (op) =>
+    encoder.constraints === undefined ? undefined : hevcCodecString(op, encoder.constraints),
 });
 
 /** How `encoder` states the level in ffprobe's units `idc`; nothing for a level no table lists. */
@@ -707,6 +710,9 @@ const encodesOn = (
 ): ReadonlyArray<Row> =>
   OUTPUT_CODECS.map((codec) => row(encodeOn(domain, codec, encoders[codec])));
 
+/** HEVC's profile for an encode of `depth` bits: Main, or Main 10 for HDR. */
+const hevcProfile = (depth: number): "main" | "main10" => (depth > 8 ? "main10" : "main");
+
 /** States no level: H.264 encodes have no level table. */
 const NO_LEVEL = (): ReadonlyArray<string> => [];
 
@@ -717,19 +723,20 @@ const NO_LEVEL = (): ReadonlyArray<string> => [];
 const encodeQsv = encodesOn("qsv", {
   h264: {
     name: "h264_qsv",
-    before: ["-preset", "veryfast"],
+    before: () => ["-preset", "veryfast"],
     after: ["-forced_idr", "1"],
     level: NO_LEVEL,
   },
   hevc: {
     name: "hevc_qsv",
-    before: ["-preset", "veryfast", "-profile:v", "main"],
+    constraints: "90",
+    before: (depth) => ["-preset", "veryfast", "-profile:v", hevcProfile(depth)],
     after: ["-forced_idr", "1"],
     level: (level) => ["-level", String(level.tenths)],
   },
   av1: {
     name: "av1_qsv",
-    before: ["-preset", "veryfast", "-profile:v", "main"],
+    before: () => ["-preset", "veryfast", "-profile:v", "main"],
     after: ["-forced_idr", "1"],
     level: (level) => ["-level", String(level.tenths)],
   },
@@ -835,20 +842,21 @@ const toneMapVaapi: OpImpl<"ToneMap"> = {
 };
 
 /**
- * VA-API's encoders: H.264 High, HEVC Main, AV1 Main. They take a level in ffprobe's units
- * (`general_level_idc`, `seq_level_idx`).
+ * VA-API's encoders: H.264 High, HEVC Main (Main 10 for HDR), AV1 Main. They take a level in
+ * ffprobe's units (`general_level_idc`, `seq_level_idx`).
  */
 const encodeVaapi = encodesOn("vaapi", {
-  h264: { name: "h264_vaapi", before: ["-profile:v", "high"], after: [], level: NO_LEVEL },
+  h264: { name: "h264_vaapi", before: () => ["-profile:v", "high"], after: [], level: NO_LEVEL },
   hevc: {
     name: "hevc_vaapi",
-    before: ["-profile:v", "main"],
+    constraints: "B0",
+    before: (depth) => ["-profile:v", hevcProfile(depth)],
     after: [],
     level: (level) => ["-level", String(level.idc)],
   },
   av1: {
     name: "av1_vaapi",
-    before: ["-profile:v", "main"],
+    before: () => ["-profile:v", "main"],
     after: [],
     level: (level) => ["-level", String(level.idc)],
   },

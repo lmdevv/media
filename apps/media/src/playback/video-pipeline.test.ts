@@ -693,7 +693,7 @@ describe("planVideo", () => {
     const video = source({ codec: "hevc", pixelFormat: "yuv420p10le", depth: 10, colour: HDR10 });
     const sdr = sdrTarget("hevc");
     const hdr: OutputTarget = { ...sdr, depth: 10, colour: "hdr10" };
-    const keys = everyKey(video, intentFor(video, { targets: [sdr] }), []);
+    const keys = everyKey(video, intentFor(video, { targets: [hdr, sdr] }), []);
     const toSdr = planVideo(video, intentFor(video, { targets: [sdr] }), snapshot([], keys));
     const toHdr = planVideo(video, intentFor(video, { targets: [hdr] }), snapshot([], keys));
 
@@ -701,20 +701,24 @@ describe("planVideo", () => {
       Result.map(toSdr, ({ pipeline }) => impls(pipeline)),
       Result.succeed(["decode.cpu", "scale.cpu", "tonemap.cpu", "encode.cpu.hevc"]),
     );
+    assert.deepStrictEqual(
+      Result.map(toHdr, ({ pipeline }) => impls(pipeline)),
+      Result.succeed(["decode.cpu", "scale.cpu", "encode.cpu.hevc"]),
+    );
+    assert.strictEqual(Result.isSuccess(toHdr) ? toHdr.success.output.dynamicRange : "", "hdr10");
 
     const toneMapped = Result.isSuccess(toSdr)
       ? toSdr.success.pipeline.steps.find((step) => Op.$is("ToneMap")(step.op))?.input
       : undefined;
 
-    // No row encodes HDR, so the HDR target's chain ends refused at its encode: handed the frames
-    // the SDR chain tone-maps, as it runs the same stages without the tone map.
+    const encoded = Result.isSuccess(toHdr) ? toHdr.success.pipeline.steps.at(-1) : undefined;
+
+    // The HDR target's chain runs the same stages without the tone map: its encoder gets the
+    // frames the SDR chain tone-maps, 10-bit PQ, and keeps them so.
     assert.isDefined(toneMapped);
-    assert.deepStrictEqual(
-      Result.isFailure(toHdr) && Rejection.$is("Refused")(toHdr.failure)
-        ? toHdr.failure.frame
-        : undefined,
-      toneMapped,
-    );
+    assert.deepStrictEqual(encoded?.input, toneMapped);
+    assert.deepStrictEqual(encoded?.output.colour, HDR10);
+    assert.strictEqual(encoded?.capability, "encode.cpu.hevc:10/crf/pq");
   });
 
   it("prefers Quick Sync to VA-API, and caps only a CPU encode at 1080p", () => {

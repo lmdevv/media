@@ -132,6 +132,9 @@ interface Size {
 const levelAtMost = (codec: OutputCodec, declared: number): Level | undefined =>
   (LEVELS[codec] ?? []).findLast((level) => level.idc <= declared);
 
+/** The highest level of `codec` the table lists, in ffprobe's units; none without a table. */
+export const highestLevel = (codec: OutputCodec): number | undefined => LEVELS[codec]?.at(-1)?.idc;
+
 /** The level in ffprobe's units `idc` of `codec`, as listed. */
 export const levelOf = (codec: OutputCodec, idc: number): Level | undefined =>
   (LEVELS[codec] ?? []).find((level) => level.idc === idc);

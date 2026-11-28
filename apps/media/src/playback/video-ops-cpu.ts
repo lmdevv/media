@@ -16,8 +16,9 @@ import {
   drawnCanvas,
   encodeProbes,
   encodeRowId,
-  encodesTarget,
+  encodeVariant,
   filter,
+  hevcCodecString,
   ImplId,
   NOTHING,
   Op,
@@ -29,6 +30,7 @@ import {
   visibleCanvas,
   SDR_BT709,
   STRIP_DYNAMIC_HDR_METADATA,
+  STRIP_DYNAMIC_METADATA,
   STRIP_HDR_METADATA,
   TAG_SDR_BT709,
   toneMapTransfer,
@@ -223,12 +225,15 @@ const burnTextCpu: OpImpl<"BurnText"> = {
 
 /**
  * One codec's software encoder: its name, the options that set its speed, profile, and quality
- * target before the bitrate cap, and those after it, which state the plan's level when it has one.
+ * target before the bitrate cap for a target's depth, and those after it, which state the plan's
+ * level when it has one.
  */
 interface SoftwareEncoder {
   readonly name: string;
-  readonly quality: ReadonlyArray<string>;
+  readonly quality: (depth: number) => ReadonlyArray<string>;
   readonly after: (level: Level | undefined) => ReadonlyArray<string>;
+  /** The HEVC constraint flags it writes, for its codec string (`hevcCodecString`). */
+  readonly constraints?: string;
 }
 
 /**
@@ -246,24 +251,37 @@ interface SoftwareEncoder {
 const SVT_AV1_LIVE: ReadonlyArray<string> = ["lp=3", "hierarchical-levels=3", "lookahead=0"];
 
 /**
- * The 8-bit SDR encoder of each codec, each at a quality target near libx264's CRF 23 and a speed
+ * The software encoder of each codec, each at a quality target near libx264's CRF 23 and a speed
  * that keeps up with a 1080p stream on a desktop CPU. libx265 closes its GOPs, or a forced
  * keyframe is a CRA picture whose leading pictures need the segment before, and makes each forced
  * keyframe an IDR frame (`forced-idr`): without it, a forced keyframe less than a second after a
  * scene cut's keyframe is dropped. On 30 s of a 1080p SDR film with Debian's ffmpeg 7.1 on a Ryzen
  * 9 5950X, libx265 `superfast` at CRF 23 scores an SSIM of 0.9878 against libx264's 0.9892 (CRF
  * 24: 0.9865; 28: 0.9801) with 81 % of its bytes, near 39 frames a second against libx264's 195.
- * SVT-AV1's presets above 9 warn of artifacts outside its real-time mode.
+ * SVT-AV1's presets above 9 warn of artifacts outside its real-time mode. libx265 encodes HEVC's
+ * HDR targets in Main 10 with the same options: from frames tagged PQ or HLG and BT.2020 that carry
+ * HDR10's mastering display and content light levels, ffmpeg 7.1 and 9 alike pass the tags to it
+ * and it writes them into the stream's VUI and its mastering display and content light level SEI,
+ * which the MP4 muxer copies into the sample entry (`colr`, `mdcv`, `clli`), with no option of its
+ * own.
  */
 const SOFTWARE_ENCODERS: Readonly<Record<OutputCodec, SoftwareEncoder>> = {
   h264: {
     name: "libx264",
-    quality: ["-preset", "veryfast", "-profile:v", "high", "-crf", "23"],
+    quality: () => ["-preset", "veryfast", "-profile:v", "high", "-crf", "23"],
     after: () => [],
   },
   hevc: {
     name: "libx265",
-    quality: ["-preset", "superfast", "-profile:v", "main", "-crf", "23"],
+    constraints: "90",
+    quality: (depth) => [
+      "-preset",
+      "superfast",
+      "-profile:v",
+      depth > 8 ? "main10" : "main",
+      "-crf",
+      "23",
+    ],
     after: (level) => [
       "-forced-idr",
       "1",
@@ -277,7 +295,7 @@ const SOFTWARE_ENCODERS: Readonly<Record<OutputCodec, SoftwareEncoder>> = {
   },
   av1: {
     name: "libsvtav1",
-    quality: ["-preset", "9", "-crf", "30"],
+    quality: () => ["-preset", "9", "-crf", "30"],
     after: (level) => [
       "-svtav1-params",
       [...SVT_AV1_LIVE, ...(level === undefined ? [] : [`level=${String(level.tenths)}`])].join(
@@ -287,10 +305,16 @@ const SOFTWARE_ENCODERS: Readonly<Record<OutputCodec, SoftwareEncoder>> = {
   },
 };
 
+/** The 4:2:0 layout a software encode of `depth` bits is converted to. */
+const softwareLayout = (depth: number): "yuv420p" | "yuv420p10le" =>
+  depth > 8 ? "yuv420p10le" : "yuv420p";
+
 /**
  * The software encoder of `codec`, a row of its own: a quality target under a VBV cap, from any
- * SDR layout and depth, converted to 8-bit 4:2:0. Every forced keyframe is an IDR frame (H.264,
- * HEVC) or a key frame (AV1).
+ * layout and depth of the target's signal, converted to 4:2:0 at the target's depth: 8-bit SDR, or
+ * for HEVC, Main 10 in the source's own HDR10 or HLG, its HDR10 static metadata kept and any
+ * HDR10+ or Dolby Vision metadata dropped (`STRIP_DYNAMIC_METADATA`), which libx265 would
+ * otherwise write. Every forced keyframe is an IDR frame (H.264, HEVC) or a key frame (AV1).
  */
 const encodeCpu = (codec: OutputCodec): OpImpl<"Encode"> => {
   const encoder = SOFTWARE_ENCODERS[codec];
@@ -300,21 +324,26 @@ const encodeCpu = (codec: OutputCodec): OpImpl<"Encode"> => {
     op: "Encode",
     on: "cpu",
     takes: "cpu",
-    needs: () => [`encoder:${encoder.name}`],
-    variant: (op, input) =>
-      encodesTarget(codec, op.target) &&
-      input.colour.signal === "sdr" &&
-      input.scan === "progressive"
-        ? `${String(op.target.depth)}/crf`
-        : undefined,
-    output: (_, input) => ({ ...input, depth: 8, pixelFormat: "yuv420p" }),
+    needs: (op) =>
+      op.target.colour === "sdr"
+        ? [`encoder:${encoder.name}`]
+        : [`encoder:${encoder.name}`, "filter:sidedata"],
+    variant: (op, input) => encodeVariant(codec, "crf", op, input),
+    output: (op, input) => ({
+      ...input,
+      depth: op.target.depth,
+      pixelFormat: softwareLayout(op.target.depth),
+    }),
     render: (op) => ({
       input: [],
-      filters: [filter("format", "yuv420p")],
+      filters: [
+        filter("format", softwareLayout(op.target.depth)),
+        ...(op.target.colour === "sdr" ? [] : STRIP_DYNAMIC_METADATA),
+      ],
       output: [
         "-c:v",
         encoder.name,
-        ...encoder.quality,
+        ...encoder.quality(op.target.depth),
         "-maxrate",
         String(op.bitrate),
         "-bufsize",
@@ -323,6 +352,8 @@ const encodeCpu = (codec: OutputCodec): OpImpl<"Encode"> => {
       ],
     }),
     probes: encodeProbes(codec),
+    codecString: (op) =>
+      encoder.constraints === undefined ? undefined : hevcCodecString(op, encoder.constraints),
   };
 };
 

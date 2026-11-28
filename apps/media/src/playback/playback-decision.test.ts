@@ -204,22 +204,23 @@ const everywhere = deciding(["qsv", "vaapi"], () => false);
 
 describe("outputTargets", () => {
   it("prefers HEVC, then AV1 decoded in hardware, then H.264", () => {
-    expect(outputTargets(chrome)).toStrictEqual([target("h264", "allowed")]);
-    expect(outputTargets(safari)).toStrictEqual([
+    expect(outputTargets(chrome, undefined)).toStrictEqual([target("h264", "allowed")]);
+    expect(outputTargets(safari, undefined)).toStrictEqual([
       target("hevc", "refused"),
       target("h264", "allowed"),
     ]);
-    expect(outputTargets(chromeWithHevc)).toStrictEqual([
+    expect(outputTargets(chromeWithHevc, undefined)).toStrictEqual([
       target("hevc", "refused"),
       target("h264", "allowed"),
     ]);
-    expect(outputTargets(chromeWithAv1)).toStrictEqual([
+    expect(outputTargets(chromeWithAv1, undefined)).toStrictEqual([
       target("av1", "refused"),
       target("h264", "allowed"),
     ]);
     expect(
       outputTargets(
         device([{ codec: "h264" }, { codec: "hevc" }, { codec: "av1", powerEfficient: true }]),
+        undefined,
       ),
     ).toStrictEqual([
       target("hevc", "refused"),
@@ -229,21 +230,24 @@ describe("outputTargets", () => {
   });
 
   it("encodes HEVC or AV1 on the CPU only for a client without H.264", () => {
-    expect(outputTargets(hevcOnly)).toStrictEqual([target("hevc", "allowed")]);
-    expect(outputTargets(av1Only)).toStrictEqual([target("av1", "allowed")]);
+    expect(outputTargets(hevcOnly, undefined)).toStrictEqual([target("hevc", "allowed")]);
+    expect(outputTargets(av1Only, undefined)).toStrictEqual([target("av1", "allowed")]);
     expect(
-      outputTargets(device([{ codec: "hevc" }, { codec: "av1", powerEfficient: true }])),
+      outputTargets(device([{ codec: "hevc" }, { codec: "av1", powerEfficient: true }]), undefined),
     ).toStrictEqual([target("hevc", "allowed"), target("av1", "allowed")]);
   });
 
   it("offers only a profile the client lists, and nothing for a client that plays none", () => {
     expect(
-      outputTargets(device([{ codec: "h264" }, { codec: "hevc", profiles: ["Main 10"] }])),
+      outputTargets(
+        device([{ codec: "h264" }, { codec: "hevc", profiles: ["Main 10"] }]),
+        undefined,
+      ),
     ).toStrictEqual([target("h264", "allowed")]);
-    expect(outputTargets(device([{ codec: "h264", profiles: ["Main", "High"] }]))).toStrictEqual([
-      target("h264", "allowed"),
-    ]);
-    expect(outputTargets(device([{ codec: "vp9" }]))).toStrictEqual([]);
+    expect(
+      outputTargets(device([{ codec: "h264", profiles: ["Main", "High"] }]), undefined),
+    ).toStrictEqual([target("h264", "allowed")]);
+    expect(outputTargets(device([{ codec: "vp9" }]), undefined)).toStrictEqual([]);
   });
 
   it("carries the level the client declared for each codec", () => {
@@ -254,6 +258,7 @@ describe("outputTargets", () => {
           { codec: "hevc", maxLevel: 93 },
           { codec: "av1", maxLevel: 8, powerEfficient: true },
         ]),
+        undefined,
       ),
     ).toStrictEqual([
       target("hevc", "refused", 93),

@@ -15,7 +15,8 @@ import { Data, Result } from "effect";
 
 import type { AudioTrack, MediaProbe, VideoStream } from "../media/media-probe.ts";
 import { burnableText } from "../subtitles/burned-text.ts";
-import { convertible } from "./source-colours.ts";
+import { highestLevel } from "./output-levels.ts";
+import { convertible, keptRange, sourceColour } from "./source-colours.ts";
 import {
   type CapabilitySnapshot,
   encodeDomain,
@@ -29,6 +30,7 @@ import {
 import {
   type Burn,
   type Colour,
+  type HdrRange,
   Op,
   type OutputCodec,
   type OutputTarget,
@@ -158,18 +160,51 @@ const playable = (
     : undefined;
 };
 
+/** HEVC's profile for HDR, as ffprobe names it. */
+const HDR_PROFILE = "main 10";
+
 /**
- * What an encode for `client` may produce, the most wanted first: HEVC when the client plays it;
- * AV1 when it decodes AV1 in hardware, or plays neither HEVC nor H.264; H.264 last, the broad
- * fallback. A CPU encodes H.264 when the client plays it, as software HEVC and AV1 cost several
- * times its CPU for a live stream, and HEVC or AV1 only for a client without H.264. Each target
- * carries the level the client declared for its codec, which HEVC and AV1 encodes fit; H.264 has
- * no level table, so its declared level limits nothing. Empty when the client plays none.
+ * What `client` says of HEVC when it keeps `range` from an HDR source: it plays HEVC Main 10 at 10
+ * bits in that range (`dynamicRanges`), and its screen shows it now (`hdrScreen`). A client that
+ * decodes HDR on an SDR screen leaves the screen out, and gets the service's SDR.
  */
-export const outputTargets = (client: ClientCapabilities): ReadonlyArray<OutputTarget> => {
+const playsHdr = (client: ClientCapabilities, range: HdrRange): VideoCodecSupport | undefined => {
+  const support = videoSupport(client, "hevc");
+
+  return support !== undefined &&
+    (support.profiles === undefined ||
+      support.profiles.some((listed) => listed.toLowerCase() === HDR_PROFILE)) &&
+    (support.maxBitDepth ?? 8) >= 10 &&
+    (support.dynamicRanges ?? []).includes(range) &&
+    (client.hdrScreen ?? []).includes(range)
+    ? support
+    : undefined;
+};
+
+/**
+ * What an encode for `client` may produce, the most wanted first: HEVC Main 10 in `kept`, the
+ * source's own HDR (`keptRange`), when the client plays it and its screen shows it; HEVC when the
+ * client plays it; AV1 when it decodes AV1 in hardware, or plays neither HEVC nor H.264; H.264
+ * last, the broad fallback. The SDR targets follow the HDR one, so a chain that cannot keep HDR
+ * (no proven 10-bit encoder, a subtitle drawn in, a failed run) maps to SDR within the same
+ * intent. A CPU encodes H.264 when the client plays it, as software HEVC and AV1 cost several
+ * times its CPU for a live stream, and HEVC (HDR included) or AV1 only for a client without H.264.
+ * Each SDR target carries the level the client declared for its codec, which HEVC and AV1 encodes
+ * fit; H.264 has no level table, so its declared level limits nothing. The HDR target carries the
+ * declared level, else HEVC's highest, so its encode always states the lowest level that holds it,
+ * which the multivariant playlist names. Empty when the client plays none.
+ */
+export const outputTargets = (
+  client: ClientCapabilities,
+  kept: HdrRange | undefined,
+): ReadonlyArray<OutputTarget> => {
   const h264 = playable(client, "h264");
   const hevc = playable(client, "hevc");
   const av1 = playable(client, "av1");
+  const hdr = kept === undefined ? undefined : playsHdr(client, kept);
+
+  const cpuEncode = (codec: OutputCodec) =>
+    codec === "h264" || h264 === undefined ? "allowed" : "refused";
 
   const av1Wanted =
     av1 !== undefined &&
@@ -181,7 +216,7 @@ export const outputTargets = (client: ClientCapabilities): ReadonlyArray<OutputT
     ["h264", h264],
   ];
 
-  return wanted.flatMap(([codec, support]): ReadonlyArray<OutputTarget> =>
+  const sdr = wanted.flatMap(([codec, support]): ReadonlyArray<OutputTarget> =>
     support === undefined
       ? []
       : [
@@ -189,11 +224,24 @@ export const outputTargets = (client: ClientCapabilities): ReadonlyArray<OutputT
             codec,
             depth: 8,
             colour: "sdr",
-            cpuEncode: codec === "h264" || h264 === undefined ? "allowed" : "refused",
+            cpuEncode: cpuEncode(codec),
             level: support.maxLevel,
           },
         ],
   );
+
+  return hdr === undefined || kept === undefined
+    ? sdr
+    : [
+        {
+          codec: "hevc",
+          depth: 10,
+          colour: kept,
+          cpuEncode: cpuEncode("hevc"),
+          level: hdr.maxLevel ?? highestLevel("hevc"),
+        },
+        ...sdr,
+      ];
 };
 
 const selectAudio = (
@@ -341,9 +389,11 @@ const dolbyVisionCopyOf = (video: VideoStream, client: ClientCapabilities): Dolb
 };
 
 /**
- * What an encode of `video` for `client` asks for: the client's targets (`outputTargets`), each
- * tone-mapped from an HDR source when it is SDR, within the client's size and the viewer's cap,
- * the CPU within 1920x1080. Undefined when the client plays nothing the transcoder encodes to.
+ * What an encode of `video` for `client` asks for: the client's targets (`outputTargets`), the
+ * source's own HDR first where the table keeps it and the client shows it, each SDR target
+ * tone-mapped from an HDR source, within the client's size and the viewer's cap, the CPU within
+ * 1920x1080. A subtitle to draw in stays in the intent: no row draws one on HDR frames, so its
+ * chain maps to SDR. Undefined when the client plays nothing the transcoder encodes to.
  */
 export const encodeIntent = (
   probe: MediaProbe,
@@ -351,7 +401,7 @@ export const encodeIntent = (
   client: ClientCapabilities,
   request: EncodeRequest,
 ): VideoIntent | undefined => {
-  const targets = outputTargets(client);
+  const targets = outputTargets(client, keptRange(sourceColour(video).signal));
 
   if (targets.length === 0) return undefined;
 
