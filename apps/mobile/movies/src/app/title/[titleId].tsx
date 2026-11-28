@@ -3,7 +3,7 @@ import { describeFailure, isFailure } from "@media/mobile-core/failure";
 import { useAllPages } from "@media/mobile-core/pages";
 import { usePlatform, usePlatformQuery } from "@media/sdk/react";
 import { router, useLocalSearchParams } from "expo-router";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { ChevronDown, CircleAlert } from "lucide-react-native";
 import { Pressable, useWindowDimensions, View } from "react-native";
 import Animated, { useAnimatedScrollHandler, useSharedValue } from "react-native-reanimated";
@@ -131,6 +131,16 @@ function TitleDetailView({
   const hero = heroHeight(windowHeight, widthClass);
   const layout = episodeLayout(widthClass);
   const openActions = () => router.push(`/title/${titleId}/actions`);
+  // The sections below the hero join a frame after the page first draws: a page that opens with
+  // the title's answer already held would otherwise draw them all in the commit that starts the
+  // push, and hold the push back until they are laid out.
+  const [pastFirstFrame, setPastFirstFrame] = useState(false);
+
+  useEffect(() => {
+    const frame = requestAnimationFrame(() => setPastFirstFrame(true));
+
+    return () => cancelAnimationFrame(frame);
+  }, []);
 
   const episodes = useAllPages(
     platform.movies.titles.episodes,
@@ -218,7 +228,7 @@ function TitleDetailView({
           </View>
         }
         ListFooterComponent={
-          detail === null ? undefined : (
+          detail === null || !pastFirstFrame ? undefined : (
             <View
               className={`gap-6 pt-2 regular:gap-10 ${show ? "regular:pt-10" : "regular:pt-0"}`}
             >
