@@ -686,6 +686,45 @@ describe("PlaybackController", () => {
     expect(names(sent).slice(-2)).toStrictEqual(["report:b,p2", "jump:2"]);
   });
 
+  it("shows position only for its queue entry and publishes consecutive seeks immediately", async () => {
+    const { controller, engine, stop } = setup({ mse: true, playCurrent: "1" });
+    const readPosition = (itemId: string): number => controller.sampledPositionMs(itemId);
+
+    try {
+      await controller.playTracks(["a", "b"], 0);
+      controller.sync(queueOf([one, two], "1"));
+      await settle();
+      engine().emit({ type: "time", positionMs: 190_000 });
+      await settle();
+
+      expect(readPosition(one.itemId)).toBe(190_000);
+      expect(readPosition(two.itemId)).toBe(0);
+
+      engine().finish();
+      expect(controller.getSnapshot().current).toBe(two.itemId);
+      engine().emit({ type: "time", positionMs: 1500 });
+      await controller.togglePlay();
+
+      expect(readPosition(one.itemId)).toBe(0);
+      expect(readPosition(two.itemId)).toBe(1500);
+
+      let shown = readPosition(two.itemId);
+
+      const unsubscribe = controller.onPosition(() => {
+        shown = readPosition(two.itemId);
+      });
+
+      controller.seek(0);
+      expect(shown).toBe(0);
+      controller.seek(shown + 1000);
+      expect(shown).toBe(1000);
+      expect(engine().samplePlayback().positionMs).toBe(1000);
+      unsubscribe();
+    } finally {
+      stop();
+    }
+  });
+
   it("empties the player with the queue", async () => {
     const { controller, record } = setup({ playCurrent: "1" });
 

@@ -7,7 +7,6 @@ import { browserEngines } from "./browser-engine";
 import { setMediaSessionHandlers, showNowPlaying } from "./media-session";
 import type { ControllerSnapshot } from "./playback-controller";
 import { PlaybackController } from "./playback-controller";
-import { usePositionTicks } from "./position-ticks";
 import { ticketSources } from "./source-resolver";
 
 type Detail = Awaited<ReturnType<PlatformSdk["music"]["playback"]["get"]>>;
@@ -95,9 +94,12 @@ export const useGuestPlayer = (tracks: ReadonlyArray<GuestTrack>, baseUrl: strin
   return { controller, state };
 };
 
-/** Ticks only the mounted seek control, independently of the share's song list and artwork. */
-export const useGuestPosition = (controller: PlaybackController): number => {
-  const read = useCallback(() => controller.positionMs(), [controller]);
+/** Reads the shown entry's position as soon as the controller sets it. */
+export const useGuestPosition = (controller: PlaybackController, itemId: string | null): number => {
+  const read = useCallback(
+    () => (itemId === null ? 0 : controller.sampledPositionMs(itemId)),
+    [controller, itemId],
+  );
 
-  return usePositionTicks(read);
+  return useSyncExternalStore(controller.onPosition, read);
 };

@@ -733,6 +733,16 @@ export class PlaybackController {
   }
 
   /**
+   * The last position set for `itemId`, or zero if this device has no position for that entry.
+   * Reads the sample without advancing it by the clock. Subscribe with {@link onPosition}.
+   */
+  sampledPositionMs(itemId: string): number {
+    if (this.#loaded?.entry.itemId === itemId) return Math.round(this.#sample.positionMs);
+
+    return this.#resumeAt?.itemId === itemId ? this.#resumeAt.positionMs : 0;
+  }
+
+  /**
    * Replaces the queue with `trackIds` and plays the one at `index` here. That song's ticket is
    * asked for while the core writes the queue, so it plays once the queue's answer and its ticket
    * are both in, without waiting for the new queue to arrive. A song this device holds a copy of
