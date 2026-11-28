@@ -28,6 +28,7 @@ import {
   type Row,
   visibleCanvas,
   SDR_BT709,
+  STRIP_DYNAMIC_HDR_METADATA,
   STRIP_HDR_METADATA,
   TAG_SDR_BT709,
   toneMapTransfer,
@@ -92,8 +93,10 @@ const scaleCpu: OpImpl<"Scale"> = {
 
 /**
  * HDR to SDR in software from PQ and HLG frames: linearize, map with Hable onto 100 nits, convert
- * to BT.709. The frames leave tagged SDR BT.709 in limited range (`TAG_SDR_BT709`), without the
- * source's HDR metadata (`STRIP_HDR_METADATA`). Needs ffmpeg's `zscale` (libzimg) and `tonemap`.
+ * to BT.709. Dynamic HDR metadata, which it does not read, goes first all the same, as before every
+ * tone map (`STRIP_DYNAMIC_HDR_METADATA`). The frames leave tagged SDR BT.709 in limited range
+ * (`TAG_SDR_BT709`), without the source's HDR metadata (`STRIP_HDR_METADATA`). Needs ffmpeg's
+ * `zscale` (libzimg) and `tonemap`.
  */
 const toneMapCpu: OpImpl<"ToneMap"> = {
   id: ImplId("tonemap.cpu"),
@@ -106,6 +109,7 @@ const toneMapCpu: OpImpl<"ToneMap"> = {
   render: () => ({
     ...NOTHING,
     filters: [
+      ...STRIP_DYNAMIC_HDR_METADATA,
       filter("zscale", ["t", "linear"], ["npl", "100"]),
       filter("format", "gbrpf32le"),
       filter("zscale", ["p", "bt709"]),
@@ -116,8 +120,8 @@ const toneMapCpu: OpImpl<"ToneMap"> = {
     ],
   }),
   probes: [
-    { op: Op.ToneMap(), clip: "hevc-pq", runs: 1 },
-    { op: Op.ToneMap(), clip: "hevc-hlg", runs: 1 },
+    { op: Op.ToneMap(), clip: "hevc-pq", runs: 1, readback: "picture" },
+    { op: Op.ToneMap(), clip: "hevc-hlg", runs: 1, readback: "picture" },
   ],
 };
 

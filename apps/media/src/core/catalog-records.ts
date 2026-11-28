@@ -100,6 +100,10 @@ export const toCatalogProbe = (probe: MediaProbe): Probe => ({
               onNone: () => ({}),
               onSome: (dolbyVision) => ({ dolbyVision }),
             }),
+            ...Option.match(present(probe.video.dolbyVisionRpu), {
+              onNone: () => ({}),
+              onSome: (dolbyVisionRpu) => ({ dolbyVisionRpu }),
+            }),
           },
         ],
   audio: probe.audio.map((track) => ({
@@ -169,6 +173,7 @@ const toMediaProbe = (probe: Probe): MediaProbe => {
             colour: video.colour,
             hdr10Plus: video.hdr === "hdr10plus" ? true : undefined,
             dolbyVision: video.dolbyVision,
+            dolbyVisionRpu: video.dolbyVisionRpu,
           },
     audio: probe.audio.map((track) => ({
       index: track.index,

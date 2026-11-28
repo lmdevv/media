@@ -8,9 +8,10 @@ const DOMAINS: ReadonlyMap<string, string> = new Map([
   ["cpu", "CPU"],
   ["qsv", "QSV"],
   ["vaapi", "VA-API"],
+  ["vulkan", "Vulkan"],
 ]);
 
-/** `CPU`, `QSV`, `VA-API`, or a later backend's domain upper-cased. */
+/** `CPU`, `QSV`, `VA-API`, `Vulkan`, or a later backend's domain upper-cased. */
 export const domainLabel = (domain: string): string => DOMAINS.get(domain) ?? domain.toUpperCase();
 
 const OPS: ReadonlyMap<string, string> = new Map([

@@ -13,10 +13,11 @@ import {
 } from "./source-colours.ts";
 
 /**
- * ffprobe's output for one file of each kind, read with the probe's own arguments and trimmed to
- * what the probe reads: the Feature Test pattern clips generated for this table (HDR10, HLG, SDR in
- * BT.601, BT.2020, and full range), FFmpeg's test suite (Dolby Vision 7 and 8.1, an iPhone's 8.4,
- * an HDR10 Matroska with container metadata), and Apple's HLS example (Dolby Vision 5 and HDR10+).
+ * ffprobe's output for one file of each kind, read with the probe's own two runs and trimmed to
+ * what the probe reads: clips generated for this table (HDR10, HLG, SDR in BT.601, BT.2020, and full
+ * range), FFmpeg's test suite (Dolby Vision 7 and 8.1, an iPhone's 8.4 with its ambient viewing
+ * environment, an HDR10 Matroska with container metadata), and Apple's HLS example (Dolby Vision 5
+ * and HDR10+).
  */
 type FixtureName = keyof typeof FIXTURES;
 
@@ -44,19 +45,28 @@ const probed = (name: FixtureName) =>
     }),
   );
 
+/** What a table line's ranges say a client must declare, in words. */
+const DECLARED: ReadonlyMap<string, string> = new Map([
+  ["sdr", "anything (SDR)"],
+  ["", "nothing"],
+]);
+
+const declared = (ranges: string): string => DECLARED.get(ranges) ?? ranges;
+
 describe("the table of source colours", () => {
   it("decides for every kind", () => {
     const lines = tableLines();
 
     const table = [
-      "| kind | source | copied to a client that declares | Dolby Vision on a copy | decoded as | when encoded | why |",
-      "| --- | --- | --- | --- | --- | --- | --- |",
+      "| kind | source | played as stored by a client that declares | copied to a client that declares | Dolby Vision on a copy | decoded as | when encoded | why |",
+      "| --- | --- | --- | --- | --- | --- | --- | --- |",
       ...lines.map((line) =>
         [
           "",
           line.kind,
           line.about,
-          line.copiedTo === "sdr" ? "anything (SDR)" : line.copiedTo,
+          declared(line.directPlayTo),
+          declared(line.copiedTo),
           line.dolbyVisionCopy,
           line.signal,
           line.encode,
@@ -70,21 +80,23 @@ describe("the table of source colours", () => {
     expect(lines.map((line) => line.kind)).toStrictEqual(SOURCE_KINDS);
 
     expect(
-      Object.fromEntries(lines.map((line) => [line.kind, [line.copiedTo, line.signal]])),
+      Object.fromEntries(
+        lines.map((line) => [line.kind, [line.directPlayTo, line.copiedTo, line.signal]]),
+      ),
     ).toStrictEqual({
-      sdr: ["sdr", "sdr"],
-      "sdr-bt601": ["sdr", "sdr"],
-      "sdr-bt2020": ["sdr", "sdr"],
-      "sdr-full-range": ["sdr", "sdr"],
-      hdr10: ["hdr10", "pq"],
-      hdr10plus: ["hdr10", "pq"],
-      hlg: ["hlg", "hlg"],
-      "dolby-vision-5": ["dolby-vision", "dovi"],
-      "dolby-vision-7": ["hdr10", "pq"],
-      "dolby-vision-8.1": ["dolby-vision or hdr10", "pq"],
-      "dolby-vision-8.2": ["dolby-vision or sdr", "sdr"],
-      "dolby-vision-8.4": ["dolby-vision or hlg", "hlg"],
-      "dolby-vision-other": ["dolby-vision", "dovi"],
+      sdr: ["sdr", "sdr", "sdr"],
+      "sdr-bt601": ["sdr", "sdr", "sdr"],
+      "sdr-bt2020": ["sdr", "sdr", "sdr"],
+      "sdr-full-range": ["sdr", "sdr", "sdr"],
+      hdr10: ["hdr10", "hdr10", "pq"],
+      hdr10plus: ["hdr10", "hdr10", "pq"],
+      hlg: ["hlg", "hlg", "hlg"],
+      "dolby-vision-5": ["dolby-vision", "dolby-vision", "dovi"],
+      "dolby-vision-7": ["", "hdr10", "pq"],
+      "dolby-vision-8.1": ["dolby-vision", "dolby-vision or hdr10", "pq"],
+      "dolby-vision-8.2": ["dolby-vision", "dolby-vision or sdr", "sdr"],
+      "dolby-vision-8.4": ["dolby-vision", "dolby-vision or hlg", "hlg"],
+      "dolby-vision-other": ["", "", "dovi"],
     });
   });
 
@@ -120,7 +132,16 @@ describe("the table of source colours", () => {
         matrix: "bt2020nc",
         range: "limited",
         chromaLocation: "topleft",
-        mastering: { minLuminance: 0.005, maxLuminance: 1000 },
+        mastering: {
+          minLuminance: 0.005,
+          maxLuminance: 1000,
+          primaries: {
+            red: { x: 0.708, y: 0.292 },
+            green: { x: 0.17, y: 0.797 },
+            blue: { x: 0.131, y: 0.046 },
+            whitePoint: { x: 0.3127, y: 0.329 },
+          },
+        },
         contentLight: { maxCll: 1375, maxFall: 188 },
       });
       expect(hdr10Plus.hdr10Plus).toBe(true);
@@ -158,6 +179,7 @@ describe("the table of source colours", () => {
       const ipt = yield* probed("dolby-vision-5");
 
       expect(ipt.dynamicRange).toBe("dolby-vision");
+      expect(ipt.dolbyVisionRpu).toBe(true);
       expect(sourceColour(ipt).signal).toBe("dovi");
       expect(sourceColour(yield* probed("dolby-vision-8.4")).signal).toBe("hlg");
     }),
@@ -180,7 +202,7 @@ describe("the table of source colours", () => {
     }),
   );
 
-  it("decides a Dolby Vision stream whose configuration was not read as profile 5", () => {
+  it("decides a Dolby Vision stream whose configuration was not read as no kind it names", () => {
     const unread: VideoStream = {
       index: 0,
       codec: "hevc",

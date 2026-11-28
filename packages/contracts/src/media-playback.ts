@@ -218,8 +218,9 @@ export const TranscodeStage = Schema.Struct({
   impl: Schema.String,
   /**
    * What the stage moved between memories: a move's frames, where they were and where they go;
-   * for a subtitle drawn on a GPU, the subtitle, prepared in CPU memory and drawn on the device
-   * while the picture stayed there.
+   * for a stage that runs on another device from its frames' memory, such as libplacebo's tone map
+   * on `vulkan`, the frames' trip there and back; for a subtitle drawn on a GPU, the subtitle,
+   * prepared in CPU memory and drawn on the device while the picture stayed there.
    */
   move: Schema.optionalKey(Schema.Struct({ from: Schema.String, to: Schema.String })),
 });

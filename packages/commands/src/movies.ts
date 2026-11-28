@@ -87,14 +87,33 @@ const fieldOrder = v.union(
   v.literal("unknown"),
 );
 
-/** A video stream's colour as ffprobe reads it; mastering luminances and light levels in cd/m². */
+/** A CIE 1931 chromaticity. */
+const chromaticity = v.object({ x: v.number(), y: v.number() });
+
+/**
+ * A video stream's colour as ffprobe reads it; mastering luminances and light levels in cd/m², with
+ * the mastering display's primaries and white point where the stream gives them.
+ */
 const videoColour = v.object({
   transfer: v.optional(v.string()),
   primaries: v.optional(v.string()),
   matrix: v.optional(v.string()),
   range: v.optional(v.union(v.literal("limited"), v.literal("full"))),
   chromaLocation: v.optional(v.string()),
-  mastering: v.optional(v.object({ minLuminance: v.number(), maxLuminance: v.number() })),
+  mastering: v.optional(
+    v.object({
+      minLuminance: v.number(),
+      maxLuminance: v.number(),
+      primaries: v.optional(
+        v.object({
+          red: chromaticity,
+          green: chromaticity,
+          blue: chromaticity,
+          whitePoint: chromaticity,
+        }),
+      ),
+    }),
+  ),
   contentLight: v.optional(v.object({ maxCll: v.number(), maxFall: v.number() })),
 });
 
@@ -119,6 +138,8 @@ const videoStream = v.object({
   colour: v.optional(videoColour),
   /** Present for a Dolby Vision stream scanned since its configuration was read. */
   dolbyVision: v.optional(dolbyVision),
+  /** Present when the stream's first picture carries a Dolby Vision RPU. */
+  dolbyVisionRpu: v.optional(v.literal(true)),
 });
 
 const audioStream = v.object({
@@ -205,6 +226,10 @@ const mediaVersion = v.object({
   videoProfile: nullable(v.string()),
   videoLevel: nullable(v.number()),
   videoBitDepth: nullable(v.number()),
+  /** The primary video stream's Dolby Vision configuration record. */
+  dolbyVision: v.optional(dolbyVision),
+  /** Present when the primary video stream's first picture carries a Dolby Vision RPU. */
+  dolbyVisionRpu: v.optional(v.literal(true)),
   audioCodec: nullable(v.string()),
   audioChannels: nullable(v.number()),
   audioTracks: v.number(),

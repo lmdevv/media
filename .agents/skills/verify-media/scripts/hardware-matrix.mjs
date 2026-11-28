@@ -530,8 +530,13 @@ export const WORK = {
 
 const ALL_PATHS = Object.keys(PATHS);
 
-/** ffprobe's names for side data that says a stream is HDR: HDR10's, HDR10+'s, and Dolby Vision's. */
-const HDR_SIDE_DATA = /mastering display|content light level|2094-40|hdr10\+|dolby vision|dovi/i;
+/**
+ * The only side data an SDR stream from a tone map may carry, on the stream or its first picture,
+ * as ffprobe names it: the encoders' own unregistered SEI (x264's settings). Anything else, HDR10's
+ * mastering display and content light levels, HDR10+, Dolby Vision, an iPhone's ambient viewing
+ * environment, an ICC profile, or a kind not met yet, fails the check rather than slipping past.
+ */
+export const SDR_SIDE_DATA = new Set(["H.26[45] User Data Unregistered SEI message"]);
 
 /** What a row's colour check compares a fixture's patches with, and which patches it has. */
 export const patchesOf = (reference) => (reference === "source" ? SDR_PATCHES : HDR_PATCHES);
@@ -1748,8 +1753,9 @@ export const CHECKS = {
           : no(`tagged ${tags}, not bt709/bt709/bt709 in limited range`);
       }),
   },
-  // HDR metadata left on an SDR stream: the encoders write what ffmpeg's frames carry into the
-  // bitstream, and a player that reads it shows the SDR picture as HDR.
+  // Side data left on an SDR stream: the encoders write what ffmpeg's frames carry into the
+  // bitstream, and a player that reads HDR or viewing metadata shows the SDR picture as HDR. Only
+  // the allowed kinds pass (`SDR_SIDE_DATA`).
   "hdr-metadata": {
     class: "output",
     run: (obs) => {
@@ -1757,10 +1763,10 @@ export const CHECKS = {
       if (fetches.length === 0) return no("no output was fetched");
       for (const fetch of fetches) {
         if (fetch.sideData === undefined) return no(`could not measure: no side data was read from the ${fetch.name} output`);
-        const left = [...fetch.sideData.stream, ...fetch.sideData.frame].filter((type) => HDR_SIDE_DATA.test(type));
+        const left = [...fetch.sideData.stream, ...fetch.sideData.frame].filter((type) => !SDR_SIDE_DATA.has(type));
         if (left.length > 0) return no(`the ${fetch.name} output still carries ${[...new Set(left)].join(", ")}`);
       }
-      return ok("no HDR metadata on the stream or its first picture");
+      return ok("no side data on the stream or its first picture but the encoder's own");
     },
   },
   // The colour an SDR source states, carried to the output: its transfer, primaries, matrix, and range.

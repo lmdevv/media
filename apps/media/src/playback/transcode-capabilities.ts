@@ -71,6 +71,8 @@ import {
   type GpuDomain,
   type ImplId,
   implOf,
+  SHADER_CACHE_OPTION,
+  shaderCacheFiles,
   type SourceVideo,
 } from "./video-ops.ts";
 
@@ -213,13 +215,20 @@ const probeOutcome = (
     : "rejected";
 };
 
-/** Every component a build listing shows: codecs ffmpeg decodes, decoders, encoders, filters, hardware accelerations. */
+/**
+ * Every component a build listing shows: codecs ffmpeg decodes, decoders, encoders, filters,
+ * hardware accelerations, and the libplacebo options a row reads when present (`placebo`, the
+ * filter's help, empty without it).
+ */
 const featuresOf = (
   codecs: string,
   filters: string,
   hwaccels: string,
+  placebo: string,
 ): ReadonlySet<BuildFeature> => {
   const features = new Set<BuildFeature>();
+
+  if (/^\s+shader_cache\s/mu.test(placebo)) features.add(SHADER_CACHE_OPTION);
 
   for (const line of codecs.split("\n")) {
     const codec = /^ ([D.])([E.])[VAS.D.][I.][L.][S.]\s+(\S+)\s/u.exec(line);
@@ -458,6 +467,10 @@ const make = Effect.gen(function* () {
       tools.ffmpeg(["-hide_banner", "-codecs"]),
       tools.ffmpeg(["-hide_banner", "-filters"]),
       tools.ffmpeg(["-hide_banner", "-hwaccels"]),
+      // A build without libplacebo has no help for it, which takes nothing from the listing.
+      tools
+        .ffmpeg(["-hide_banner", "-h", "filter=libplacebo"])
+        .pipe(Effect.orElseSucceed(() => "")),
     ]).pipe(Effect.result);
 
     if (Result.isFailure(listed)) {
@@ -466,12 +479,12 @@ const make = Effect.gen(function* () {
       return Option.none<Inventory.BuildIdentity>();
     }
 
-    const [version, codecs, filters, hwaccels] = listed.success;
+    const [version, codecs, filters, hwaccels, placebo] = listed.success;
 
     const build: Inventory.BuildIdentity = {
       version: firstLine(version),
       kernel: Option.getOrElse(yield* readTrimmed("/proc/sys/kernel/osrelease"), () => ""),
-      features: featuresOf(codecs, filters, hwaccels),
+      features: featuresOf(codecs, filters, hwaccels, placebo),
       at: yield* now,
     };
 
@@ -654,7 +667,14 @@ const make = Effect.gen(function* () {
       plan.readback === undefined ? undefined : path.join(clipFolder, "readback.gray");
 
     const args = probeCommandArgs(plan.pipeline, plan.input, input.value.file, input.value.stream, {
-      files: { subtitle: script },
+      // libplacebo's probe compiles the shaders a stream then finds in the same cache.
+      files: {
+        subtitle: script,
+        ...shaderCacheFiles(
+          Option.getOrUndefined((yield* Ref.get(inventory)).build)?.features,
+          config.dataDir,
+        ),
+      },
       readback,
     });
 

@@ -40,11 +40,14 @@ const BASE_COLOURS: ReadonlyMap<number, VideoColour> = new Map([
   [6, COLOURS.hdr10],
 ]);
 
-/** A 4K HEVC Main 10 stream of `dynamicRange` in `colour`, with what `extra` adds. */
+/**
+ * A 1080p HEVC Main 10 film at 24 frames a second, of `dynamicRange` in `colour`, with what `extra`
+ * adds: a size and rate at which libplacebo keeps up on both GPU paths.
+ */
 const hevc10 = (
   dynamicRange: VideoStream["dynamicRange"],
   colour: VideoColour,
-  extra: Pick<VideoStream, "hdr10Plus" | "dolbyVision"> = {},
+  extra: Pick<VideoStream, "hdr10Plus" | "dolbyVision" | "dolbyVisionRpu"> = {},
 ): VideoStream => ({
   index: 0,
   codec: "hevc",
@@ -52,17 +55,24 @@ const hevc10 = (
   level: 153,
   bitDepth: 10,
   pixelFormat: "yuv420p10le",
-  width: 3840,
-  height: 2160,
+  width: 1920,
+  height: 1080,
+  frameRate: 24,
   dynamicRange,
   colour,
   hdr10Plus: extra.hdr10Plus,
   dolbyVision: extra.dolbyVision,
+  dolbyVisionRpu: extra.dolbyVisionRpu,
 });
 
-const dolbyVisionOf = (profile: number, compatibility: number): VideoStream =>
+/**
+ * Dolby Vision of `profile` and `compatibility`, in the colour its base layer has, its first
+ * picture carrying an RPU unless `rpu` is false.
+ */
+const dolbyVisionOf = (profile: number, compatibility: number, rpu = true): VideoStream =>
   hevc10("dolby-vision", BASE_COLOURS.get(compatibility) ?? COLOURS.ipt, {
     dolbyVision: { profile, level: 6, compatibility },
+    dolbyVisionRpu: rpu ? true : undefined,
   });
 
 const file = (container: MediaProbe["container"], video: VideoStream): MediaProbe => ({
@@ -156,25 +166,133 @@ const delivery = (plan: PlaybackPlan): string =>
 const sdrDelivery = (decide: typeof qsv, video: VideoStream): string =>
   delivery(decide(file("mkv", video), sdrBrowser));
 
+/**
+ * How `decide` delivers `video` to each client, as an MP4 an iPhone and a browser could play as
+ * stored and as Matroska, which only a copy or an encode reaches: the original-file ladder.
+ */
+const ladder = (decide: typeof qsv, video: VideoStream) => ({
+  "iphone mp4": delivery(decide(file("mp4", video), iphone)),
+  "iphone mkv": delivery(decide(file("mkv", video), iphone)),
+  "hdr browser mp4": delivery(decide(file("mp4", video), hdrBrowser)),
+  "hdr browser mkv": delivery(decide(file("mkv", video), hdrBrowser)),
+  "sdr browser mp4": delivery(decide(file("mp4", video), sdrBrowser)),
+});
+
 describe("what each kind of source gets", () => {
-  it("copies Dolby Vision to a client that plays it, keeping its configuration", () => {
-    expect(delivery(cpu(file("mkv", dolbyVisionOf(8, 1)), iphone))).toBe("copy compatible");
-    expect(delivery(cpu(file("mkv", dolbyVisionOf(8, 4)), iphone))).toBe("copy compatible");
-    expect(delivery(cpu(file("mkv", dolbyVisionOf(5, 0)), iphone))).toBe("copy only");
-    expect(delivery(cpu(file("mp4", dolbyVisionOf(5, 0)), iphone))).toBe("direct");
+  it("plays HDR10 and HLG as stored where declared, and maps them for SDR", () => {
+    for (const [range, colour] of [
+      ["hdr10", COLOURS.hdr10],
+      ["hlg", COLOURS.hlg],
+    ] as const) {
+      expect(ladder(qsv, hevc10(range, colour))).toStrictEqual({
+        "iphone mp4": "direct",
+        "iphone mkv": "copy none",
+        "hdr browser mp4": "direct",
+        "hdr browser mkv": "copy none",
+        "sdr browser mp4": `encode tonemap.qsv.placebo:${range === "hdr10" ? "pq" : "hlg"}`,
+      });
+    }
   });
 
-  it("copies profile 7 as its HDR10 base layer, without its configuration", () => {
-    expect(delivery(cpu(file("mkv", dolbyVisionOf(7, 6)), iphone))).toBe("copy none");
-    expect(delivery(cpu(file("mkv", dolbyVisionOf(7, 6)), hdrBrowser))).toBe("copy none");
-  });
+  it("plays Dolby Vision 8 as stored only for Dolby Vision, and copies its base layer elsewhere", () => {
+    for (const [compatibility, toneMap] of [
+      [1, " tonemap.qsv.placebo:pq"],
+      [2, ""],
+      [4, " tonemap.qsv.placebo:hlg"],
+    ] as const) {
+      expect(ladder(qsv, dolbyVisionOf(8, compatibility))).toStrictEqual({
+        "iphone mp4": "direct",
+        "iphone mkv": "copy compatible",
+        "hdr browser mp4": "copy base",
+        "hdr browser mkv": "copy base",
+        "sdr browser mp4": `encode${toneMap}`,
+      });
+    }
 
-  it("copies a Dolby Vision base layer to a client that plays what it is", () => {
-    expect(delivery(cpu(file("mkv", dolbyVisionOf(8, 1)), hdrBrowser))).toBe("copy none");
-    expect(delivery(cpu(file("mkv", dolbyVisionOf(8, 4)), hdrBrowser))).toBe("copy none");
     expect(
       delivery(cpu(file("mkv", dolbyVisionOf(8, 1)), castCapabilities("Chromecast Ultra"))),
-    ).toBe("copy none");
+    ).toBe("copy base");
+  });
+
+  it("never plays Dolby Vision 7 as stored, and copies it as its HDR10 base layer", () => {
+    expect(ladder(qsv, dolbyVisionOf(7, 6))).toStrictEqual({
+      "iphone mp4": "copy base",
+      "iphone mkv": "copy base",
+      "hdr browser mp4": "copy base",
+      "hdr browser mkv": "copy base",
+      "sdr browser mp4": "encode tonemap.qsv.placebo:pq",
+    });
+  });
+
+  it("plays Dolby Vision 5 only for Dolby Vision, and maps it only with libplacebo", () => {
+    expect(ladder(qsv, dolbyVisionOf(5, 0))).toStrictEqual({
+      "iphone mp4": "direct",
+      "iphone mkv": "copy only",
+      "hdr browser mp4": "encode tonemap.qsv.placebo:pq",
+      "hdr browser mkv": "encode tonemap.qsv.placebo:pq",
+      "sdr browser mp4": "encode tonemap.qsv.placebo:pq",
+    });
+    expect(ladder(cpu, dolbyVisionOf(5, 0))).toStrictEqual({
+      "iphone mp4": "direct",
+      "iphone mkv": "copy only",
+      "hdr browser mp4": "refused dolby-vision-not-convertible",
+      "hdr browser mkv": "refused dolby-vision-not-convertible",
+      "sdr browser mp4": "refused dolby-vision-not-convertible",
+    });
+  });
+
+  it("reads profile 5 as profile 5 whatever compatibility id it claims", () => {
+    for (const compatibility of [1, 2, 4, 6]) {
+      expect(ladder(qsv, dolbyVisionOf(5, compatibility))).toStrictEqual(
+        ladder(qsv, dolbyVisionOf(5, 0)),
+      );
+    }
+  });
+
+  it("refuses Dolby Vision 5 whose first picture has no RPU, everywhere", () => {
+    const refused = "refused dolby-vision-not-convertible";
+
+    for (const compatibility of [0, 1]) {
+      expect(ladder(qsv, dolbyVisionOf(5, compatibility, false))).toStrictEqual({
+        "iphone mp4": refused,
+        "iphone mkv": refused,
+        "hdr browser mp4": refused,
+        "hdr browser mkv": refused,
+        "sdr browser mp4": refused,
+      });
+    }
+  });
+
+  it("takes a profile and id the table does not name as the stricter kind: no base layer", () => {
+    const strict = {
+      "iphone mp4": "encode tonemap.qsv.placebo:pq",
+      "iphone mkv": "encode tonemap.qsv.placebo:pq",
+      "hdr browser mp4": "encode tonemap.qsv.placebo:pq",
+      "hdr browser mkv": "encode tonemap.qsv.placebo:pq",
+      "sdr browser mp4": "encode tonemap.qsv.placebo:pq",
+    };
+
+    for (const [profile, compatibility] of [
+      [7, 1],
+      [7, 2],
+      [8, 0],
+      [8, 6],
+      [4, 2],
+      [9, 2],
+      [10, 1],
+    ] as const) {
+      expect(
+        ladder(qsv, dolbyVisionOf(profile, compatibility)),
+        `${String(profile)}.${String(compatibility)}`,
+      ).toStrictEqual(strict);
+    }
+
+    expect(
+      ladder(qsv, hevc10("dolby-vision", COLOURS.hdr10, { dolbyVisionRpu: true })),
+    ).toStrictEqual(strict);
+    expect(delivery(qsv(file("mkv", dolbyVisionOf(8, 6, false)), iphone))).toBe(
+      "refused dolby-vision-not-convertible",
+    );
   });
 
   it("tone-maps each base layer from what it is for an SDR client", () => {
@@ -193,21 +311,8 @@ describe("what each kind of source gets", () => {
     expect(sdrDelivery(qsvWithoutVulkan, dolbyVisionOf(8, 2))).toBe("encode");
   });
 
-  it("maps every HDR kind with libplacebo where the GPU proved it", () => {
-    expect(sdrDelivery(qsv, hevc10("hdr10", COLOURS.hdr10))).toBe("encode tonemap.qsv.placebo:pq");
-    expect(sdrDelivery(qsv, hevc10("hlg", COLOURS.hlg))).toBe("encode tonemap.qsv.placebo:hlg");
-    expect(sdrDelivery(qsv, dolbyVisionOf(8, 4))).toBe("encode tonemap.qsv.placebo:hlg");
-    expect(sdrDelivery(qsv, dolbyVisionOf(5, 0))).toBe("encode tonemap.qsv.placebo:pq");
-    expect(sdrDelivery(qsv, hevc10("dolby-vision", COLOURS.ipt))).toBe(
-      "encode tonemap.qsv.placebo:pq",
-    );
-  });
-
   it("refuses Dolby Vision 5 where no libplacebo is proven, rather than map its IPT as PQ", () => {
     expect(delivery(qsvWithoutVulkan(file("mkv", dolbyVisionOf(5, 0)), sdrBrowser))).toBe(
-      "refused dolby-vision-not-convertible",
-    );
-    expect(delivery(cpu(file("mkv", dolbyVisionOf(5, 0)), hdrBrowser))).toBe(
       "refused dolby-vision-not-convertible",
     );
     expect(delivery(cpu(file("mkv", hevc10("dolby-vision", COLOURS.ipt)), sdrBrowser))).toBe(
@@ -253,9 +358,17 @@ describe("a refusal at the encode rung", () => {
   });
 });
 
-describe("a copy that keeps Dolby Vision", () => {
+describe("a copy of Dolby Vision", () => {
   it("writes its configuration, in Dolby Vision's own sample entry for profile 5 alone", () => {
     expect(copyArgs("none")).toStrictEqual(["-c:v", "copy", "-tag:v", "hvc1"]);
+    expect(copyArgs("base")).toStrictEqual([
+      "-c:v",
+      "copy",
+      "-tag:v",
+      "hvc1",
+      "-bsf:v",
+      "filter_units=remove_types=62|63",
+    ]);
     expect(copyArgs("compatible")).toStrictEqual([
       "-c:v",
       "copy",

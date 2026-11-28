@@ -53,6 +53,11 @@ export const VideoStream = Schema.Struct({
   hdr10Plus: Schema.optional(Schema.Literal(true)),
   /** A Dolby Vision stream's profile, level, and base layer compatibility id. */
   dolbyVision: Schema.optional(DolbyVision),
+  /**
+   * The first picture carries a Dolby Vision RPU, which says what profile 5's samples mean. Read
+   * from the first picture alone: a file whose later pictures lose it cannot be told at scan time.
+   */
+  dolbyVisionRpu: Schema.optional(Schema.Literal(true)),
 });
 
 /** The main video stream of a file. */
@@ -153,6 +158,14 @@ const Tags = Schema.Struct({
  */
 const SideData = Schema.Struct({
   side_data_type: Schema.optionalKey(Schema.String),
+  red_x: Schema.optionalKey(Schema.String),
+  red_y: Schema.optionalKey(Schema.String),
+  green_x: Schema.optionalKey(Schema.String),
+  green_y: Schema.optionalKey(Schema.String),
+  blue_x: Schema.optionalKey(Schema.String),
+  blue_y: Schema.optionalKey(Schema.String),
+  white_point_x: Schema.optionalKey(Schema.String),
+  white_point_y: Schema.optionalKey(Schema.String),
   min_luminance: Schema.optionalKey(Schema.String),
   max_luminance: Schema.optionalKey(Schema.String),
   max_content: Schema.optionalKey(Schema.Int),
@@ -288,8 +301,22 @@ const bitDepthOf = (stream: FfprobeStream): number => {
 const ofKind = (items: ReadonlyArray<SideData>, type: string): SideData | undefined =>
   items.find((item) => (item.side_data_type ?? "").toLowerCase().includes(type));
 
-const dynamicRangeOf = (stream: FfprobeStream, transfer: string | undefined): DynamicRange => {
-  if (ofKind(stream.side_data_list ?? [], "dovi") !== undefined) return "dolby-vision";
+/** Whether the first picture carries a Dolby Vision RPU, raw or as the metadata parsed from it. */
+const carriesRpu = (frame: FfprobeFrame | undefined): boolean =>
+  ofKind(frame?.side_data_list ?? [], "dolby vision") !== undefined;
+
+/**
+ * The stream's dynamic range: Dolby Vision for a configuration record or an RPU in the first
+ * picture (a stream with no record still needs its RPU read), else by transfer.
+ */
+const dynamicRangeOf = (
+  stream: FfprobeStream,
+  frame: FfprobeFrame | undefined,
+  transfer: string | undefined,
+): DynamicRange => {
+  if (ofKind(stream.side_data_list ?? [], "dovi") !== undefined || carriesRpu(frame)) {
+    return "dolby-vision";
+  }
 
   if (transfer === "smpte2084") return "hdr10";
 
@@ -315,6 +342,41 @@ const RANGES: ReadonlyMap<string, "limited" | "full"> = new Map([
   ["jpeg", "full"],
 ]);
 
+/** A chromaticity from ffprobe's rationals, when both lie within the CIE 1931 diagram's bounds. */
+const chromaticityOf = (
+  x: string | undefined,
+  y: string | undefined,
+): { readonly x: number; readonly y: number } | undefined => {
+  const [cx, cy] = [rationalOf(x), rationalOf(y)];
+
+  return cx === undefined || cy === undefined || cx < 0 || cx > 1 || cy <= 0 || cy > 1
+    ? undefined
+    : { x: cx, y: cy };
+};
+
+type Mastering = NonNullable<VideoColour["mastering"]>;
+
+/**
+ * A mastering display's luminances, when they make sense (the minimum not negative and below the
+ * maximum), with its primaries and white point when the item gives all four.
+ */
+const masteringOf = (item: SideData | undefined): Mastering | undefined => {
+  const minLuminance = rationalOf(item?.min_luminance);
+  const maxLuminance = rationalOf(item?.max_luminance);
+
+  if (minLuminance === undefined || maxLuminance === undefined) return undefined;
+
+  if (minLuminance < 0 || maxLuminance <= minLuminance) return undefined;
+  const red = chromaticityOf(item?.red_x, item?.red_y);
+  const green = chromaticityOf(item?.green_x, item?.green_y);
+  const blue = chromaticityOf(item?.blue_x, item?.blue_y);
+  const whitePoint = chromaticityOf(item?.white_point_x, item?.white_point_y);
+
+  return red === undefined || green === undefined || blue === undefined || whitePoint === undefined
+    ? { minLuminance, maxLuminance }
+    : { minLuminance, maxLuminance, primaries: { red, green, blue, whitePoint } };
+};
+
 /**
  * The stream's colour, from the stream's own tags and side data and its first picture's, which
  * carry HEVC's mastering display and content light level SEI that MP4 keeps nowhere else. The
@@ -322,10 +384,8 @@ const RANGES: ReadonlyMap<string, "limited" | "full"> = new Map([
  */
 const colourOf = (stream: FfprobeStream, frame: FfprobeFrame | undefined): VideoColour => {
   const items = [...(stream.side_data_list ?? []), ...(frame?.side_data_list ?? [])];
-  const mastering = ofKind(items, "mastering display");
+  const mastering = masteringOf(ofKind(items, "mastering display"));
   const light = ofKind(items, "content light level");
-  const minLuminance = rationalOf(mastering?.min_luminance);
-  const maxLuminance = rationalOf(mastering?.max_luminance);
 
   const range = (stream.pix_fmt ?? "").startsWith("yuvj")
     ? "full"
@@ -347,9 +407,7 @@ const colourOf = (stream: FfprobeStream, frame: FfprobeFrame | undefined): Video
 
   if (chromaLocation !== undefined) colour.chromaLocation = chromaLocation;
 
-  if (minLuminance !== undefined && maxLuminance !== undefined && maxLuminance > 0) {
-    colour.mastering = { minLuminance, maxLuminance };
-  }
+  if (mastering !== undefined) colour.mastering = mastering;
 
   if (light?.max_content !== undefined && light.max_average !== undefined) {
     colour.contentLight = { maxCll: light.max_content, maxFall: light.max_average };
@@ -419,7 +477,7 @@ const toVideo = (
 
   if (stream.width === undefined || stream.height === undefined) return undefined;
   const colour = colourOf(stream, frame);
-  const dynamicRange = dynamicRangeOf(stream, colour.transfer);
+  const dynamicRange = dynamicRangeOf(stream, frame, colour.transfer);
   const dolbyVision = dolbyVisionOf(stream);
 
   const hdr10Plus =
@@ -440,6 +498,7 @@ const toVideo = (
     colour,
     hdr10Plus: hdr10Plus ? true : undefined,
     dolbyVision,
+    dolbyVisionRpu: carriesRpu(frame) ? true : undefined,
   };
 };
 
@@ -586,50 +645,55 @@ export const parseFfprobeJson = Effect.fn("MediaProbe.parse")(function* (
  */
 const FRAME_ENTRIES = [
   "frame=stream_index,color_range,color_space,color_primaries,color_transfer",
-  "frame_side_data=side_data_type,min_luminance,max_luminance,max_content,max_average",
+  "frame_side_data=side_data_type,red_x,red_y,green_x,green_y,blue_x,blue_y,white_point_x,white_point_y,min_luminance,max_luminance,max_content,max_average",
 ].join(":");
 
 /**
- * Probes the file at `path` with ffprobe: its format, streams, and chapters, then the picture
- * stream's first picture (`FRAME_ENTRIES`). The second run names that stream alone, since
- * `-read_intervals %+#1` stops after the first packet of the streams it reads, and a file whose
- * first packet is audio would otherwise give no picture.
+ * Probes the file at `path` with ffprobe: its format, streams, and chapters, and the first picture
+ * of its first video stream that is not cover art (`V:0`, as `pictureStream` picks it) with its
+ * `FRAME_ENTRIES`, in two runs side by side. One run cannot do both: `-read_intervals %+#1` stops
+ * after the first packet of the streams a run reads, so a file whose first packet is audio would
+ * give no picture, and `-select_streams` would hide the other streams. Side by side, a probe on a
+ * slow mount takes as long as one run: on a source answering each read 40 ms late, 0.95 s for the
+ * streams, 0.95 s for the picture, 0.95 s for both. The picture run reads the header and then
+ * packets up to the stream's first, which the tools' timeout bounds for a file whose video starts
+ * far in.
  */
 export const probeFile = Effect.fn("MediaProbe.probeFile")(function* (path: string) {
   const tools = yield* MediaTools.Service;
 
-  const output = yield* tools
-    .ffprobe([
-      "-v",
-      "error",
-      "-print_format",
-      "json",
-      "-show_format",
-      "-show_streams",
-      "-show_chapters",
-      path,
-    ])
-    .pipe(Effect.flatMap((json) => decodeFfprobeOutput(json).pipe(Effect.mapError(invalid))));
-
-  const picture = pictureStream(output);
-
-  if (picture === undefined) return probeOf(output, path);
-
-  const { frames } = yield* tools
-    .ffprobe([
-      "-v",
-      "error",
-      "-print_format",
-      "json",
-      "-select_streams",
-      String(picture.index),
-      "-read_intervals",
-      "%+#1",
-      "-show_entries",
-      FRAME_ENTRIES,
-      path,
-    ])
-    .pipe(Effect.flatMap((json) => decodeFfprobeFrames(json).pipe(Effect.mapError(invalid))));
+  const [output, { frames }] = yield* Effect.all(
+    [
+      tools
+        .ffprobe([
+          "-v",
+          "error",
+          "-print_format",
+          "json",
+          "-show_format",
+          "-show_streams",
+          "-show_chapters",
+          path,
+        ])
+        .pipe(Effect.flatMap((json) => decodeFfprobeOutput(json).pipe(Effect.mapError(invalid)))),
+      tools
+        .ffprobe([
+          "-v",
+          "error",
+          "-print_format",
+          "json",
+          "-select_streams",
+          "V:0",
+          "-read_intervals",
+          "%+#1",
+          "-show_entries",
+          FRAME_ENTRIES,
+          path,
+        ])
+        .pipe(Effect.flatMap((json) => decodeFfprobeFrames(json).pipe(Effect.mapError(invalid)))),
+    ],
+    { concurrency: 2 },
+  );
 
   return probeOf({ ...output, frames: frames ?? [] }, path);
 });

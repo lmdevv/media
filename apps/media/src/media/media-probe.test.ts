@@ -348,6 +348,12 @@ describe.runIf(hasFfmpeg)("probeFile", () => {
         assert.deepStrictEqual(video?.colour?.mastering, {
           minLuminance: 0.005,
           maxLuminance: 1000,
+          primaries: {
+            red: { x: 0.68, y: 0.32 },
+            green: { x: 0.265, y: 0.69 },
+            blue: { x: 0.15, y: 0.06 },
+            whitePoint: { x: 0.3127, y: 0.329 },
+          },
         });
         assert.deepStrictEqual(video?.colour?.contentLight, { maxCll: 1000, maxFall: 400 });
       }).pipe(Effect.scoped),

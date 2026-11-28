@@ -30,6 +30,7 @@ import {
   type GpuDomain,
   ImplId,
   implOf,
+  keepsUp,
   Op,
   type OpName,
   type OutputCodec,
@@ -73,6 +74,8 @@ export interface Step {
   readonly op: Op;
   /** The domain the row runs in. */
   readonly on: Domain;
+  /** The render node of the domain it runs in; none on the CPU. */
+  readonly device: string | undefined;
   /** The inventory key of what this step exercises. */
   readonly capability: CapabilityKey;
   readonly needs: ReadonlyArray<BuildFeature>;
@@ -321,6 +324,7 @@ const build = (
       impl: entry.id,
       op,
       on: entry.on,
+      device: entry.on === "cpu" ? undefined : deviceOf(entry.on),
       capability: key,
       needs,
       input: frame,
@@ -524,23 +528,75 @@ const candidates = (
   );
 };
 
+/** Whether `entry` can do `step`'s operation on its frames: its key verified, not set aside. */
+const canDo = (entry: Row, step: Step, snapshot: CapabilitySnapshot): boolean => {
+  const use = entry.use(step.op, step.input);
+
+  if (use === undefined || snapshot.excluded.has(entry.id)) return false;
+
+  const bound =
+    entry.on === "cpu" || snapshot.domains.some((binding) => binding.domain === entry.on);
+
+  return bound && snapshot.verified.has(capabilityKey(entry.id, use.variant));
+};
+
+/** The rows that stand in for `id` (`Row.fallbackFor`). */
+const fallbacksOf = (id: ImplId): ReadonlyArray<Row> =>
+  VIDEO_OPS.filter((entry) => entry.fallbackFor === id);
+
+/**
+ * Whether `step` runs a row other than the one the table prefers for it: a fallback row
+ * (`Row.fallbackFor`) where the row it stands in for can do the step and keeps up with the source
+ * at its output's height (`keepsUp`), or a preferred row that does not keep up where a fallback can
+ * do the step.
+ */
+const misplaced = (
+  step: Step,
+  snapshot: CapabilitySnapshot,
+  frameRate: number | undefined,
+): boolean => {
+  const entry = rowById.get(step.impl);
+
+  if (entry === undefined) return false;
+  const preferred = entry.fallbackFor === undefined ? undefined : rowById.get(entry.fallbackFor);
+
+  if (preferred !== undefined) {
+    return canDo(preferred, step, snapshot) && keepsUp(preferred, step.output.height, frameRate);
+  }
+
+  return (
+    !keepsUp(entry, step.output.height, frameRate) &&
+    fallbacksOf(entry.id).some((fallback) => canDo(fallback, step, snapshot))
+  );
+};
+
 /**
  * How much a chain costs, compared in order: an encode on the CPU, the target's place in the
- * intent's order, CPU work, moves between memories, then the snapshot's domain preference.
+ * intent's order, rows run where the table prefers another (`misplaced`), CPU work, moves between
+ * memories with the moves rows make inside themselves (`Row.transfers`), then the snapshot's domain
+ * preference.
  */
 const costOf = (
   steps: ReadonlyArray<Step>,
   candidate: Candidate,
   snapshot: CapabilitySnapshot,
+  frameRate: number | undefined,
 ): ReadonlyArray<number> => {
   const gpu = steps.find((step) => step.on !== "cpu")?.on;
   const rank = snapshot.domains.findIndex((binding) => binding.domain === gpu);
 
+  const moves = steps.reduce(
+    (total, step) =>
+      total + (Op.$is("Move")(step.op) ? 1 : 0) + (rowById.get(step.impl)?.transfers?.count ?? 0),
+    0,
+  );
+
   return [
     candidate.encode.on === "cpu" ? 1 : 0,
     candidate.rank,
+    steps.filter((step) => misplaced(step, snapshot, frameRate)).length,
     steps.filter((step) => step.on === "cpu" && !Op.$is("Move")(step.op)).length,
-    steps.filter((step) => Op.$is("Move")(step.op)).length,
+    moves,
     rank === -1 ? snapshot.domains.length : rank,
   ];
 };
@@ -576,7 +632,7 @@ const cheapest = (
     if (Result.isFailure(built)) {
       first ??= built.failure;
     } else {
-      const cost = costOf(built.success, candidate, snapshot);
+      const cost = costOf(built.success, candidate, snapshot, intent.frameRate);
 
       if (best === undefined || cheaper(cost, best.cost)) {
         best = { candidate, steps: built.success, cost };

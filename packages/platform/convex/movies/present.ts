@@ -79,6 +79,19 @@ export const presentMediaFile = (file: Doc<"mediaFiles">): MediaFile => ({
 const defaultAudio = (file: Doc<"mediaFiles">) =>
   file.probe.audio.find((track) => track.default) ?? file.probe.audio[0];
 
+/** A video stream's Dolby Vision configuration record and RPU flag, the ones it has. */
+const dolbyVisionOf = (
+  video: Doc<"mediaFiles">["probe"]["video"][number] | undefined,
+): Pick<MediaVersion, "dolbyVision" | "dolbyVisionRpu"> => {
+  const fields: { -readonly [Key in "dolbyVision" | "dolbyVisionRpu"]?: MediaVersion[Key] } = {};
+
+  if (video?.dolbyVision !== undefined) fields.dolbyVision = video.dolbyVision;
+
+  if (video?.dolbyVisionRpu === true) fields.dolbyVisionRpu = true;
+
+  return fields;
+};
+
 /** A file on disk as a version to choose, `lastPlayed` when the caller's progress names it. */
 export const presentVersion = (
   file: Doc<"mediaFiles">,
@@ -97,6 +110,7 @@ export const presentVersion = (
     videoProfile: video?.profile ?? null,
     videoLevel: video?.level ?? null,
     videoBitDepth: video?.bitDepth ?? null,
+    ...dolbyVisionOf(video),
     audioCodec: audio?.codec ?? null,
     audioChannels: audio?.channels ?? null,
     audioTracks: file.probe.audio.length,
@@ -231,6 +245,7 @@ const directPlayFile = (file: Doc<"mediaFiles">): DirectPlayFile => {
             height: video.height,
             dynamicRange: dynamicRangeOf(video.hdr),
             dolbyVision: video.dolbyVision,
+            dolbyVisionRpu: video.dolbyVisionRpu,
           },
     audio: audio === undefined ? undefined : { codec: audio.codec, channels: audio.channels },
   };

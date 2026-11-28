@@ -21,9 +21,11 @@ the evidence of where it ran.
   Vision 8.1 and 8.4 (the HDR10 and HLG patches re-encoded with the RPUs of fetched samples, an
   iPhone's recording for 8.4),
   7 (one picture with its enhancement layer), and 5 (Apple's HLS example), the last fetched (below).
-  Quick Sync's and VA-API's paths map with libplacebo (BT.2390, on a Vulkan device of the same GPU)
-  where it is proven, else with the GPU's own tone map; the CPU maps with zscale and Hable, and
-  refuses Dolby Vision 5 (`dolby-vision-not-convertible`), which only libplacebo reads.
+  Quick Sync's and VA-API's paths map with libplacebo (BT.2390, on a Vulkan device derived from the
+  render node's) where it is proven and keeps up at the output's height (`PLACEBO_THROUGHPUT` in
+  `video-ops-intel.ts`), else with the GPU's own tone map; Dolby Vision 5 keeps libplacebo at any
+  size. The CPU maps with zscale and Hable, and refuses Dolby Vision 5
+  (`dolby-vision-not-convertible`), which only libplacebo reads.
 - `scale-bt601`, `scale-bt2020`, and `scale-full-range` scale SDR patches in BT.601, BT.2020, and
   full range to 720 lines: their colour is carried, tags and pixels as the source's.
 - `hw-burn-in` draws the DVD (image) subtitle track into the picture: on a GPU path with the GPU's
@@ -220,8 +222,9 @@ Preconditions:
     `libplacebo=format=yuv420p:colorspace=bt709:color_primaries=bt709:color_trc=bt709:range=tv:tonemapping=bt.2390:peak_detect=0:contrast_recovery=0`
     on lavapipe (`VK_ICD_FILENAMES` naming Mesa's `lvp_icd`) and read the patches back with
     `node colour-patches.mjs read`.
-- `hdr-metadata` fails a stream or first picture that still carries mastering display, content
-  light level, HDR10+, or Dolby Vision metadata; `sdr-tags` also wants limited range; `source-tags`
+- `hdr-metadata` fails a stream or first picture that carries any side data but the encoder's own
+  unregistered SEI (`SDR_SIDE_DATA`): mastering display, content light level, HDR10+, Dolby Vision,
+  an ambient viewing environment, or a kind not met yet; `sdr-tags` also wants limited range; `source-tags`
   wants an SDR source's transfer, primaries, matrix, and range carried.
 - Fetched samples (`SAMPLES`: FFmpeg's test suite, which states no licence for them, and Apple's
   HLS example, published for testing players) are downloaded by the runner into

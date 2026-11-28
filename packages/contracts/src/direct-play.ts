@@ -15,9 +15,11 @@ export interface DirectPlayVideo {
   readonly dynamicRange: DynamicRange;
   /**
    * A Dolby Vision stream's profile and base layer signal compatibility id, when the probe read its
-   * configuration; what the base layer plays as depends on it (`playableAs`).
+   * configuration; what the base layer plays as depends on it (`dolbyVisionBase`).
    */
   readonly dolbyVision?: { readonly profile: number; readonly compatibility: number } | undefined;
+  /** Whether a Dolby Vision stream's first picture carries an RPU. */
+  readonly dolbyVisionRpu?: true | undefined;
 }
 
 /** An audio track as direct play reads it. */
@@ -64,39 +66,80 @@ export const videoSupport = (
 ): VideoCodecSupport | undefined =>
   client.videoCodecs.find((support) => canonicalCodec(support.codec) === canonicalCodec(codec));
 
-/**
- * What a Dolby Vision base layer plays as for a player that does not apply Dolby Vision, by its
- * signal compatibility id: HDR10 (1, and 6 for profile 7's Blu-ray base layer), SDR (2), or HLG
- * (4). An id of 0 (profile 5's IPT-PQ-c2) or any other plays as nothing else.
- */
-const BASE_LAYERS: ReadonlyMap<number, DynamicRange> = new Map([
+/** Profile 8's base layers by signal compatibility id: HDR10 (1), SDR (2), and HLG (4). */
+const PROFILE_8_BASES: ReadonlyMap<number, DynamicRange> = new Map([
   [1, "hdr10"],
   [2, "sdr"],
   [4, "hlg"],
-  [6, "hdr10"],
 ]);
 
 /**
- * The dynamic ranges a client may declare, any one of which lets it play `video` as stored; SDR
- * needs no declaration. A Dolby Vision stream plays for a client that declares Dolby Vision, and
- * for one that declares what its base layer is; profile 7 plays only as its HDR10 base layer, since
- * players outside Blu-ray do not apply its enhancement layer. One whose configuration was not read
- * plays only for Dolby Vision.
+ * What a Dolby Vision stream's base layer plays as for a player that does not apply Dolby Vision,
+ * decided from the profile first and then the signal compatibility id, the stricter reading where
+ * they disagree: profile 7's HDR10 (its Blu-ray id, 6) and profile 8's HDR10, SDR, or HLG (1, 2, 4),
+ * each in HEVC. Profile 5 has none whatever its id says, since its samples are IPT-PQ-c2; nor has
+ * any other profile, id, or codec, nor a stream whose configuration was not read.
  */
-export const playableAs = (
-  video: Pick<DirectPlayVideo, "dynamicRange" | "dolbyVision">,
-): ReadonlyArray<DynamicRange> => {
-  if (video.dynamicRange !== "dolby-vision") return [video.dynamicRange];
+export const dolbyVisionBase = (
+  video: Pick<DirectPlayVideo, "codec" | "dolbyVision">,
+): DynamicRange | undefined => {
   const config = video.dolbyVision;
-  const base = config === undefined ? undefined : BASE_LAYERS.get(config.compatibility);
 
-  if (config?.profile === 7) return base === undefined ? [] : [base];
+  if (config === undefined || canonicalCodec(video.codec) !== "hevc") return undefined;
 
-  return base === undefined ? ["dolby-vision"] : ["dolby-vision", base];
+  if (config.profile === 7) return config.compatibility === 6 ? "hdr10" : undefined;
+
+  return config.profile === 8 ? PROFILE_8_BASES.get(config.compatibility) : undefined;
 };
 
-/** Whether the client decodes and displays `video` as stored. */
-export const decodesVideo = (client: ClientCapabilities, video: DirectPlayVideo): boolean => {
+/** Whether `video` is Dolby Vision 5 in HEVC, by its configuration. */
+const isProfile5 = (video: Pick<DirectPlayVideo, "codec" | "dolbyVision">): boolean =>
+  video.dolbyVision?.profile === 5 && canonicalCodec(video.codec) === "hevc";
+
+/**
+ * How a stream reaches a client: `stored`, the original file's bytes over byte ranges, any Dolby
+ * Vision configuration record in them included; or `copied`, its packets remuxed, which keeps that
+ * record for a client that declares Dolby Vision and drops it for one that does not.
+ */
+export type Delivery = "stored" | "copied";
+
+/**
+ * The dynamic ranges a client may declare, any one of which lets it play `video` delivered as
+ * `delivery`; SDR needs no declaration. A stream that is not Dolby Vision plays as its own range.
+ * For Dolby Vision:
+ * - Profile 8 with a base layer (`dolbyVisionBase`) plays as stored only for Dolby Vision, since
+ *   the original keeps its record and its sample entry may be `dvh1`; copied, for Dolby Vision or
+ *   as its base layer, the record dropped.
+ * - Profile 7 never plays as stored: AVFoundation, which declares Dolby Vision, fails to decode it
+ *   with its record. Copied, it plays as its HDR10 base layer, the record dropped.
+ * - Profile 5 plays, stored or copied, only for Dolby Vision, and only when its first picture
+ *   carries the RPU that says what its samples mean.
+ * - Any other profile, id, or codec, or a stream whose configuration was not read, plays as
+ *   neither: only a conversion that reads its RPU shows it.
+ */
+export const playableAs = (
+  video: Pick<DirectPlayVideo, "codec" | "dynamicRange" | "dolbyVision" | "dolbyVisionRpu">,
+  delivery: Delivery,
+): ReadonlyArray<DynamicRange> => {
+  if (video.dynamicRange !== "dolby-vision") return [video.dynamicRange];
+
+  if (isProfile5(video)) return video.dolbyVisionRpu === true ? ["dolby-vision"] : [];
+
+  const base = dolbyVisionBase(video);
+
+  if (base === undefined) return [];
+
+  if (video.dolbyVision?.profile === 7) return delivery === "copied" ? [base] : [];
+
+  return delivery === "copied" ? ["dolby-vision", base] : ["dolby-vision"];
+};
+
+/** Whether the client decodes and displays `video` delivered as `delivery` (`playableAs`). */
+export const decodesVideo = (
+  client: ClientCapabilities,
+  video: DirectPlayVideo,
+  delivery: Delivery,
+): boolean => {
   const support = videoSupport(client, video.codec);
 
   if (support === undefined) return false;
@@ -111,7 +154,7 @@ export const decodesVideo = (client: ClientCapabilities, video: DirectPlayVideo)
 
   const depthOk = video.bitDepth <= (support.maxBitDepth ?? 8);
 
-  const rangeOk = playableAs(video).some(
+  const rangeOk = playableAs(video, delivery).some(
     (range) => range === "sdr" || (support.dynamicRanges ?? []).includes(range),
   );
 
@@ -136,7 +179,7 @@ export const decodesAudio = (client: ClientCapabilities, track: DirectPlayAudio)
 export const playsDirectly = (client: ClientCapabilities, file: DirectPlayFile): boolean =>
   client.containers.some((container) => container === file.container) &&
   file.video !== undefined &&
-  decodesVideo(client, file.video) &&
+  decodesVideo(client, file.video, "stored") &&
   (file.audio === undefined || decodesAudio(client, file.audio));
 
 const DYNAMIC_RANGES: Readonly<Record<HdrFormat, DynamicRange>> = {

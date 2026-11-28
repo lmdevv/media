@@ -5,7 +5,8 @@
  * signal its decoded frames carry, which picks the tone map, and how an encode reaches SDR. The
  * rows read the signal; nothing else branches on a kind of source.
  */
-import { playableAs } from "@media/contracts/direct-play";
+import { canonicalCodec, dolbyVisionBase, playableAs } from "@media/contracts/direct-play";
+import type { DynamicRange } from "@media/contracts/media-playback";
 
 import type { VideoStream } from "../media/media-probe.ts";
 import type { Colour, Signal } from "./video-ops.ts";
@@ -34,8 +35,11 @@ export type SourceKind = (typeof SOURCE_KINDS)[number];
 export interface ColourDecision {
   /** The source, in words. */
   readonly about: string;
-  /** A stream of this kind, as the probe reads it, from which the table's copy rule is printed. */
-  readonly example: Pick<VideoStream, "dynamicRange" | "dolbyVision">;
+  /**
+   * A stream of this kind, as the probe reads it, from which the table's direct-play and copy rules
+   * are printed.
+   */
+  readonly example: Pick<VideoStream, "codec" | "dynamicRange" | "dolbyVision" | "dolbyVisionRpu">;
   /**
    * What a copy (remux) for a client that declares Dolby Vision keeps of the stream's Dolby Vision
    * configuration: `kept` writes it into the output, so the player applies the RPU; `dropped`
@@ -50,7 +54,7 @@ export interface ColourDecision {
   readonly why: string;
 }
 
-const SDR = { dynamicRange: "sdr" } as const;
+const SDR = { codec: "hevc", dynamicRange: "sdr" } as const;
 
 /** What keeps an SDR source's own colour on Quick Sync's path, whose scale would convert it. */
 const QSV_KEEPS =
@@ -62,7 +66,7 @@ const QSV_KEEPS =
  * shadows and mid-tones darker; zscale and Hable on the CPU.
  */
 const GPU_TONE_MAP =
-  "mapped to SDR BT.709 by libplacebo (BT.2390) on Quick Sync's or VA-API's path where Vulkan is proven, else by the GPU's own tone map (darker in the shadows and mid-tones), and by zscale with Hable on the CPU";
+  "mapped to SDR BT.709 by libplacebo (BT.2390) on Quick Sync's or VA-API's path where Vulkan is proven and it keeps up at the output's size, else by the GPU's own tone map (darker in the shadows and mid-tones), and by zscale with Hable on the CPU";
 
 /** The table: one decision per kind of source. */
 export const COLOUR_DECISIONS: Readonly<Record<SourceKind, ColourDecision>> = {
@@ -100,7 +104,7 @@ export const COLOUR_DECISIONS: Readonly<Record<SourceKind, ColourDecision>> = {
   },
   hdr10: {
     about: "HDR10: PQ, BT.2020",
-    example: { dynamicRange: "hdr10" },
+    example: { codec: "hevc", dynamicRange: "hdr10" },
     dolbyVisionCopy: "none",
     signal: "pq",
     encode: GPU_TONE_MAP,
@@ -108,46 +112,52 @@ export const COLOUR_DECISIONS: Readonly<Record<SourceKind, ColourDecision>> = {
   },
   hdr10plus: {
     about: "HDR10+: HDR10 with SMPTE 2094-40 dynamic metadata",
-    example: { dynamicRange: "hdr10" },
+    example: { codec: "hevc", dynamicRange: "hdr10" },
     dolbyVisionCopy: "none",
     signal: "pq",
-    encode: "as HDR10, from its static metadata; its dynamic metadata is not used and not kept",
+    encode:
+      "as HDR10, from its static metadata: its dynamic metadata is removed before every tone map, so no path reads it, and none is kept",
     why: "its base is ordinary HDR10, which every HDR10 player shows",
   },
   hlg: {
     about: "HLG: ARIB STD-B67, BT.2020",
-    example: { dynamicRange: "hlg" },
+    example: { codec: "hevc", dynamicRange: "hlg" },
     dolbyVisionCopy: "none",
     signal: "hlg",
     encode: `${GPU_TONE_MAP}; VA-API's own needs mastering display metadata HLG has none of, so without libplacebo its chains map on the CPU`,
     why: "a client that declares HLG plays it; any other needs SDR",
   },
   "dolby-vision-5": {
-    about: "Dolby Vision 5: IPT-PQ-c2, no compatible base layer",
+    about:
+      "Dolby Vision 5: IPT-PQ-c2, no compatible base layer, whatever its compatibility id says",
     example: {
+      codec: "hevc",
       dynamicRange: "dolby-vision",
       dolbyVision: { profile: 5, level: 6, compatibility: 0 },
+      dolbyVisionRpu: true,
     },
     dolbyVisionCopy: "kept",
     signal: "dovi",
     encode:
-      "reshaped by its RPU and mapped by libplacebo on Quick Sync's and VA-API's paths where Vulkan is proven; refused on the CPU's and elsewhere (dolby-vision-not-convertible)",
-    why: "read as HDR10 its IPT samples come out green and purple, so no PQ tone map may take it",
+      "reshaped by its RPU and mapped by libplacebo on Quick Sync's and VA-API's paths where Vulkan is proven, at any size, when its first picture carries an RPU; refused otherwise, on the CPU's, and elsewhere (dolby-vision-not-convertible)",
+    why: "read as HDR10 its IPT samples come out green and purple, so no PQ tone map may take it, and without its RPU nothing says what they mean",
   },
   "dolby-vision-7": {
     about: "Dolby Vision 7: HDR10 base layer with an enhancement layer",
     example: {
+      codec: "hevc",
       dynamicRange: "dolby-vision",
       dolbyVision: { profile: 7, level: 6, compatibility: 6 },
     },
     dolbyVisionCopy: "dropped",
     signal: "pq",
     encode: "its HDR10 base layer tone-mapped as HDR10; the enhancement layer and RPU are not read",
-    why: "players other than Blu-ray's do not apply profile 7, and every HDR10 player shows its base layer",
+    why: "players other than Blu-ray's do not apply profile 7 (AVFoundation fails to decode it with its record, so the original never plays as stored), and every HDR10 player shows its base layer",
   },
   "dolby-vision-8.1": {
     about: "Dolby Vision 8.1: HDR10 base layer",
     example: {
+      codec: "hevc",
       dynamicRange: "dolby-vision",
       dolbyVision: { profile: 8, level: 6, compatibility: 1 },
     },
@@ -159,6 +169,7 @@ export const COLOUR_DECISIONS: Readonly<Record<SourceKind, ColourDecision>> = {
   "dolby-vision-8.2": {
     about: "Dolby Vision 8.2: SDR base layer",
     example: {
+      codec: "hevc",
       dynamicRange: "dolby-vision",
       dolbyVision: { profile: 8, level: 6, compatibility: 2 },
     },
@@ -170,6 +181,7 @@ export const COLOUR_DECISIONS: Readonly<Record<SourceKind, ColourDecision>> = {
   "dolby-vision-8.4": {
     about: "Dolby Vision 8.4: HLG base layer, as iPhones record",
     example: {
+      codec: "hevc",
       dynamicRange: "dolby-vision",
       dolbyVision: { profile: 8, level: 4, compatibility: 4 },
     },
@@ -179,20 +191,22 @@ export const COLOUR_DECISIONS: Readonly<Record<SourceKind, ColourDecision>> = {
     why: "the base layer is ordinary HLG, the picture a player without Dolby Vision shows",
   },
   "dolby-vision-other": {
-    about: "Dolby Vision of another profile, or one whose configuration was not read",
-    example: { dynamicRange: "dolby-vision" },
-    dolbyVisionCopy: "kept",
+    about:
+      "Dolby Vision of another profile, a profile and compatibility id that disagree, another codec, or an RPU with no configuration record",
+    example: { codec: "hevc", dynamicRange: "dolby-vision", dolbyVisionRpu: true },
+    dolbyVisionCopy: "none",
     signal: "dovi",
-    encode: "as Dolby Vision 5: libplacebo, which reads the RPU, else refused",
-    why: "without a known compatible base layer only the RPU says what the samples mean",
+    encode:
+      "as Dolby Vision 5: libplacebo, which reads the RPU, when the first picture has one; else refused",
+    why: "without a base layer the table names, only the RPU says what the samples mean, and no player is known to take the original",
   },
 };
 
-/** The Dolby Vision 8 kinds, by the base layer's signal compatibility id. */
-const PROFILE_8: ReadonlyMap<number, SourceKind> = new Map([
-  [1, "dolby-vision-8.1"],
-  [2, "dolby-vision-8.2"],
-  [4, "dolby-vision-8.4"],
+/** The Dolby Vision 8 kinds, by what the shared check reads their base layer as. */
+const PROFILE_8: ReadonlyMap<DynamicRange, SourceKind> = new Map([
+  ["hdr10", "dolby-vision-8.1"],
+  ["sdr", "dolby-vision-8.2"],
+  ["hlg", "dolby-vision-8.4"],
 ]);
 
 /** ffprobe's names for BT.601's primaries and matrix. */
@@ -208,16 +222,14 @@ const fullRange = (video: VideoStream): boolean =>
 /** The kind of `video`'s colour, as the probe read it. */
 export const kindOf = (video: VideoStream): SourceKind => {
   if (video.dynamicRange === "dolby-vision") {
-    const profile = video.dolbyVision;
+    const profile = video.dolbyVision?.profile;
 
-    if (profile?.profile === 5) return "dolby-vision-5";
+    if (profile === 5 && canonicalCodec(video.codec) === "hevc") return "dolby-vision-5";
+    const base = dolbyVisionBase(video);
 
-    if (profile?.profile === 7) return "dolby-vision-7";
+    if (base === undefined) return "dolby-vision-other";
 
-    return (
-      (profile?.profile === 8 ? PROFILE_8.get(profile.compatibility) : undefined) ??
-      "dolby-vision-other"
-    );
+    return profile === 7 ? "dolby-vision-7" : (PROFILE_8.get(base) ?? "dolby-vision-other");
   }
 
   if (video.dynamicRange === "hdr10") return video.hdr10Plus === true ? "hdr10plus" : "hdr10";
@@ -233,7 +245,15 @@ export const kindOf = (video: VideoStream): SourceKind => {
 };
 
 /** The decision for `video`'s kind of colour. */
-export const decisionOf = (video: VideoStream): ColourDecision => COLOUR_DECISIONS[kindOf(video)];
+const decisionOf = (video: VideoStream): ColourDecision => COLOUR_DECISIONS[kindOf(video)];
+
+/**
+ * Whether an encode can show `video` right: every kind but Dolby Vision that only its RPU explains
+ * (`dovi`: profile 5 and the kinds the table does not name), which needs the RPU in its first
+ * picture.
+ */
+export const convertible = (video: VideoStream): boolean =>
+  decisionOf(video).signal !== "dovi" || video.dolbyVisionRpu === true;
 
 /** The colour `video`'s decoded frames are in, as rows read it. */
 export const sourceColour = (video: VideoStream): Colour => ({
@@ -249,7 +269,9 @@ export const sourceColour = (video: VideoStream): Colour => ({
 export interface TableLine {
   readonly kind: SourceKind;
   readonly about: string;
-  /** The dynamic ranges a client may declare, any one of which lets it receive the original. */
+  /** The dynamic ranges a client may declare, any one of which lets it play the original file. */
+  readonly directPlayTo: string;
+  /** The dynamic ranges a client may declare, any one of which lets it receive a copy (remux). */
   readonly copiedTo: string;
   readonly dolbyVisionCopy: ColourDecision["dolbyVisionCopy"];
   readonly signal: Signal;
@@ -257,7 +279,7 @@ export interface TableLine {
   readonly why: string;
 }
 
-/** The table as lines, in its order, with each kind's copy rule from the shared check. */
+/** The table as lines, in its order, with each kind's direct-play and copy rules from the shared check. */
 export const tableLines = (): ReadonlyArray<TableLine> =>
   SOURCE_KINDS.map((kind) => {
     const decision = COLOUR_DECISIONS[kind];
@@ -265,7 +287,8 @@ export const tableLines = (): ReadonlyArray<TableLine> =>
     return {
       kind,
       about: decision.about,
-      copiedTo: playableAs(decision.example).join(" or "),
+      directPlayTo: playableAs(decision.example, "stored").join(" or "),
+      copiedTo: playableAs(decision.example, "copied").join(" or "),
       dolbyVisionCopy: decision.dolbyVisionCopy,
       signal: decision.signal,
       encode: decision.encode,

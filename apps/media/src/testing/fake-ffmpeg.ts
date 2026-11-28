@@ -47,6 +47,11 @@ export interface FakeFfmpegBehavior {
   readonly hlsFailsAfterFirstFragment?: true;
   /** The filter list lacks `zscale` and `tonemap`, as a build without libzimg would. */
   readonly withoutCpuToneMap?: true;
+  /**
+   * The filter list names libplacebo, and the stand-in plays its tone map in software as a format
+   * conversion to NV12, as on a GPU whose Vulkan the probes prove.
+   */
+  readonly withPlacebo?: true;
   /** Runs these rules pick fail, hang, or start late, as a broken or slow stage would. */
   readonly rules?: ReadonlyArray<RunRule>;
   /**
@@ -68,7 +73,9 @@ export interface FakeFfmpegBehavior {
  * `afterFragments`, a matching HLS run first writes its init segment and that many fragments, then
  * writes `stderr` and exits with status 1, as a stage that fails partway through would. A rule
  * with `armedBy` applies only once a rule that `arm`s that name has matched, so a probe can pass at
- * start and fail after a stream's failure; `limit` caps how many runs a rule matches.
+ * start and fail after a stream's failure; `limit` caps how many runs a rule matches. In `stderr`,
+ * `{Parsed:<filter>}` names the run's first `<filter>` as ffmpeg's log does (`Parsed_<filter>_<n>`,
+ * `n` its place in the graph).
  */
 export interface RunRule {
   readonly token: string;
@@ -148,6 +155,15 @@ if (behavior.logInvocations === true) {
 
 let failsPartway;
 
+// The graph's filters in the order ffmpeg names them, labels left out, so a rule's stderr can name
+// one as its log does.
+const graphText = asked[asked.findIndex((arg) => arg === "-vf" || arg === "-filter_complex") + 1] ?? "";
+const graphFilters = graphText
+  .split(/[;,]/)
+  .map((part) => part.replace(/^(\\[[^\\]]*\\])+/, "").split("=")[0].replace(/\\[[^\\]]*\\]$/, ""));
+const parsedNames = (text) =>
+  text?.replace(/\\{Parsed:([a-z0-9_]+)\\}/g, (_, name) => "Parsed_" + name + "_" + graphFilters.indexOf(name));
+
 for (const [index, rule] of (behavior.rules ?? []).entries()) {
   const runs = rule.runs === "any" || (rule.runs === "hls" ? hls : probe);
   const armed = rule.armedBy === undefined || existsSync(join(here, "armed-" + rule.armedBy));
@@ -162,7 +178,7 @@ for (const [index, rule] of (behavior.rules ?? []).entries()) {
       break;
     }
     if (rule.delayMs !== undefined) await new Promise((resolve) => setTimeout(resolve, rule.delayMs));
-    const stderr = rule.stderrFrom === undefined ? rule.stderr : readFileSync(join(here, rule.stderrFrom), "utf8");
+    const stderr = rule.stderrFrom === undefined ? parsedNames(rule.stderr) : readFileSync(join(here, rule.stderrFrom), "utf8");
     if (stderr !== undefined) process.stderr.write(stderr + "\\n");
     // A core size limit of 1 makes Linux skip the core dump, which a dump collector such as
     // systemd-coredump would otherwise take seconds to write before the run ends.
@@ -214,6 +230,7 @@ const graphInSoftware = (text) =>
     .replace(/vpp_qsv=([^,;\\[]*)/g, (_, options) => inSoftware(optionsOf(options)))
     .replace(/scale_vaapi=([^,;\\[]*)/g, (_, options) => inSoftware(optionsOf(options)))
     .replace(/tonemap_vaapi=[^,;\\[]*/g, "format=nv12")
+    .replace(/libplacebo=[^,;\\[]*/g, "format=nv12")
     .replace(/deinterlace_vaapi=[^,;\\[]*/g, SOFTWARE_DEINTERLACE)
     .replace(/overlay_(?:qsv|vaapi)=(?:\\\\.|[^,;\\[\\\\])*/g, "overlay=eof_action=pass:repeatlast=0")
     .replace(/hwupload(=[^,;\\[]*)?/g, "null")
@@ -279,10 +296,18 @@ if (listing !== undefined) {
   const listed = run(args, { encoding: "utf8" });
   const lines = (listed.stdout + emulated[listing]).split("\\n");
 
-  const hidden = behavior.withoutCpuToneMap === true ? /\\s(zscale|tonemap|libplacebo)\\s/ : /\\slibplacebo\\s/;
+  // With libplacebo played, the listing names it whatever the build has; otherwise it never does.
+  const hidden =
+    behavior.withoutCpuToneMap === true
+      ? /\\s(zscale|tonemap|libplacebo)\\s/
+      : /\\slibplacebo\\s/;
+  const shown =
+    listing === "-filters" && behavior.withPlacebo === true
+      ? " .. libplacebo        V->V       played in software\\n"
+      : "";
 
   process.stdout.write(
-    (listing === "-filters" ? lines.filter((line) => !hidden.test(line)) : lines).join("\\n"),
+    (listing === "-filters" ? lines.filter((line) => !hidden.test(line)) : lines).join("\\n") + shown,
   );
   process.exit(listed.status ?? 1);
 }
@@ -353,7 +378,7 @@ if (stalls || failsAfterFirst || failsPartway !== undefined) {
 
   if (status !== 0) process.exit(status);
   if (failsPartway !== undefined) {
-    process.stderr.write((failsPartway.stderr ?? "Conversion failed!") + "\\n");
+    process.stderr.write((parsedNames(failsPartway.stderr) ?? "Conversion failed!") + "\\n");
     process.exit(1);
   }
   if (failsAfterFirst) process.exit(1);

@@ -196,11 +196,15 @@ export const FieldOrder = Schema.Literals(["progressive", "tff", "bff", "unknown
 /** How a video stream says its pictures are scanned. */
 export type FieldOrder = typeof FieldOrder.Type;
 
+/** A CIE 1931 chromaticity. */
+const Chromaticity = Schema.Struct({ x: Schema.Finite, y: Schema.Finite });
+
 /**
  * A video stream's colour as ffprobe reads it from the container, the bitstream, and the first
  * picture. `transfer`, `primaries`, and `matrix` are ffprobe's names (`smpte2084`, `bt2020`,
- * `bt2020nc`), each absent when the stream states none. Mastering display luminances are in cd/m²;
- * the content light levels are MaxCLL and MaxFALL in cd/m².
+ * `bt2020nc`), each absent when the stream states none. Mastering display luminances are in cd/m²,
+ * the minimum below the maximum, with the display's primaries and white point where the stream
+ * gives them; the content light levels are MaxCLL and MaxFALL in cd/m².
  */
 export const VideoColour = Schema.Struct({
   transfer: Schema.optionalKey(Schema.String),
@@ -209,7 +213,18 @@ export const VideoColour = Schema.Struct({
   range: Schema.optionalKey(Schema.Literals(["limited", "full"])),
   chromaLocation: Schema.optionalKey(Schema.String),
   mastering: Schema.optionalKey(
-    Schema.Struct({ minLuminance: Schema.Finite, maxLuminance: Schema.Finite }),
+    Schema.Struct({
+      minLuminance: Schema.Finite,
+      maxLuminance: Schema.Finite,
+      primaries: Schema.optionalKey(
+        Schema.Struct({
+          red: Chromaticity,
+          green: Chromaticity,
+          blue: Chromaticity,
+          whitePoint: Chromaticity,
+        }),
+      ),
+    }),
   ),
   contentLight: Schema.optionalKey(Schema.Struct({ maxCll: Schema.Int, maxFall: Schema.Int })),
 });
@@ -251,6 +266,11 @@ export const VideoStream = Schema.Struct({
   colour: Schema.optionalKey(VideoColour),
   /** Present for a Dolby Vision stream scanned since its configuration was read. */
   dolbyVision: Schema.optionalKey(DolbyVision),
+  /**
+   * Present when the stream's first picture carries a Dolby Vision RPU, without which profile 5,
+   * and Dolby Vision of a profile the table does not name, cannot be shown right.
+   */
+  dolbyVisionRpu: Schema.optionalKey(Schema.Literal(true)),
 });
 
 /** A video stream. */
@@ -382,6 +402,10 @@ export const MediaVersion = Schema.Struct({
   /** ffprobe level of the primary video stream, such as 153 for HEVC 5.1. */
   videoLevel: Schema.NullOr(Schema.Int),
   videoBitDepth: Schema.NullOr(Schema.Int),
+  /** The primary video stream's Dolby Vision configuration record, as `VideoStream` has it. */
+  dolbyVision: Schema.optionalKey(DolbyVision),
+  /** Present when the primary video stream's first picture carries a Dolby Vision RPU. */
+  dolbyVisionRpu: Schema.optionalKey(Schema.Literal(true)),
   /** ffmpeg codec name of the default audio track, such as `eac3`. */
   audioCodec: Schema.NullOr(Schema.String),
   audioChannels: Schema.NullOr(Schema.Int),

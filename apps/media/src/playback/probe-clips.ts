@@ -123,6 +123,22 @@ export const PROBE_CLIPS: Readonly<Record<ClipName, ProbeClip>> = {
       "bt2020nc",
     ],
   },
+  "hevc-pq-bare": {
+    source: { ...sdr("hevc", "yuv420p10le", 10), colour: hdr("pq", "absent") },
+    needs: "encoder:libx265",
+    args: [
+      ...PICTURE,
+      "-vf",
+      PQ,
+      ...libx265("yuv420p10le"),
+      "-color_primaries",
+      "bt2020",
+      "-color_trc",
+      "smpte2084",
+      "-colorspace",
+      "bt2020nc",
+    ],
+  },
   "hevc-hlg": {
     source: { ...sdr("hevc", "yuv420p10le", 10), colour: hdr("hlg", "absent") },
     needs: "encoder:libx265",
@@ -272,18 +288,39 @@ export interface ReadbackVerdict {
 }
 
 /**
- * Whether the 320x240 gray picture a subtitle row's probe read back (`gray`, 8 bits a pixel) shows
- * `readback`, measured inside each region with a margin to its edges. `blend`: the clear band keeps
- * the clip's gray, the opaque band is white (220 or more), and the half band lies within 14 levels
- * of halfway between them, so an overlay that ignores alpha, takes it as premultiplied, or draws
- * nothing fails. `glyph`: the block's middle is white (215 or more) and the left edge, which no
- * glyph reaches, keeps the clip's gray.
+ * How a tone map's picture of the HDR clips must spread and sit: its tenth and ninetieth percentile
+ * levels at least `spread` apart and its mean within `low` and `high`. On ffmpeg 9, the CPU's Hable
+ * and libplacebo's BT.2390 picture of the PQ and HLG clips spread 59 to 151 levels around means of
+ * 110 to 168; a blank or flat picture spreads none.
+ */
+const MAPPED = { spread: 30, low: 20, high: 235 } as const;
+
+/**
+ * Whether the 320x240 gray picture a probe read back (`gray`, 8 bits a pixel) shows `readback`,
+ * measured inside each region with a margin to its edges. `blend`: the clear band keeps the clip's
+ * gray, the opaque band is white (220 or more), and the half band lies within 14 levels of halfway
+ * between them, so an overlay that ignores alpha, takes it as premultiplied, or draws nothing
+ * fails. `glyph`: the block's middle is white (215 or more) and the left edge, which no glyph
+ * reaches, keeps the clip's gray. `picture`: a tone map's frames show the clip's picture
+ * (`MAPPED`), so one that hands on blank or garbled frames fails.
  */
 export const readbackVerdict = (readback: Readback, gray: Uint8Array): ReadbackVerdict => {
   if (gray.length < 320 * 240) {
     return {
       passed: false,
       detail: `read back ${String(gray.length)} bytes, not a 320x240 picture`,
+    };
+  }
+
+  if (readback === "picture") {
+    const levels = [...gray.subarray(0, 320 * 240)].toSorted((left, right) => left - right);
+    const low = levels[Math.floor(levels.length / 10)] ?? 0;
+    const high = levels[Math.floor((levels.length * 9) / 10)] ?? 0;
+    const mean = levels.reduce((total, value) => total + value, 0) / levels.length;
+
+    return {
+      passed: high - low >= MAPPED.spread && mean >= MAPPED.low && mean <= MAPPED.high,
+      detail: `levels ${level(low)} to ${level(high)} around ${level(mean)}`,
     };
   }
 

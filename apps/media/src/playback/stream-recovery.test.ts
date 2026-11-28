@@ -215,6 +215,19 @@ const deinterlacerFailsLater = await writeFakeFfmpeg({
   logInvocations: true,
 });
 
+/** What ffmpeg prints when libplacebo loses its Vulkan device partway through a run. */
+const PLACEBO_LOST = "[{Parsed:libplacebo} @ 0x1] Failed rendering frame: VK_ERROR_DEVICE_LOST";
+
+/**
+ * On a build whose libplacebo the probes prove, the first stream run that tone-maps there writes
+ * two fragments, then fails as a lost Vulkan device does; its probe passes.
+ */
+const placeboFailsLater = await writeFakeFfmpeg({
+  withPlacebo: true,
+  rules: [{ token: "libplacebo", runs: "hls", stderr: PLACEBO_LOST, afterFragments: 2, limit: 1 }],
+  logInvocations: true,
+});
+
 /** What ffmpeg prints when Quick Sync's overlay cannot start its composition. */
 const OVERLAY_FAILED =
   "[Parsed_overlay_qsv_10 @ 0x1] Failed to create a VPP session: undefined behavior (-16)";
@@ -229,10 +242,10 @@ const overlayFails = await writeFakeFfmpeg({
 });
 
 /**
- * libass failing to start, as ffmpeg reports it from the text subtitle's filter: the 13th of an HDR
- * film's CPU chain, after the scale and the tone map's 11 filters.
+ * libass failing to start, as ffmpeg reports it from the text subtitle's filter: the 18th of an HDR
+ * film's CPU chain, after the scale and the tone map's 16 filters.
  */
-const LIBASS_FAILED = "[Parsed_subtitles_12 @ 0x1] Error initializing libass";
+const LIBASS_FAILED = "[Parsed_subtitles_17 @ 0x1] Error initializing libass";
 
 /** The first stream run that draws a text subtitle fails. */
 const textBurnFails = await writeFakeFfmpeg({
@@ -1345,6 +1358,71 @@ describe.skipIf(!hasFfmpeg)("stream recovery", () => {
           assert.notInclude(replacement.join(" "), "deinterlace=advanced");
           assert.include(replacement, "h264_qsv");
           assert.include(replacement, "-hwaccel");
+          assert.deepStrictEqual(kept(replacement).seeks.map(Number), [from], "from segment 2");
+          assert.deepStrictEqual(kept(replacement).maxrate, kept(first).maxrate);
+          assert.isTrue(kept(replacement).subtitle);
+        }),
+      120_000,
+    );
+  });
+
+  layer(
+    recovering(placeboFailsLater),
+    options,
+  )((it) => {
+    it.effect(
+      "tone-maps on Quick Sync for this file when libplacebo fails after segments were served, from the first segment not served",
+      () =>
+        Effect.gen(function* () {
+          const capabilities = yield* TranscodeCapabilities.Service;
+          const fileId = yield* addFilm("placebo-lost-later");
+
+          // A replacement plans from what the service knows, probing nothing: the start's warmup
+          // proves Quick Sync's own tone map, as it has on a server that has run a minute.
+          yield* capabilities.inventory.pipe(
+            Effect.filterOrFail(
+              (known) =>
+                capabilityOf(known, capabilityKey(ImplId("tonemap.qsv"), "pq")).status ===
+                "verified",
+            ),
+            Effect.retry({ schedule: Schedule.spaced("100 millis"), times: 600 }),
+            Effect.orDie,
+          );
+
+          const film = yield* negotiated({
+            token: signTestToken({ fid: fileId, sid: "film" }),
+            ...CHOICES,
+            startSeconds: 0,
+          });
+
+          assert.strictEqual(film.generation, 1);
+          assert.strictEqual(film.mode, "transcode-qsv");
+          assert.deepInclude(
+            film.transcode?.stages.find((stage) => stage.op === "tonemap"),
+            { impl: "tonemap.qsv.placebo" },
+            "libplacebo keeps up at this size, so it maps first",
+          );
+          assert.strictEqual(yield* fetchStatus(segmentOf(film.url, 0)), 200);
+          assert.strictEqual(yield* fetchStatus(segmentOf(film.url, 1)), 200);
+
+          const gone = yield* fetchAnswer(segmentOf(film.url, 2));
+
+          assert.strictEqual(gone.status, 410, gone.body);
+
+          const next = new URL(`../2/index.m3u8${new URL(film.url).search}`, film.url).toString();
+
+          assert.strictEqual(yield* fetchStatus(segmentOf(next, 2)), 200);
+          assert.strictEqual(yield* fetchStatus(segmentOf(next, 3)), 200);
+
+          const runs = yield* runsOf(placeboFailsLater, film.streamId ?? "");
+          const [first = [], replacement = []] = runs;
+          const from = yield* segmentStart(next, 2);
+
+          assert.lengthOf(runs, 2);
+          assert.include(first.join(" "), "libplacebo=");
+          assert.notInclude(replacement.join(" "), "libplacebo");
+          assert.include(replacement.join(" "), "tonemap=1", "Quick Sync's own tone map");
+          assert.include(replacement, "h264_qsv");
           assert.deepStrictEqual(kept(replacement).seeks.map(Number), [from], "from segment 2");
           assert.deepStrictEqual(kept(replacement).maxrate, kept(first).maxrate);
           assert.isTrue(kept(replacement).subtitle);

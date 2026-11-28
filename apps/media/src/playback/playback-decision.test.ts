@@ -469,10 +469,36 @@ describe("decidePlayback", () => {
       },
       audio: AudioPlan.Copy({ index: 1 }),
     });
+    // At 2160 lines libplacebo does not keep up with a source of unknown rate, held to 60 frames a
+    // second, so Quick Sync's own tone map is the cheaper choice.
     expect(impls(plan)).toStrictEqual([
       "decode.qsv",
       "scale.qsv",
+      "tonemap.qsv",
+      "encode.qsv.h264",
+    ]);
+
+    // A 24 fps film capped at 1080 lines keeps libplacebo, which takes its frames in CPU memory:
+    // the plan moves them there and back.
+    const film = probe(
+      "mkv",
+      video("hevc", {
+        profile: "Main 10",
+        bitDepth: 10,
+        width: 3840,
+        height: 2160,
+        dynamicRange: "hdr10",
+        frameRate: 24,
+      }),
+      [aac],
+    );
+
+    expect(impls(hardware(film, chrome, { quality: { maxHeight: 1080 } }))).toStrictEqual([
+      "decode.qsv",
+      "scale.qsv",
+      "move.qsv>cpu",
       "tonemap.qsv.placebo",
+      "move.cpu>qsv",
       "encode.qsv.h264",
     ]);
   });
@@ -538,7 +564,7 @@ describe("decidePlayback", () => {
       mode: "transcode-vaapi",
       video: { output: { width: 3840, height: 2160 } },
     });
-    expect(impls(onVaapi)).toContain("tonemap.vaapi.placebo");
+    expect(impls(onVaapi)).toContain("tonemap.vaapi");
 
     expect(cpuToneMap(probe("mkv", hevcHdr, [aac]), chrome)).toMatchObject({
       mode: "transcode-software",

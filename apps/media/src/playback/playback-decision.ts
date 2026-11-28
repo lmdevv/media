@@ -15,7 +15,7 @@ import { Data, Result } from "effect";
 
 import type { AudioTrack, MediaProbe, VideoStream } from "../media/media-probe.ts";
 import { burnableText } from "../subtitles/burned-text.ts";
-import { decisionOf } from "./source-colours.ts";
+import { convertible } from "./source-colours.ts";
 import {
   type CapabilitySnapshot,
   encodeDomain,
@@ -37,12 +37,12 @@ import {
 } from "./video-ops.ts";
 
 /**
- * How a copy states a Dolby Vision stream for a client that declares Dolby Vision: `none` copies it
- * as a plain stream of its base layer; `compatible` keeps its configuration over a base layer other
- * players show; `only` keeps it in Dolby Vision's own sample entry, for a base layer that is no
- * other format (profile 5).
+ * What a copy keeps of Dolby Vision: `none` for a stream that is not Dolby Vision; `base` sends a
+ * Dolby Vision stream's base layer alone, its configuration record, RPU, and enhancement layer
+ * removed; `compatible` keeps its configuration over a base layer other players show; `only` keeps
+ * it in Dolby Vision's own sample entry, for a stream with no other format (profile 5).
  */
-export type DolbyVisionCopy = "none" | "compatible" | "only";
+export type DolbyVisionCopy = "none" | "base" | "compatible" | "only";
 
 /** What happens to the video stream. */
 export type VideoPlan = Data.TaggedEnum<{
@@ -265,13 +265,15 @@ export const decideWithin = (
   const defaultAudio = probe.audio.find((track) => track.default) ?? probe.audio[0];
 
   const mustEncode = burnSubtitle !== undefined || exceeds(probe, video, options.quality);
-  const videoOk = decodesVideo(client, video) && !mustEncode;
+  // A direct play serves the original bytes, a copy remuxes them: the shared check decides each.
+  const directOk = decodesVideo(client, video, "stored") && !mustEncode;
+  const copyOk = decodesVideo(client, video, "copied") && !mustEncode;
   const audioOk = audio === undefined || decodesAudio(client, audio);
 
   // Browsers play the file's default audio track; another track needs HLS.
   if (
     client.containers.includes(probe.container) &&
-    videoOk &&
+    directOk &&
     audioOk &&
     audio?.index === defaultAudio?.index
   ) {
@@ -293,12 +295,14 @@ export const decideWithin = (
         ? AudioPlan.Copy({ index: audio.index })
         : AudioPlan.Aac({ index: audio.index });
 
-  if (videoOk && HLS_VIDEO_CODECS.has(canonical(video.codec)) && options.copyVideo !== false) {
+  if (copyOk && HLS_VIDEO_CODECS.has(canonical(video.codec)) && options.copyVideo !== false) {
     const copy = VideoPlan.Copy({ dolbyVision: dolbyVisionCopyOf(video, client) });
 
     return PlaybackPlan.Hls({ mode: modeOf(copy, audioPlan), video: copy, audio: audioPlan });
   }
 
+  if (!convertible(video))
+    return PlaybackPlan.Unsupported({ reason: "dolby-vision-not-convertible" });
   const intent = encodeIntent(probe, video, client, options);
 
   const encoded =
@@ -314,20 +318,23 @@ export const decideWithin = (
 };
 
 /**
- * How a copy of `video` for `client` states its Dolby Vision: its configuration is kept only for a
- * client that declares Dolby Vision for the codec, and only where the table keeps it (not for
- * profile 7, which such players do not apply).
+ * How a copy of `video` for `client` states its Dolby Vision: its configuration is kept for a
+ * client that declares Dolby Vision for the codec where the shared check copies it as Dolby Vision
+ * (not profile 7), over a base layer other players show (`compatible`) or as Dolby Vision alone
+ * (`only`, profile 5); any other copy of Dolby Vision is its base layer (`base`).
  */
 const dolbyVisionCopyOf = (video: VideoStream, client: ClientCapabilities): DolbyVisionCopy => {
+  if (video.dynamicRange !== "dolby-vision") return "none";
+
   const declared = (videoSupport(client, video.codec)?.dynamicRanges ?? []).includes(
     "dolby-vision",
   );
 
-  if (video.dynamicRange !== "dolby-vision" || !declared) return "none";
+  const copied = playableAs(video, "copied");
 
-  if (decisionOf(video).dolbyVisionCopy !== "kept") return "none";
+  if (!declared || !copied.includes("dolby-vision")) return "base";
 
-  return playableAs(video).length > 1 ? "compatible" : "only";
+  return copied.length > 1 ? "compatible" : "only";
 };
 
 /**

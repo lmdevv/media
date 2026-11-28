@@ -240,10 +240,33 @@ export type BuildFeature =
   | `decoder:${string}`
   | `filter:${string}`
   | `hwaccel:${string}`
-  | `decodes:${string}`;
+  | `decodes:${string}`
+  | `option:${string}`;
 
-/** A file each run names for itself that a filter reads: a text subtitle as ASS, and its fonts. */
-export type RunFile = "subtitle" | "fonts";
+/** The build feature of libplacebo's `shader_cache` option, which ffmpeg 7.1's filter lacks. */
+export const SHADER_CACHE_OPTION: BuildFeature = "option:libplacebo:shader_cache";
+
+/**
+ * Where libplacebo keeps the shaders it compiles, under the data folder (`RunFile` `shaders`): a
+ * start that finds them saves their compiling, about 0.12 s of a first picture on the Arc A380.
+ */
+const SHADER_CACHE = "libplacebo-shaders.cache";
+
+/**
+ * The run files that name libplacebo's shader cache (`SHADER_CACHE`) under `dataDir`, for a build
+ * whose `features` have the option (`SHADER_CACHE_OPTION`); none for one without.
+ */
+export const shaderCacheFiles = (
+  features: ReadonlySet<BuildFeature> | undefined,
+  dataDir: string,
+): { readonly shaders?: string } =>
+  features?.has(SHADER_CACHE_OPTION) === true ? { shaders: `${dataDir}/${SHADER_CACHE}` } : {};
+
+/**
+ * A file each run names for itself that a filter reads: a text subtitle as ASS, its fonts, and
+ * libplacebo's shader cache.
+ */
+export type RunFile = "subtitle" | "fonts" | "shaders";
 
 /**
  * A named option's value: text, or the path of a file the run names (`RenderOptions.files`). The
@@ -301,6 +324,7 @@ export type ClipName =
   | "hevc-8"
   | "hevc-10"
   | "hevc-pq"
+  | "hevc-pq-bare"
   | "hevc-hlg"
   | "av1-8"
   | "av1-10"
@@ -317,7 +341,7 @@ export type ClipName =
  * and a half-transparent band lands on the gray clip as each should; `glyph`, that libass drew a
  * glyph of the default font where the probe's script puts it (`probe-clips.ts`).
  */
-export type Readback = "blend" | "glyph";
+export type Readback = "blend" | "glyph" | "picture";
 
 /** One variant a row proves ahead of use: the operation, run on frames of a generated clip. */
 export interface ProbeCase<T extends OpName> {
@@ -348,6 +372,56 @@ export interface OpImpl<T extends OpName = OpName> {
   readonly output: (op: OpOf<T>, input: Frame) => Omit<Frame, "device">;
   readonly render: (op: OpOf<T>, input: Frame) => Rendering;
   readonly probes: ReadonlyArray<ProbeCase<T>>;
+  /**
+   * Where the row itself takes its frames and how many moves that makes, which a chain's cost
+   * counts with its moves and the stage summary shows: libplacebo's upload to a Vulkan device and
+   * download back, two moves. None when absent.
+   */
+  readonly transfers?: Transfers;
+  /**
+   * A row that does the same operation as the table prefers it done: a chain using this row costs
+   * more than one using that row while that row can do the step (its key verified, not set aside)
+   * and keeps up (`throughput`), so this one runs where that one cannot.
+   */
+  readonly fallbackFor?: ImplId;
+  /**
+   * The frames a second the row sustained on the Arc A380 for outputs of up to each height, the
+   * lowest of the measured runs and builds, smallest height first: where it falls below
+   * `KEEPS_UP` times the source's frame rate, a row standing in for it (`fallbackFor`) that can do
+   * the step is the cheaper choice. None when the row keeps up at any size.
+   */
+  readonly throughput?: ReadonlyArray<readonly [height: number, framesPerSecond: number]>;
+}
+
+/**
+ * How many times the source's frame rate a row with a measured `throughput` must sustain to be
+ * preferred: enough for a second stream beside the first, and for a restart after a seek to
+ * catch up.
+ */
+const KEEPS_UP = 2.5;
+
+/** The frame rate a source whose rate is unknown is held to, as levels hold it. */
+const UNKNOWN_FRAME_RATE = 60;
+
+/**
+ * Whether `row` keeps up (`KEEPS_UP`) with a source of `frameRate` at an output `height` lines
+ * tall, by the first measured height at or above it, else the tallest.
+ */
+export const keepsUp = (
+  row: { readonly throughput?: OpImpl["throughput"] | undefined },
+  height: number,
+  frameRate: number | undefined,
+): boolean => {
+  if (row.throughput === undefined) return true;
+  const measured = row.throughput.find(([lines]) => lines >= height) ?? row.throughput.at(-1);
+
+  return measured !== undefined && measured[1] >= KEEPS_UP * (frameRate ?? UNKNOWN_FRAME_RATE);
+};
+
+/** The moves a row makes inside itself: to `device` and back, `count` moves in all. */
+interface Transfers {
+  readonly device: string;
+  readonly count: number;
 }
 
 /** What a row does with one operation on one frame. */
@@ -367,6 +441,12 @@ export interface Row {
   /** What the row does with `op` on `input`; undefined for another operation or a refused frame. */
   readonly use: (op: Op, input: Frame) => Use | undefined;
   readonly probes: ReadonlyArray<ProbeCase<OpName>>;
+  /** The moves the row makes inside itself (`OpImpl.transfers`). */
+  readonly transfers: Transfers | undefined;
+  /** The row this one stands in for (`OpImpl.fallbackFor`). */
+  readonly fallbackFor: ImplId | undefined;
+  /** What the row sustains by output height (`OpImpl.throughput`). */
+  readonly throughput: OpImpl["throughput"];
 }
 
 /** `impl` as a table row. */
@@ -393,6 +473,9 @@ export const row = <T extends OpName>(impl: OpImpl<T>): Row => ({
 
     return probe.readback === undefined ? proved : { ...proved, readback: probe.readback };
   }),
+  transfers: impl.transfers,
+  fallbackFor: impl.fallbackFor,
+  throughput: impl.throughput,
 });
 
 /** What the transcoder knows about a GPU domain besides its rows. */
@@ -401,6 +484,13 @@ export interface DomainSpec {
   readonly device: (config: MediaConfig.Interface) => string;
   /** Arguments that open the device and name it for filters, before the input. */
   readonly deviceArgs: (device: string) => ReadonlyArray<string>;
+  /**
+   * Arguments that open the device and a Vulkan device derived from it, which ffmpeg finds by the
+   * render node's DRM device, so it is the same GPU and never a software one, named for filters in
+   * its place: a chain with a row that runs on Vulkan (`Transfers`) opens these, and the renderer
+   * has its uploads and maps name the domain's device.
+   */
+  readonly vulkanArgs: (device: string) => ReadonlyArray<string>;
   /** Components every use of the domain needs. */
   readonly needs: ReadonlyArray<BuildFeature>;
   /**
@@ -420,23 +510,50 @@ export const toneMapTransfer = (frame: Frame): "pq" | "hlg" | undefined =>
   frame.colour.signal === "pq" || frame.colour.signal === "hlg" ? frame.colour.signal : undefined;
 
 /**
- * The HDR metadata a tone map's SDR frames must not keep: HDR10's mastering display and content
- * light levels, HDR10+'s dynamic metadata, and Dolby Vision's RPU, parsed and raw. ffmpeg passes
- * each on from the source's frames, and encoders write them into the stream (libx265 and libsvtav1
- * all of them, the GPU encoders HDR10's), so an SDR stream would claim HDR.
+ * Dynamic HDR metadata, scene by scene: HDR10+ (SMPTE 2094-40) and HDR Vivid (CUVA 005.1). Every
+ * tone map maps a source as its static HDR10 base, so rows remove these before the tone map, where
+ * libplacebo would read them (on Apple's HDR10+ sample, up to 14 luma codes apart at one frame);
+ * the CPU's, VA-API's, and Quick Sync's tone maps read only static metadata.
+ */
+const DYNAMIC_HDR_METADATA = ["DYNAMIC_HDR_PLUS", "DYNAMIC_HDR_VIVID"] as const;
+
+/** Dolby Vision's RPU, parsed and raw. */
+const DOLBY_VISION_METADATA = ["DOVI_METADATA", "DOVI_RPU_BUFFER"] as const;
+
+/**
+ * The side data an SDR stream must not keep, from the frame side data types both builds' `sidedata`
+ * filter knows (PANSCAN, A53_CC, STEREO3D, MATRIXENCODING, DOWNMIX_INFO, REPLAYGAIN, DISPLAYMATRIX,
+ * AFD, MOTION_VECTORS, SKIP_SAMPLES, AUDIO_SERVICE_TYPE, MASTERING_DISPLAY_METADATA, GOP_TIMECODE,
+ * SPHERICAL, CONTENT_LIGHT_LEVEL, ICC_PROFILE, S12M_TIMECODE, DYNAMIC_HDR_PLUS, REGIONS_OF_INTEREST,
+ * VIDEO_ENC_PARAMS, SEI_UNREGISTERED, FILM_GRAIN_PARAMS, DETECTION_BBOXES, DOVI_RPU_BUFFER,
+ * DOVI_METADATA, DYNAMIC_HDR_VIVID, AMBIENT_VIEWING_ENVIRONMENT, VIDEO_HINT, in ffmpeg 7.1 and 9):
+ * every one that describes HDR, the source's colour, or how it was meant to be viewed. HDR10's
+ * mastering display and content light levels, the dynamic metadata, Dolby Vision's RPU, the
+ * ambient viewing environment an iPhone's HLG carries, and an ICC profile of the source's colour.
+ * ffmpeg passes each on from the source's frames, and encoders and muxers write them into the
+ * stream, so an SDR stream would claim what it no longer is.
  */
 const HDR_METADATA = [
   "MASTERING_DISPLAY_METADATA",
   "CONTENT_LIGHT_LEVEL",
-  "DYNAMIC_HDR_PLUS",
-  "DOVI_METADATA",
-  "DOVI_RPU_BUFFER",
+  ...DYNAMIC_HDR_METADATA,
+  ...DOLBY_VISION_METADATA,
+  "AMBIENT_VIEWING_ENVIRONMENT",
+  "ICC_PROFILE",
 ] as const;
 
+/** Filters that remove side data of `types` from frames in any memory. */
+const strip = (types: ReadonlyArray<string>): ReadonlyArray<FilterCall> =>
+  types.map((type) => filter("sidedata", ["mode", "delete"], ["type", type]));
+
 /** Filters that remove `HDR_METADATA` from frames in any memory. */
-export const STRIP_HDR_METADATA: ReadonlyArray<FilterCall> = HDR_METADATA.map((type) =>
-  filter("sidedata", ["mode", "delete"], ["type", type]),
-);
+export const STRIP_HDR_METADATA: ReadonlyArray<FilterCall> = strip(HDR_METADATA);
+
+/** Filters that remove `DYNAMIC_HDR_METADATA`, which a tone map must not read. */
+export const STRIP_DYNAMIC_HDR_METADATA: ReadonlyArray<FilterCall> = strip(DYNAMIC_HDR_METADATA);
+
+/** Filters that remove Dolby Vision's RPU, which only a map of Dolby Vision's IPT may read. */
+export const STRIP_DOLBY_VISION_METADATA: ReadonlyArray<FilterCall> = strip(DOLBY_VISION_METADATA);
 
 /**
  * Tags frames SDR BT.709 in limited range, whatever a filter before left on them, so encoders and

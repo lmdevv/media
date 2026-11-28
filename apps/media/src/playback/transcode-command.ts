@@ -112,11 +112,23 @@ const sampleEntry = (codec: string): ReadonlyArray<string> =>
   codec === "hevc" ? ["-tag:v", "hvc1"] : [];
 
 /**
- * A copy's sample entry and what keeps its Dolby Vision configuration: `dvh1` for a stream that is
- * only Dolby Vision, and the muxer's unofficial mode, which writes `dvcC` or `dvvC`.
+ * HEVC's Dolby Vision NAL units: the RPU (62) and the enhancement layer (63), which other
+ * players skip and a base-layer copy (`base`) removes, so it is the stream it says it is.
+ */
+const DOLBY_VISION_UNITS = "filter_units=remove_types=62|63";
+
+/**
+ * A copy's sample entry and what keeps or removes its Dolby Vision: for a copy that keeps it, `dvh1`
+ * for a stream that is only Dolby Vision and the muxer's unofficial mode, which writes `dvcC` or
+ * `dvvC`; for a base-layer copy, its RPU and enhancement layer filtered out, the muxer dropping
+ * the configuration as it does by default.
  */
 const copiedEntry = (codec: string, dolbyVision: DolbyVisionCopy): ReadonlyArray<string> => {
   if (dolbyVision === "none") return sampleEntry(codec);
+
+  if (dolbyVision === "base") {
+    return [...sampleEntry(codec), ...(codec === "hevc" ? ["-bsf:v", DOLBY_VISION_UNITS] : [])];
+  }
 
   const entry =
     dolbyVision === "only" && codec === "hevc" ? ["-tag:v", "dvh1"] : sampleEntry(codec);

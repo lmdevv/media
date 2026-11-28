@@ -507,7 +507,7 @@ describe("planVideo", () => {
 
   it("prefers libplacebo's tone map on a GPU that proved it, the GPU's own and the CPU's after", () => {
     const video = source({ codec: "hevc", pixelFormat: "yuv420p10le", depth: 10, colour: HDR10 });
-    const intent = intentFor(video);
+    const intent = intentFor(video, { frameRate: 24 });
 
     for (const domain of [QSV, VAAPI]) {
       const on = domain.domain;
@@ -521,6 +521,99 @@ describe("planVideo", () => {
       assert.deepStrictEqual(toneMap([]), [`tonemap.${on}.placebo`]);
       assert.deepStrictEqual(toneMap([`tonemap.${on}.placebo`]), [`tonemap.${on}`]);
       assert.deepStrictEqual(toneMap([`tonemap.${on}.placebo`, `tonemap.${on}`]), ["tonemap.cpu"]);
+    }
+  });
+
+  it("prefers the GPU's own tone map where libplacebo does not keep up with the source", () => {
+    const uhd = source({
+      codec: "hevc",
+      pixelFormat: "yuv420p10le",
+      depth: 10,
+      colour: HDR10,
+      width: 3840,
+      height: 2160,
+    });
+
+    for (const domain of [QSV, VAAPI]) {
+      const on = domain.domain;
+
+      const toneMapOf = (video: SourceVideo, frameRate: number | undefined) => {
+        const intent = intentFor(video, { frameRate });
+
+        return impls(
+          planned(video, intent, snapshot([domain], everyKey(video, intent, [domain]))),
+        ).filter((impl) => impl.startsWith("tonemap."));
+      };
+
+      // A 24 fps film at 2160 lines needs 60 frames a second, which libplacebo does not sustain.
+      assert.deepStrictEqual(toneMapOf(uhd, 24), [`tonemap.${on}`]);
+      // At 1080 lines a 24 fps film keeps it; a source of unknown rate is held to 60 fps.
+      const hd = { ...uhd, width: 1920, height: 1080 };
+
+      assert.deepStrictEqual(toneMapOf(hd, 24), [`tonemap.${on}.placebo`]);
+      assert.deepStrictEqual(toneMapOf(hd, undefined), [`tonemap.${on}`]);
+      // Nothing stands in for libplacebo with Dolby Vision's IPT, which keeps it at any size.
+      assert.deepStrictEqual(toneMapOf({ ...uhd, colour: DOLBY_VISION_IPT }, 24), [
+        `tonemap.${on}.placebo`,
+      ]);
+    }
+
+    // VA-API's own tone map takes no HLG (its probe refuses it), so libplacebo stays its choice at
+    // any size.
+    const hlg = { ...uhd, colour: { ...HDR10, signal: "hlg" as const, transfer: "arib-std-b67" } };
+    const intent = intentFor(hlg, { frameRate: 24 });
+
+    const keys = everyKey(hlg, intent, [VAAPI]).filter(
+      (key) => key !== capabilityKey(ImplId("tonemap.vaapi"), "hlg"),
+    );
+
+    assert.include(impls(planned(hlg, intent, snapshot([VAAPI], keys))), "tonemap.vaapi.placebo");
+  });
+
+  it("maps HDR10+ as its static base: dynamic metadata leaves before every tone map that reads it", () => {
+    const video = source({ codec: "hevc", pixelFormat: "yuv420p10le", depth: 10, colour: HDR10 });
+    const intent = intentFor(video, { frameRate: 24 });
+
+    const dynamic =
+      "sidedata=mode=delete:type=DYNAMIC_HDR_PLUS,sidedata=mode=delete:type=DYNAMIC_HDR_VIVID";
+
+    const options = {
+      input: 0,
+      stream: 0,
+      trimPicture: undefined,
+      trimSubtitle: undefined,
+      files: {},
+    };
+
+    for (const domain of [QSV, VAAPI]) {
+      const keys = everyKey(video, intent, [domain]);
+
+      // Each tone map in the order the planner falls through them, and where its filter starts.
+      const order = [
+        [`tonemap.${domain.domain}.placebo`, "libplacebo="],
+        [`tonemap.${domain.domain}`, domain.domain === "qsv" ? "tonemap=1" : "tonemap_vaapi="],
+        ["tonemap.cpu", "zscale=t=linear"],
+      ] as const;
+
+      for (const [index, [impl, map]] of order.entries()) {
+        const excluded = order.slice(0, index).map(([earlier]) => ImplId(earlier));
+        const pipeline = planned(video, intent, snapshot([domain], keys, excluded));
+        const text = renderVideo(pipeline, options).graph?.text ?? "";
+
+        assert.include(impls(pipeline), impl);
+        assert.include(text, map, impl);
+
+        // vpp_qsv hands the driver only static metadata: on Apple's HDR10+ sample, 120 frames at
+        // 720 lines came out byte for byte the same with and without it, under ffmpeg 7.1 and 9,
+        // so its scale and tone map keep their one fused pass.
+        if (impl === "tonemap.qsv") {
+          assert.isAbove(text.indexOf(dynamic), text.indexOf(map), impl);
+          continue;
+        }
+
+        assert.isAtLeast(text.indexOf(dynamic), 0, impl);
+        assert.isBelow(text.indexOf(dynamic), text.indexOf(map), impl);
+      }
     }
   });
 

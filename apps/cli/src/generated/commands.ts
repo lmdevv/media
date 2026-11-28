@@ -3782,6 +3782,14 @@ export const generatedCommands = [
             videoProfile: Schema.Union([Schema.String, Schema.Null]),
             videoLevel: Schema.Union([Schema.Finite, Schema.Null]),
             videoBitDepth: Schema.Union([Schema.Finite, Schema.Null]),
+            dolbyVision: Schema.optionalKey(
+              Schema.Struct({
+                profile: Schema.Finite,
+                level: Schema.Finite,
+                compatibility: Schema.Finite,
+              }),
+            ),
+            dolbyVisionRpu: Schema.optionalKey(Schema.Literal(true)),
             audioCodec: Schema.Union([Schema.String, Schema.Null]),
             audioChannels: Schema.Union([Schema.Finite, Schema.Null]),
             audioTracks: Schema.Finite,
@@ -4622,7 +4630,18 @@ export const generatedCommands = [
                   ),
                   chromaLocation: Schema.optionalKey(Schema.String),
                   mastering: Schema.optionalKey(
-                    Schema.Struct({ minLuminance: Schema.Finite, maxLuminance: Schema.Finite }),
+                    Schema.Struct({
+                      minLuminance: Schema.Finite,
+                      maxLuminance: Schema.Finite,
+                      primaries: Schema.optionalKey(
+                        Schema.Struct({
+                          red: Schema.Struct({ x: Schema.Finite, y: Schema.Finite }),
+                          green: Schema.Struct({ x: Schema.Finite, y: Schema.Finite }),
+                          blue: Schema.Struct({ x: Schema.Finite, y: Schema.Finite }),
+                          whitePoint: Schema.Struct({ x: Schema.Finite, y: Schema.Finite }),
+                        }),
+                      ),
+                    }),
                   ),
                   contentLight: Schema.optionalKey(
                     Schema.Struct({ maxCll: Schema.Finite, maxFall: Schema.Finite }),
@@ -4636,6 +4655,7 @@ export const generatedCommands = [
                   compatibility: Schema.Finite,
                 }),
               ),
+              dolbyVisionRpu: Schema.optionalKey(Schema.Literal(true)),
             }),
           ),
           audio: Schema.Array(
@@ -4821,6 +4841,14 @@ export const generatedCommands = [
           videoProfile: Schema.Union([Schema.String, Schema.Null]),
           videoLevel: Schema.Union([Schema.Finite, Schema.Null]),
           videoBitDepth: Schema.Union([Schema.Finite, Schema.Null]),
+          dolbyVision: Schema.optionalKey(
+            Schema.Struct({
+              profile: Schema.Finite,
+              level: Schema.Finite,
+              compatibility: Schema.Finite,
+            }),
+          ),
+          dolbyVisionRpu: Schema.optionalKey(Schema.Literal(true)),
           audioCodec: Schema.Union([Schema.String, Schema.Null]),
           audioChannels: Schema.Union([Schema.Finite, Schema.Null]),
           audioTracks: Schema.Finite,
@@ -5204,7 +5232,18 @@ export const generatedCommands = [
                     ),
                     chromaLocation: Schema.optionalKey(Schema.String),
                     mastering: Schema.optionalKey(
-                      Schema.Struct({ minLuminance: Schema.Finite, maxLuminance: Schema.Finite }),
+                      Schema.Struct({
+                        minLuminance: Schema.Finite,
+                        maxLuminance: Schema.Finite,
+                        primaries: Schema.optionalKey(
+                          Schema.Struct({
+                            red: Schema.Struct({ x: Schema.Finite, y: Schema.Finite }),
+                            green: Schema.Struct({ x: Schema.Finite, y: Schema.Finite }),
+                            blue: Schema.Struct({ x: Schema.Finite, y: Schema.Finite }),
+                            whitePoint: Schema.Struct({ x: Schema.Finite, y: Schema.Finite }),
+                          }),
+                        ),
+                      }),
                     ),
                     contentLight: Schema.optionalKey(
                       Schema.Struct({ maxCll: Schema.Finite, maxFall: Schema.Finite }),
@@ -5218,6 +5257,7 @@ export const generatedCommands = [
                     compatibility: Schema.Finite,
                   }),
                 ),
+                dolbyVisionRpu: Schema.optionalKey(Schema.Literal(true)),
               }),
             ),
             audio: Schema.Array(
@@ -5299,6 +5339,14 @@ export const generatedCommands = [
           videoProfile: Schema.Union([Schema.String, Schema.Null]),
           videoLevel: Schema.Union([Schema.Finite, Schema.Null]),
           videoBitDepth: Schema.Union([Schema.Finite, Schema.Null]),
+          dolbyVision: Schema.optionalKey(
+            Schema.Struct({
+              profile: Schema.Finite,
+              level: Schema.Finite,
+              compatibility: Schema.Finite,
+            }),
+          ),
+          dolbyVisionRpu: Schema.optionalKey(Schema.Literal(true)),
           audioCodec: Schema.Union([Schema.String, Schema.Null]),
           audioChannels: Schema.Union([Schema.Finite, Schema.Null]),
           audioTracks: Schema.Finite,
@@ -5406,6 +5454,14 @@ export const generatedCommands = [
               videoProfile: Schema.Union([Schema.String, Schema.Null]),
               videoLevel: Schema.Union([Schema.Finite, Schema.Null]),
               videoBitDepth: Schema.Union([Schema.Finite, Schema.Null]),
+              dolbyVision: Schema.optionalKey(
+                Schema.Struct({
+                  profile: Schema.Finite,
+                  level: Schema.Finite,
+                  compatibility: Schema.Finite,
+                }),
+              ),
+              dolbyVisionRpu: Schema.optionalKey(Schema.Literal(true)),
               audioCodec: Schema.Union([Schema.String, Schema.Null]),
               audioChannels: Schema.Union([Schema.Finite, Schema.Null]),
               audioTracks: Schema.Finite,
@@ -5783,6 +5839,14 @@ export const generatedCommands = [
         videoProfile: Schema.Union([Schema.String, Schema.Null]),
         videoLevel: Schema.Union([Schema.Finite, Schema.Null]),
         videoBitDepth: Schema.Union([Schema.Finite, Schema.Null]),
+        dolbyVision: Schema.optionalKey(
+          Schema.Struct({
+            profile: Schema.Finite,
+            level: Schema.Finite,
+            compatibility: Schema.Finite,
+          }),
+        ),
+        dolbyVisionRpu: Schema.optionalKey(Schema.Literal(true)),
         audioCodec: Schema.Union([Schema.String, Schema.Null]),
         audioChannels: Schema.Union([Schema.Finite, Schema.Null]),
         audioTracks: Schema.Finite,

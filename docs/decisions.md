@@ -106,28 +106,44 @@ Old movies' Convex project, its SDK client, and its command registry were delete
   runs on every build: on ffmpeg 9 a constant-rate source's encode is byte for byte the same with
   it, and a variable-rate file ends at its last frame's end, as on the CPU, not a frame short.
 - HDR and Dolby Vision (ADS-391): the probe reads each video stream's colour, as data: transfer,
-  primaries, matrix, range, chroma siting, HDR10's mastering display and content light levels
-  (from the container and the first picture, where HEVC in MP4 keeps them), HDR10+, and a Dolby
-  Vision configuration (profile, level, and the base layer's compatibility id). `DynamicRange`
-  stays the summary the wire and clients use. One table (`source-colours.ts`, printed by its test)
-  decides per kind: SDR BT.709, BT.601, BT.2020, and full range are carried as they are; HDR10 and
-  HDR10+ are PQ; HLG is HLG; Dolby Vision 7 and 8.1 are their HDR10 base layer, 8.4 its HLG one,
-  8.2 its SDR one; Dolby Vision 5, and any profile whose base layer is no other format, is IPT-PQ
-  that only the RPU makes colour, so only libplacebo maps it, and without a proven libplacebo it
-  is refused (`dolby-vision-not-convertible`, decoded leniently, as every refusal reason now is).
-  Copies follow the shared direct-play check (`playableAs`): a client that declares Dolby Vision
-  gets profiles 5 and 8 with their configuration kept (`-strict unofficial`; `dvh1` for profile 5),
-  which ffmpeg's MP4 muxer otherwise drops, so profile 5 reached iPhones as plain BT.709 HEVC;
-  profile 7 is copied as its HDR10 base layer alone, since AVFoundation cannot decode it with its
-  configuration; one that declares what a base layer is gets that. Every tone map's frames leave
-  SDR BT.709 in limited range without HDR metadata (mastering display, content light levels,
-  HDR10+, Dolby Vision RPU), which encoders would otherwise write. Judged against libplacebo's
-  BT.2390 on colour patches, the CPU's `zscale` and Hable lie within 6.5 (CIEDE2000), and Intel's
-  own tone map, Quick Sync's and VA-API's alike, crushes shadows and mid-tones (0.5 cd/m² at luma 3
-  where 16 is right, 100 cd/m² at 130 where 174 is) and cannot be set otherwise; so Quick Sync's
-  and VA-API's paths map with libplacebo, on a Vulkan device of the same GPU (the frames
-  downloaded and uploaded around it), where it is proven, and with their own tone map otherwise.
-  The image carries Mesa's Vulkan drivers for it; libplacebo never uses their software device.
+  primaries, matrix, range, chroma siting, HDR10's mastering display (luminance checked, and its
+  primaries) and content light levels (from the container and the first picture, where HEVC in MP4
+  keeps them), HDR10+, a Dolby Vision configuration (profile, level, and the base layer's
+  compatibility id), and whether the first picture carries a Dolby Vision RPU. `DynamicRange` stays
+  the summary the wire and clients use. One table (`source-colours.ts`, printed by its test) decides
+  per kind, from the profile first and the compatibility id second, and any pairing it does not name
+  takes the stricter side: SDR BT.709, BT.601, BT.2020, and full range are carried as they are;
+  HDR10 and HDR10+ are PQ (HDR10+ mapped as its static base: every tone map that would read the
+  dynamic metadata gets it removed first); HLG is HLG; HEVC Dolby Vision 7 with id 6 and 8.1 are
+  their HDR10 base layer, 8.4 its HLG one, 8.2 its SDR one; Dolby Vision 5, and every other pairing,
+  is IPT-PQ that only the RPU makes colour, so only libplacebo maps it, and only when the first
+  picture carries an RPU; without one, or without a proven libplacebo, it is refused
+  (`dolby-vision-not-convertible`). A later picture losing its RPU cannot be known at scan time.
+  Direct play and copies follow one rule per profile (`playableAs`): profile 8 plays as it is only
+  for a client that declares Dolby Vision and is copied with its configuration (`-strict
+  unofficial`) for one, or as its base layer, the RPU's NAL units removed (`filter_units`), for one
+  that declares that range; profile 7 never plays as it is and is copied as its HDR10 base layer
+  alone; profile 5 plays and is copied (`dvh1`) only with an RPU and only for a client that declares
+  Dolby Vision. A negotiation's `video.dynamicRange` is the range the bytes carry: a base-layer copy
+  says the base's, a tone map says `sdr`. Every tone map's frames leave SDR BT.709 in limited range,
+  carrying no side data but the encoder's own unregistered SEI: mastering display, content light
+  levels, HDR10+, HDR Vivid, the RPU, an iPhone's ambient viewing environment, and an ICC profile
+  are removed, which encoders would otherwise write. Judged against libplacebo's BT.2390 on colour
+  patches, the CPU's `zscale` and Hable lie within 6.5 (CIEDE2000) and oversaturate bright saturated
+  HLG (9.5 against the kept reference), and Intel's own tone map, Quick Sync's and VA-API's alike,
+  crushes shadows and mid-tones (0.5 cd/m² at luma 3 where 16 is right, 100 cd/m² at 130 where 174
+  is) and cannot be set otherwise. So Quick Sync's and VA-API's paths map with libplacebo where it is
+  proven (its probe reads the picture back) and sustains 2.5 times the source's frame rate at the
+  output's height (measured on both builds: up to 1080 lines on Quick Sync and 1440 on VA-API for a
+  24 fps film), else with their own tone map; Dolby Vision 5 keeps libplacebo at any size. libplacebo
+  runs on a Vulkan device derived from the configured render node's VA-API or Quick Sync device, so
+  it is that GPU by construction and never Mesa's software device. It takes frames in CPU memory and
+  uploads and downloads them itself (two transfers the plan's cost counts); a mapped hand-over failed
+  on both builds (`VK_ERROR_OUT_OF_DEVICE_MEMORY` creating the image). On builds whose libplacebo
+  has `shader_cache` (ffmpeg 9, not the image's 7.1), compiled shaders are kept under the data
+  folder. When a Dolby Vision copy fails in an app's player, the app negotiates once more without
+  Dolby Vision: the iOS simulator's HLS path decodes no Dolby Vision, while AVFoundation with a
+  decoder plays the media playlist as served.
 - Output codec: direct play, remuxes, and audio-only conversions come first, as always; only
   video that must be encoded gets a codec. The decision lists what the client plays, most wanted
   first: HEVC; AV1 when the client reports decoding it power-efficiently (in hardware) or plays

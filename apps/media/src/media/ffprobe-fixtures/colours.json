@@ -2,9 +2,9 @@
   "dolby-vision-5": {
     "format": {
       "format_name": "mov,mp4,m4a,3gp,3g2,mj2",
-      "duration": "108.389958",
+      "duration": "43.366667",
       "start_time": "10.000000",
-      "bit_rate": "3018020"
+      "bit_rate": "2086008"
     },
     "streams": [
       {
@@ -38,8 +38,11 @@
           "hearing_impaired": 0,
           "attached_pic": 0
         },
+        "tags": {
+          "language": "eng"
+        },
         "start_time": "10.000000",
-        "duration": "108.389958"
+        "duration": "43.366667"
       },
       {
         "index": 1,
@@ -53,8 +56,11 @@
           "hearing_impaired": 0,
           "attached_pic": 0
         },
+        "tags": {
+          "language": "eng"
+        },
         "start_time": "10.000000",
-        "duration": "104.557000"
+        "duration": "47.796000"
       }
     ],
     "frames": [
@@ -75,9 +81,9 @@
   "hdr10plus": {
     "format": {
       "format_name": "mov,mp4,m4a,3gp,3g2,mj2",
-      "duration": "108.473375",
+      "duration": "43.450083",
       "start_time": "10.000000",
-      "bit_rate": "2937368"
+      "bit_rate": "2026321"
     },
     "streams": [
       {
@@ -102,8 +108,11 @@
           "hearing_impaired": 0,
           "attached_pic": 0
         },
+        "tags": {
+          "language": "eng"
+        },
         "start_time": "10.041708",
-        "duration": "108.431667"
+        "duration": "43.408375"
       },
       {
         "index": 1,
@@ -117,8 +126,11 @@
           "hearing_impaired": 0,
           "attached_pic": 0
         },
+        "tags": {
+          "language": "eng"
+        },
         "start_time": "10.000000",
-        "duration": "104.599000"
+        "duration": "47.838000"
       }
     ],
     "frames": [
@@ -131,6 +143,14 @@
         "side_data_list": [
           {
             "side_data_type": "Mastering display metadata",
+            "red_x": "35400/50000",
+            "red_y": "14600/50000",
+            "green_x": "8500/50000",
+            "green_y": "39850/50000",
+            "blue_x": "6550/50000",
+            "blue_y": "2300/50000",
+            "white_point_x": "15635/50000",
+            "white_point_y": "16450/50000",
             "min_luminance": "50/10000",
             "max_luminance": "10000000/10000"
           },
@@ -179,6 +199,9 @@
             "rpu_present_flag": 1,
             "el_present_flag": 0,
             "bl_present_flag": 1
+          },
+          {
+            "side_data_type": "Display Matrix"
           }
         ],
         "disposition": {
@@ -186,6 +209,9 @@
           "forced": 0,
           "hearing_impaired": 0,
           "attached_pic": 0
+        },
+        "tags": {
+          "language": "und"
         },
         "start_time": "0.000000",
         "duration": "3.333333"
@@ -197,11 +223,17 @@
         "profile": "LC",
         "avg_frame_rate": "0/0",
         "r_frame_rate": "0/0",
+        "channels": 2,
+        "channel_layout": "stereo",
+        "sample_rate": "44100",
         "disposition": {
           "default": 1,
           "forced": 0,
           "hearing_impaired": 0,
           "attached_pic": 0
+        },
+        "tags": {
+          "language": "und"
         },
         "start_time": "0.000000",
         "duration": "3.333333"
@@ -217,6 +249,9 @@
           "hearing_impaired": 0,
           "attached_pic": 0
         },
+        "tags": {
+          "language": "und"
+        },
         "start_time": "0.000000",
         "duration": "3.333333"
       },
@@ -230,6 +265,9 @@
           "forced": 0,
           "hearing_impaired": 0,
           "attached_pic": 0
+        },
+        "tags": {
+          "language": "und"
         },
         "start_time": "0.000000",
         "duration": "3.333333"
@@ -245,13 +283,37 @@
           "hearing_impaired": 0,
           "attached_pic": 0
         },
+        "tags": {
+          "language": "und"
+        },
         "start_time": "0.000000",
         "duration": "3.333333"
       }
     ],
     "frames": [
       {
-        "stream_index": 1
+        "stream_index": 0,
+        "color_range": "tv",
+        "color_space": "bt2020nc",
+        "color_primaries": "bt2020",
+        "color_transfer": "arib-std-b67",
+        "side_data_list": [
+          {
+            "side_data_type": "3x3 displaymatrix"
+          },
+          {
+            "side_data_type": "H.26[45] User Data Unregistered SEI message"
+          },
+          {
+            "side_data_type": "Ambient viewing environment"
+          },
+          {
+            "side_data_type": "Dolby Vision RPU Data"
+          },
+          {
+            "side_data_type": "Dolby Vision Metadata"
+          }
+        ]
       }
     ]
   },
@@ -296,6 +358,9 @@
           "hearing_impaired": 0,
           "attached_pic": 0
         },
+        "tags": {
+          "language": "und"
+        },
         "start_time": "0.000000",
         "duration": "0.416667"
       }
@@ -310,6 +375,14 @@
         "side_data_list": [
           {
             "side_data_type": "Mastering display metadata",
+            "red_x": "34000/50000",
+            "red_y": "16000/50000",
+            "green_x": "13250/50000",
+            "green_y": "34500/50000",
+            "blue_x": "7500/50000",
+            "blue_y": "3000/50000",
+            "white_point_x": "15635/50000",
+            "white_point_y": "16450/50000",
             "min_luminance": "1/10000",
             "max_luminance": "100000000/10000"
           },
@@ -372,6 +445,9 @@
           "hearing_impaired": 0,
           "attached_pic": 0
         },
+        "tags": {
+          "language": "und"
+        },
         "start_time": "0.000000",
         "duration": "0.041000"
       }
@@ -386,6 +462,14 @@
         "side_data_list": [
           {
             "side_data_type": "Mastering display metadata",
+            "red_x": "34000/50000",
+            "red_y": "16000/50000",
+            "green_x": "13250/50000",
+            "green_y": "34500/50000",
+            "blue_x": "7500/50000",
+            "blue_y": "3000/50000",
+            "white_point_x": "15635/50000",
+            "white_point_y": "16450/50000",
             "min_luminance": "1/10000",
             "max_luminance": "10000000/10000"
           },
@@ -410,9 +494,9 @@
   "hdr10": {
     "format": {
       "format_name": "matroska,webm",
-      "duration": "10.000000",
+      "duration": "0.500000",
       "start_time": "0.000000",
-      "bit_rate": "164328"
+      "bit_rate": "328832"
     },
     "streams": [
       {
@@ -420,10 +504,10 @@
         "codec_type": "video",
         "codec_name": "hevc",
         "profile": "Main 10",
-        "level": 120,
+        "level": 60,
         "pix_fmt": "yuv420p10le",
-        "width": 1920,
-        "height": 1080,
+        "width": 320,
+        "height": 240,
         "avg_frame_rate": "24/1",
         "r_frame_rate": "24/1",
         "color_range": "tv",
@@ -438,6 +522,7 @@
           "hearing_impaired": 0,
           "attached_pic": 0
         },
+        "tags": {},
         "start_time": "0.000000"
       }
     ],
@@ -457,6 +542,14 @@
           },
           {
             "side_data_type": "Mastering display metadata",
+            "red_x": "34000/50000",
+            "red_y": "16000/50000",
+            "green_x": "13250/50000",
+            "green_y": "34500/50000",
+            "blue_x": "7500/50000",
+            "blue_y": "3000/50000",
+            "white_point_x": "15635/50000",
+            "white_point_y": "16450/50000",
             "min_luminance": "50/10000",
             "max_luminance": "10000000/10000"
           },
@@ -472,9 +565,9 @@
   "hlg": {
     "format": {
       "format_name": "matroska,webm",
-      "duration": "10.000000",
+      "duration": "0.500000",
       "start_time": "0.000000",
-      "bit_rate": "251356"
+      "bit_rate": "285840"
     },
     "streams": [
       {
@@ -482,10 +575,10 @@
         "codec_type": "video",
         "codec_name": "hevc",
         "profile": "Main 10",
-        "level": 120,
+        "level": 60,
         "pix_fmt": "yuv420p10le",
-        "width": 1920,
-        "height": 1080,
+        "width": 320,
+        "height": 240,
         "avg_frame_rate": "24/1",
         "r_frame_rate": "24/1",
         "color_range": "tv",
@@ -500,6 +593,7 @@
           "hearing_impaired": 0,
           "attached_pic": 0
         },
+        "tags": {},
         "start_time": "0.000000"
       }
     ],
@@ -521,21 +615,21 @@
   "sdr-bt601": {
     "format": {
       "format_name": "matroska,webm",
-      "duration": "10.000000",
+      "duration": "0.500000",
       "start_time": "0.000000",
-      "bit_rate": "10844212"
+      "bit_rate": "323488"
     },
     "streams": [
       {
         "index": 0,
         "codec_type": "video",
         "codec_name": "h264",
-        "profile": "Constrained Baseline",
-        "level": 40,
+        "profile": "High",
+        "level": 13,
         "pix_fmt": "yuv420p",
         "bits_per_raw_sample": "8",
-        "width": 1920,
-        "height": 1080,
+        "width": 320,
+        "height": 240,
         "avg_frame_rate": "24/1",
         "r_frame_rate": "24/1",
         "color_range": "tv",
@@ -550,6 +644,7 @@
           "hearing_impaired": 0,
           "attached_pic": 0
         },
+        "tags": {},
         "start_time": "0.000000"
       }
     ],
@@ -571,9 +666,9 @@
   "sdr-bt2020": {
     "format": {
       "format_name": "matroska,webm",
-      "duration": "10.000000",
+      "duration": "0.500000",
       "start_time": "0.000000",
-      "bit_rate": "14737136"
+      "bit_rate": "285680"
     },
     "streams": [
       {
@@ -581,10 +676,10 @@
         "codec_type": "video",
         "codec_name": "hevc",
         "profile": "Main 10",
-        "level": 120,
+        "level": 60,
         "pix_fmt": "yuv420p10le",
-        "width": 1920,
-        "height": 1080,
+        "width": 320,
+        "height": 240,
         "avg_frame_rate": "24/1",
         "r_frame_rate": "24/1",
         "color_range": "tv",
@@ -599,6 +694,7 @@
           "hearing_impaired": 0,
           "attached_pic": 0
         },
+        "tags": {},
         "start_time": "0.000000"
       }
     ],
@@ -620,21 +716,21 @@
   "sdr-full-range": {
     "format": {
       "format_name": "matroska,webm",
-      "duration": "10.000000",
+      "duration": "0.500000",
       "start_time": "0.000000",
-      "bit_rate": "11643776"
+      "bit_rate": "323488"
     },
     "streams": [
       {
         "index": 0,
         "codec_type": "video",
         "codec_name": "h264",
-        "profile": "Constrained Baseline",
-        "level": 40,
+        "profile": "High",
+        "level": 13,
         "pix_fmt": "yuvj420p",
         "bits_per_raw_sample": "8",
-        "width": 1920,
-        "height": 1080,
+        "width": 320,
+        "height": 240,
         "avg_frame_rate": "24/1",
         "r_frame_rate": "24/1",
         "color_range": "pc",
@@ -649,6 +745,7 @@
           "hearing_impaired": 0,
           "attached_pic": 0
         },
+        "tags": {},
         "start_time": "0.000000"
       }
     ],
@@ -699,8 +796,19 @@
           },
           {
             "side_data_type": "Mastering display metadata",
+            "red_x": "11408507/16777216",
+            "red_y": "5368709/16777216",
+            "green_x": "2222981/8388608",
+            "green_y": "11576279/16777216",
+            "blue_x": "5033165/33554432",
+            "blue_y": "16106127/268435456",
+            "white_point_x": "10492471/33554432",
+            "white_point_y": "689963/2097152",
             "min_luminance": "5368709/536870912",
             "max_luminance": "1000/1"
+          },
+          {
+            "side_data_type": "Display Matrix"
           }
         ],
         "disposition": {
@@ -708,6 +816,9 @@
           "forced": 0,
           "hearing_impaired": 0,
           "attached_pic": 0
+        },
+        "tags": {
+          "language": "spa"
         },
         "start_time": "0.000000"
       },
@@ -722,6 +833,7 @@
           "hearing_impaired": 0,
           "attached_pic": 0
         },
+        "tags": {},
         "start_time": "0.000000",
         "duration": "0.400000"
       }
@@ -747,6 +859,14 @@
           },
           {
             "side_data_type": "Mastering display metadata",
+            "red_x": "35400/50000",
+            "red_y": "14599/50000",
+            "green_x": "8500/50000",
+            "green_y": "39850/50000",
+            "blue_x": "6550/50000",
+            "blue_y": "2300/50000",
+            "white_point_x": "15634/50000",
+            "white_point_y": "16450/50000",
             "min_luminance": "10/10000",
             "max_luminance": "10000000/10000"
           }

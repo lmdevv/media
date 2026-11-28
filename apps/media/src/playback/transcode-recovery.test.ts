@@ -110,8 +110,8 @@ const QSV_CHAIN = chain("qsv", [
 const QSV_OWNERS = ownersOf(QSV_CHAIN);
 
 /**
- * decode.vaapi, scale.vaapi (Parsed_scale_vaapi_0), tonemap.vaapi (Parsed_tonemap_vaapi_1), and
- * encode.vaapi.h264.
+ * decode.vaapi, scale.vaapi (Parsed_scale_vaapi_0), tonemap.vaapi (its dynamic metadata removed by
+ * Parsed_sidedata_1 and 2, then Parsed_tonemap_vaapi_3), and encode.vaapi.h264.
  */
 const VAAPI_CHAIN = chain("vaapi", [
   [Op.Decode({ codec: "hevc" }), "decode.vaapi"],
@@ -192,7 +192,7 @@ const HEADS = {
     "Impossible to convert between the formats supported by the filter 'graph -1 input from stream 0:0' and the filter 'auto_scale_0'",
   ],
   toneMap: [
-    "[Parsed_tonemap_vaapi_1 @ 0x7398f8005480] No mastering display data from input",
+    "[Parsed_tonemap_vaapi_3 @ 0x7398f8005480] No mastering display data from input",
     "[vf#0:0 @ 0x566ff4ef0680] Error while filtering: Invalid argument",
     "[vost#0:0/h264_vaapi @ 0x566ff4ef6cc0] [enc:h264_vaapi @ 0x566ff4e6c380] Could not open encoder before EOF",
   ],

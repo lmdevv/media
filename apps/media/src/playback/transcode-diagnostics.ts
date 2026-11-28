@@ -12,6 +12,7 @@ import type {
   TranscodeSummary,
 } from "@media/contracts/media-playback";
 import type { EvidenceReason, TranscodingReport } from "@media/contracts/server-functions";
+import { dolbyVisionBase } from "@media/contracts/direct-play";
 import { EpochMillis } from "@media/contracts/units";
 import { Option } from "effect";
 
@@ -67,12 +68,16 @@ const opName = (op: Op): string =>
 type Stage = TranscodeSummary["stages"][number];
 
 /**
- * Where a step's frames came from and went: a move's memories; for an overlay on a GPU, the CPU
- * memory its image subtitle was decoded and scaled in and the device it was drawn on, while the
- * picture stayed there; none for any other step.
+ * Where a step's frames came from and went: a move's memories; for a row that takes its frames
+ * elsewhere and back (`Row.transfers`), their memory and that device, as libplacebo's tone map
+ * uploads to Vulkan; for an overlay on a GPU, the CPU memory its image subtitle was decoded and
+ * scaled in and the device it was drawn on, while the picture stayed there; none for any other step.
  */
 const movedBy = (step: Step): Stage["move"] => {
   if (Op.$is("Move")(step.op)) return { from: step.input.memory, to: step.output.memory };
+  const transfers = rowOf(step.impl)?.transfers;
+
+  if (transfers !== undefined) return { from: step.input.memory, to: transfers.device };
 
   if (Op.$is("BurnImage")(step.op) && step.op.subtitle.frame.memory !== step.on) {
     return { from: step.op.subtitle.frame.memory, to: step.on };
@@ -136,14 +141,20 @@ export const summaryOf = (
   ),
 });
 
-/** The video a plan delivers from `source`: the source itself when copied, else the encode's. */
+/**
+ * The video a plan delivers from `source`: the source itself when copied, in the range the copy
+ * delivers (a Dolby Vision copy without its record is its base layer), else the encode's.
+ */
 export const deliveredVideo = (video: VideoPlan, source: VideoStream): DeliveredVideo =>
   VideoPlan.$match(video, {
-    Copy: () => ({
+    Copy: ({ dolbyVision }) => ({
       codec: source.codec,
       width: source.width,
       height: source.height,
-      dynamicRange: source.dynamicRange,
+      dynamicRange:
+        dolbyVision === "base"
+          ? (dolbyVisionBase(source) ?? source.dynamicRange)
+          : source.dynamicRange,
     }),
     Encode: ({ output }) => ({
       codec: output.codec,
