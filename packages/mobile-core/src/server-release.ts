@@ -8,6 +8,7 @@ import type { ProtocolError } from "@media/sdk/effect";
 import { Option, Order, Schema } from "effect";
 
 import { readHealth } from "./server";
+import type { Health } from "./server";
 
 /** An answer this app couldn't read, as the SDK fails it. */
 export type UnreadableAnswer = Pick<ProtocolError, "_tag">;
@@ -71,9 +72,13 @@ export const updateLineAgainst = (server: Option.Option<Release>): string | null
     : null;
 };
 
-/** One followed server. `refresh` reads its release again, and `stop` lets go of it. */
+/**
+ * One followed server. `refresh` reads its health check again for its release, and resolves with
+ * what it read, so a caller that also wants to know whether the server answers sends no second
+ * request. `stop` lets go of it.
+ */
 export interface ServerFollow {
-  readonly refresh: () => Promise<void>;
+  readonly refresh: () => Promise<Option.Option<Health>>;
   readonly stop: () => void;
 }
 
@@ -81,9 +86,14 @@ export interface ServerFollow {
  * Follows the server at `mediaUrl` for `updateLine`, in place of any server followed before.
  * Each `refresh` reads its release from its health check. An answer applies only while this follow
  * is the current one and no later `refresh` has started; a server that doesn't answer keeps the
- * release it last named.
+ * release it last named. `onReread`, when given, is called as each read made again after an
+ * unreadable answer starts, and the function it returns hears what that read found.
  */
-export const followServer = (mediaUrl: string, app: ThisApp): ServerFollow => {
+export const followServer = (
+  mediaUrl: string,
+  app: ThisApp,
+  onReread?: () => (health: Option.Option<Health>) => void,
+): ServerFollow => {
   let asked = 0;
 
   const mine: Followed = {
@@ -98,13 +108,15 @@ export const followServer = (mediaUrl: string, app: ThisApp): ServerFollow => {
 
   followed = mine;
 
-  const refresh = async (): Promise<void> => {
+  const refresh = async (): Promise<Option.Option<Health>> => {
     const ask = ++asked;
     const health = await readHealth(mediaUrl);
 
-    if (ask !== asked || followed?.follow !== mine.follow || Option.isNone(health)) return;
+    if (ask !== asked || followed?.follow !== mine.follow || Option.isNone(health)) return health;
 
     followed = { ...followed, server: health.value.release };
+
+    return health;
   };
 
   let out = false;
@@ -126,7 +138,15 @@ export const followServer = (mediaUrl: string, app: ThisApp): ServerFollow => {
     };
 
     out = true;
-    void refresh().then(settled, settled);
+    const heard = onReread?.();
+
+    const read = async (): Promise<void> => {
+      const health = await refresh();
+
+      heard?.(health);
+    };
+
+    void read().then(settled, settled);
   };
 
   const stop = (): void => {

@@ -7,7 +7,7 @@ import {
   Unauthenticated,
 } from "@media/contracts/errors";
 import { ConvexClient, ConvexHttpClient } from "convex/browser";
-import type { AuthTokenFetcher } from "convex/browser";
+import type { AuthTokenFetcher, ConnectionState as ClientConnectionState } from "convex/browser";
 import type { FunctionReference } from "convex/server";
 import { makeFunctionReference } from "convex/server";
 import { ConvexError } from "convex/values";
@@ -99,6 +99,18 @@ export const sameSession = Option.makeEquivalence(Equivalence.strictEqual<string
 /** Stops a subscription. */
 export type Unsubscribe = () => void;
 
+/** How a lasting connection to the core stands, as its client last saw it. */
+export interface ConnectionState {
+  /** The socket is open. */
+  readonly connected: boolean;
+  /**
+   * When the oldest mutation or action still waiting for its answer went out, in epoch
+   * milliseconds; null when none waits. One that waits long with the socket open says the server
+   * stopped answering without closing it.
+   */
+  readonly waitingSince: number | null;
+}
+
 /**
  * The calls one Convex client offers, as plain Promises and callbacks. Adapters reject with
  * whatever the client threw; `ConvexTransport` translates it.
@@ -127,6 +139,11 @@ export interface ClientAdapter {
    * at once, with `none`, for a client that authenticates each request or has no source.
    */
   readonly authenticated: () => Promise<Authentication>;
+  /**
+   * Calls `listener` with the connection's state now and on each change. A client that opens no
+   * lasting connection never calls it.
+   */
+  readonly connection: (listener: (state: ConnectionState) => void) => Unsubscribe;
   readonly close: () => Promise<void>;
 }
 
@@ -157,6 +174,11 @@ export interface Interface {
    * once.
    */
   readonly authenticated: Effect.Effect<Authentication>;
+  /**
+   * The connection's state now and on each change; it never ends. Empty of changes for a
+   * connection that opens per request.
+   */
+  readonly connection: Stream.Stream<ConnectionState>;
 }
 
 /** The connection to the core's Convex deployment. */
@@ -272,6 +294,16 @@ export const make = (adapter: ClientAdapter): Effect.Effect<Interface> =>
         ),
       setAuth: (source) => Effect.promise(() => adapter.setAuth(source)),
       authenticated: Effect.promise(() => adapter.authenticated()),
+      connection: Stream.callback<ConnectionState>((queue) =>
+        Effect.acquireRelease(
+          Effect.sync(() =>
+            adapter.connection((state) => {
+              Queue.offerUnsafe(queue, state);
+            }),
+          ),
+          (unsubscribe) => Effect.sync(unsubscribe),
+        ),
+      ),
     }),
   );
 
@@ -687,6 +719,11 @@ const heldCall =
     return call(kind, path, args, signal).finally(settle);
   };
 
+const connectionOf = (state: ClientConnectionState): ConnectionState => ({
+  connected: state.isWebSocketConnected,
+  waitingSince: state.timeOfOldestInflightRequest?.getTime() ?? null,
+});
+
 const webSocketAdapter = (client: ConvexClient): ClientAdapter => {
   const fetchers = clientTokenFetchers();
 
@@ -708,6 +745,13 @@ const webSocketAdapter = (client: ConvexClient): ClientAdapter => {
         client.setAuth(fetcher ?? signedOut, answered);
       }),
     authenticated: fetchers.authenticated,
+    connection: (listener) => {
+      listener(connectionOf(client.connectionState()));
+
+      return client.subscribeToConnectionState((state) => {
+        listener(connectionOf(state));
+      });
+    },
     close: () => {
       fetchers.retire();
 
@@ -817,6 +861,7 @@ const httpAdapter = (client: ConvexHttpClient, options: HttpOptions): ClientAdap
       return Promise.resolve();
     },
     authenticated: () => Promise.resolve("none" as const),
+    connection: () => () => undefined,
     close: () => Promise.resolve(),
   };
 };

@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { artKey, blurhashAverage, parseHex, playerTint } from "@/lib/art-tint";
 import type { Rgb } from "@/lib/art-tint";
 import { useThemeColor } from "@/lib/theme-color";
+import { coverUnread } from "@/session/media-requests";
 
 const averages = new Map<string, Rgb>();
 
@@ -21,7 +22,7 @@ export const useArtTint = (artUrl: string | null): string | null => {
     let current = true;
 
     const read = async () => {
-      const hash = await Image.generateBlurhashAsync(artUrl, [1, 1]).catch(() => null);
+      const hash = await Image.generateBlurhashAsync(artUrl, [1, 1]).catch(coverUnread(artUrl));
       const average = hash === null ? null : blurhashAverage(hash);
 
       if (average === null) return;

@@ -6,6 +6,7 @@ import { usePlatform, usePlatformStatus } from "@media/sdk/react";
 import { isFailure } from "@media/mobile-core/failure";
 import { lastPerson } from "@media/mobile-core/sign-in";
 import { Equal, Option, Schema } from "effect";
+import { useLowPowerMode } from "expo-battery";
 import { CryptoDigestAlgorithm, digestStringAsync } from "expo-crypto";
 import {
   createContext,
@@ -27,6 +28,7 @@ import type { UserId } from "@/lib/models";
 import { useReadSettled } from "@/lib/platform";
 import { playsOnIos } from "@/player/player-state";
 import { useServer } from "@/session/connection";
+import { mediaRequest } from "@/session/media-requests";
 
 import { expoTransfer } from "./expo-transfer";
 import { openVault, wipeVaults } from "./expo-vault";
@@ -46,6 +48,7 @@ import type {
 import type { HeldLyrics, SyncPolicy } from "./sync/plan";
 import { canToggleDownload, downloadStatus, trackDownloadState } from "./sync/status";
 import type { DownloadStatus } from "./sync/status";
+import { observedTransfer } from "./sync/finished-file";
 import { DownloadSync, EMPTY_DOWNLOADS } from "./sync/sync";
 import type {
   DownloadsCore,
@@ -381,6 +384,11 @@ const offlineLyricsOf = (lyrics: TrackLyrics): OfflineLyrics => {
   );
 };
 
+/**
+ * Feeds `sync` what the core keeps for this phone's device. Mount it once the session's device is
+ * enrolled, keyed by it: the core refuses the list for a session on no device, and a refused list
+ * is not asked again.
+ */
 function ServerFeed({ sync }: { readonly sync: DownloadSync }) {
   const platform = usePlatform();
 
@@ -412,11 +420,21 @@ function ServerFeed({ sync }: { readonly sync: DownloadSync }) {
   );
 }
 
-/**
- * Whose downloads this phone opens: who is signed in, or while the server has not said, who last
- * signed in to it here. Nobody's while signed out: signing out deletes them.
- */
-const useDownloadsAccount = (mediaUrl: string): UserId | null => {
+/** Whose downloads this phone opens, and the device the core keeps them for. */
+interface DownloadsAccount {
+  /**
+   * Who is signed in, or while the server has not said, who last signed in to it here. Nobody
+   * while signed out: signing out deletes their downloads.
+   */
+  readonly userId: UserId | null;
+  /**
+   * The session's device once the app enrolled it, which the core keeps downloads for; null until
+   * then, and while the server has not said.
+   */
+  readonly deviceId: string | null;
+}
+
+const useDownloadsAccount = (mediaUrl: string): DownloadsAccount => {
   const platform = usePlatform();
   const status = usePlatformStatus();
 
@@ -425,11 +443,15 @@ const useDownloadsAccount = (mediaUrl: string): UserId | null => {
     status === "signedIn" ? {} : "skip",
   );
 
-  const signedIn = me === undefined || me instanceof Error ? null : me.userId;
+  const signedIn = me === undefined || me instanceof Error ? null : me;
 
-  if (status === "signedOut") return null;
+  if (status === "signedOut") return { userId: null, deviceId: null };
 
-  return signedIn ?? lastPerson({ own: appKeychains().own, server: mediaUrl })?.userId ?? null;
+  return {
+    userId:
+      signedIn?.userId ?? lastPerson({ own: appKeychains().own, server: mediaUrl })?.userId ?? null,
+    deviceId: signedIn?.device?.deviceId ?? null,
+  };
 };
 
 /** The download quality, as the core keeps it for this device, or the last one chosen here. */
@@ -459,7 +481,7 @@ const useQuality = (): [DownloadQuality, (quality: DownloadQuality) => void] => 
 
 /**
  * Keeps the account's downloads on this phone while the app runs, and fetches new ones while the
- * server answers. Mount it inside the platform provider, above the session phase, which opens the
+ * server answers. In Low Power Mode it fetches only the downloads the person starts then. Mount it inside the platform provider, above the session phase, which opens the
  * app on the downloads when the server is out of reach, and above the player, which plays
  * downloaded songs from their files.
  */
@@ -467,15 +489,22 @@ export function DownloadsProvider({ children }: { readonly children: ReactNode }
   const platform = usePlatform();
   const { mediaUrl } = useServer();
   const status = usePlatformStatus();
-  const userId = useDownloadsAccount(mediaUrl);
+  const { userId, deviceId } = useDownloadsAccount(mediaUrl);
   const [sync, setSync] = useState<DownloadSync | null>(null);
   const [quality, setQuality] = useQuality();
   const chosen = useRef(quality);
   const current = useRef<DownloadSync | null>(null);
+  const lowPower = useLowPowerMode();
+  const saving = useRef(lowPower);
 
   useLayoutEffect(() => {
     chosen.current = quality;
   }, [quality]);
+
+  useLayoutEffect(() => {
+    saving.current = lowPower;
+    current.current?.setLowPower(lowPower);
+  }, [lowPower]);
 
   useLayoutEffect(() => {
     if (userId === null) return undefined;
@@ -516,12 +545,13 @@ export function DownloadsProvider({ children }: { readonly children: ReactNode }
       const opened = new DownloadSync({
         core: coreFor(platform, mediaUrl),
         vault,
-        transfer: expoTransfer,
+        transfer: observedTransfer(expoTransfer, mediaRequest),
         policy: () => policyFor(chosen.current),
         now: Date.now,
       });
 
       created = opened;
+      opened.setLowPower(saving.current);
       opened.start();
       current.current = opened;
       setSync(opened);
@@ -560,7 +590,9 @@ export function DownloadsProvider({ children }: { readonly children: ReactNode }
 
   return (
     <DownloadsContext value={value}>
-      {sync === null || status !== "signedIn" ? null : <ServerFeed sync={sync} />}
+      {sync === null || status !== "signedIn" || deviceId === null ? null : (
+        <ServerFeed key={deviceId} sync={sync} />
+      )}
       {children}
     </DownloadsContext>
   );

@@ -214,6 +214,12 @@ const nextFailure = (
   return { attempts, retryAt: retryable ? now + wait : null, message };
 };
 
+/** Which songs and covers may start a transfer now. */
+interface Startable {
+  readonly song: (trackId: TrackId) => boolean;
+  readonly art: (hash: string) => boolean;
+}
+
 const due = (failure: Failure | undefined, now: number): boolean =>
   failure === undefined || (failure.retryAt !== null && failure.retryAt <= now);
 
@@ -226,6 +232,11 @@ export class DownloadSync {
   #stopped = false;
   #online = false;
   #lowSpace = false;
+  #lowPower = false;
+  /** The downloads the person started while Low Power Mode is on, which fetch all the same. */
+  readonly #asked = new Set<DownloadPinId>();
+  /** The songs the person tried again while Low Power Mode is on, which fetch all the same. */
+  readonly #askedSongs = new Set<TrackId>();
   /** What the core keeps on this device, as `core.downloads.list` answered; none until it does. */
   #listed: Option.Option<ReadonlySet<TrackId>> = Option.none();
   readonly #releasing = new Set<TrackId>();
@@ -315,6 +326,19 @@ export class DownloadSync {
   }
 
   /**
+   * Whether Low Power Mode is on. While it is, no transfer starts on its own: only those of a
+   * download the person starts, or of songs they try again, while it is on. Transfers already
+   * running go on. Turning it off starts the rest.
+   */
+  setLowPower(on: boolean): void {
+    if (on === this.#lowPower) return;
+    this.#lowPower = on;
+    this.#asked.clear();
+    this.#askedSongs.clear();
+    this.#plan();
+  }
+
+  /**
    * Downloads `target` to this device and keeps it in sync: the phone keeps the download, and its
    * songs are kept on the core one by one as they are fetched. `details` name it until its songs
    * are read.
@@ -344,6 +368,7 @@ export class DownloadSync {
       }),
     );
 
+    if (this.#lowPower) this.#asked.add(id);
     this.#plan();
   }
 
@@ -374,7 +399,12 @@ export class DownloadSync {
     const members =
       target.kind === "track" ? [target.id] : (view?.members ?? []).map((member) => member.trackId);
 
-    for (const trackId of members) this.#trackFailures.delete(trackId);
+    for (const trackId of members) {
+      this.#trackFailures.delete(trackId);
+
+      if (this.#lowPower) this.#askedSongs.add(trackId);
+    }
+
     this.#plan();
   }
 
@@ -689,12 +719,43 @@ export class DownloadSync {
     }
   }
 
+  /**
+   * Which songs and covers may start a transfer now: any, or in Low Power Mode only those of the
+   * downloads and songs the person asked for while it is on.
+   */
+  #mayStart(): Startable {
+    if (!this.#lowPower) return { song: () => true, art: () => true };
+
+    const songs = new Set(this.#askedSongs);
+    const art = new Set<string>();
+
+    for (const pinId of this.#asked) {
+      const manifest = this.#manifests.get(pinId);
+      const pin = manifest?.pin ?? this.#view.pins.get(pinId)?.pin;
+
+      if (pin?.available === true && pin.artHash !== null) art.add(pin.artHash);
+
+      for (const entry of manifest?.entries ?? []) songs.add(entry.track.id);
+    }
+
+    for (const manifest of this.#manifests.values()) {
+      for (const entry of manifest.entries) {
+        if (entry.artHash !== null && songs.has(entry.track.id)) art.add(entry.artHash);
+      }
+    }
+
+    return { song: (trackId) => songs.has(trackId), art: (hash) => art.has(hash) };
+  }
+
   #startFetches(fetches: ReadonlyArray<FetchStep>, covers: ReadonlyArray<FetchArtStep>): void {
     const now = this.#options.now();
     const free = () => this.#fetching.size + this.#fetchingArt.size < MAX_TRANSFERS;
+    const may = this.#mayStart();
 
     for (const cover of covers) {
       if (!free()) return;
+
+      if (!may.art(cover.hash)) continue;
 
       // The plan read the vault before its saves; a cover that landed since must not be fetched
       // again, as a second download replaces the file and its abort deletes it.
@@ -711,6 +772,8 @@ export class DownloadSync {
     for (const fetch of fetches) {
       if (!free()) return;
       const trackId = fetch.entry.track.id;
+
+      if (!may.song(trackId)) continue;
 
       const failure = this.#trackFailures.get(trackId);
 
@@ -880,13 +943,15 @@ export class DownloadSync {
       !this.#lowSpace &&
       this.#fetching.size + this.#fetchingArt.size < MAX_TRANSFERS;
 
+    const may = this.#mayStart();
+
     const retries = canStart
       ? [
           ...Array.from(this.#trackFailures, ([trackId, { retryAt }]) =>
-            this.#fetching.has(trackId) ? null : retryAt,
+            this.#fetching.has(trackId) || !may.song(trackId) ? null : retryAt,
           ),
           ...Array.from(this.#artFailures, ([hash, { retryAt }]) =>
-            this.#fetchingArt.has(hash) ? null : retryAt,
+            this.#fetchingArt.has(hash) || !may.art(hash) ? null : retryAt,
           ),
         ].flatMap((retryAt) => (retryAt === null ? [] : [retryAt - now]))
       : [];

@@ -13,7 +13,7 @@ import {
 
 import { SignInRoute } from "../auth";
 import type { AuthStatus } from "../auth";
-import type { FunctionKind } from "../convex-transport";
+import type { ConnectionState, FunctionKind } from "../convex-transport";
 import * as QueryWatch from "../query-watch";
 import * as TokenStorage from "../token-storage";
 import type { SharedStore } from "../shared-store";
@@ -176,6 +176,12 @@ type PromiseMethods = ReturnType<typeof promiseMethods>;
 /** The platform client as Promises. */
 export interface PlatformSdk extends PromiseMethods {
   readonly session: PlatformSession;
+  /**
+   * Calls `listener` with how the connection to the core stands now and on each change: whether
+   * its socket is open, and since when a call has waited for its answer. Opens the connection. A
+   * client over HTTP opens none and never calls it.
+   */
+  readonly onConnection: (listener: (state: ConnectionState) => void) => Stop;
   /** Closes the connection and stops every watch. */
   readonly dispose: () => Promise<void>;
 }
@@ -297,8 +303,20 @@ export const createPlatform = (options: PlatformOptions): PlatformSdk => {
     return () => Effect.runPromise(Fiber.interrupt(fiber));
   };
 
+  const onConnection: PlatformSdk["onConnection"] = (listener) => {
+    const fiber = runtime.runFork(
+      Stream.runForEach(
+        Stream.unwrap(Effect.map(Client.Client, (client) => client.connection)),
+        (state) => Effect.sync(() => listener(state)),
+      ),
+    );
+
+    return () => Effect.runPromise(Fiber.interrupt(fiber));
+  };
+
   return {
     ...promiseMethods(builder),
+    onConnection,
     session: {
       status: () => withClient((client) => client.session.currentStatus),
       onStatus,

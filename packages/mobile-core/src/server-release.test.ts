@@ -1,6 +1,6 @@
 import { ProtocolError, TransportError } from "@media/sdk/effect";
 import { Release } from "@media/contracts/release";
-import { Schema } from "effect";
+import { Option, Schema } from "effect";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { describeFailure, describeUnreadable } from "./failure";
@@ -137,6 +137,24 @@ describe("followServer", () => {
     expect(describeUnreadable()).toBe(UPDATE_ON_IPHONE);
   });
 
+  it("resolves each refresh with the health it read, answered or not", async () => {
+    let answering = true;
+
+    const mediaUrl = await startServer({
+      "/api/health": async () => (answering ? healthOf("0.9.0") : "<html>"),
+    });
+
+    const followed = followServer(mediaUrl, iPhone("0.9.0"));
+
+    following.push(followed);
+    expect(Option.map(await followed.refresh(), (health) => health.release)).toEqual(
+      Option.some(Option.some(Schema.decodeSync(Release)("0.9.0"))),
+    );
+
+    answering = false;
+    expect(Option.isNone(await followed.refresh())).toBe(true);
+  });
+
   it("reads the release again after an answer it can't read, once per answer", async () => {
     let release = "0.9.0";
     let asks = 0;
@@ -249,6 +267,35 @@ describe("followServer", () => {
     rereadAfter(unreadableAnswer());
 
     expect([asks, describeUnreadable()]).toEqual([0, GENERIC]);
+  });
+
+  it("tells onReread of each read made again, from its start, and never of a refresh", async () => {
+    const asked: Array<string> = [];
+    const answering = { up: true };
+
+    const mediaUrl = await startServer({
+      "/api/health": async () => {
+        asked.push("read");
+
+        return answering.up ? healthOf("0.10.0") : "not a health report";
+      },
+    });
+
+    const followed = followServer(mediaUrl, iPhone("0.9.0"), () => {
+      asked.push("started");
+
+      return (health) => {
+        asked.push(Option.isSome(health) ? "answered" : "unanswered");
+      };
+    });
+
+    following.push(followed);
+    await followed.refresh();
+    answering.up = false;
+    rereadAfter(unreadableAnswer());
+    await vi.waitFor(() => {
+      expect(asked).toEqual(["read", "started", "read", "unanswered"]);
+    });
   });
 
   it("drops an answer for a server the app has since left", async () => {

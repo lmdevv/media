@@ -565,6 +565,73 @@ describe("the WebSocket connection", () => {
   });
 });
 
+describe("connection", () => {
+  it("tells when the socket opens and when it drops", async () => {
+    const seen = await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const fake = yield* FakeConvex.make;
+
+          yield* fake.reply("account:viewer", Reply.Success({ value: "answered" }));
+          const context = yield* Layer.build(ConvexTransport.layerWebSocket(fake.url));
+          const connection = Context.get(context, ConvexTransport.ConvexTransport);
+          const states = yield* Queue.unbounded<ConvexTransport.ConnectionState>();
+
+          yield* connection.connection.pipe(
+            Stream.runForEach((state) => Queue.offer(states, state)),
+            Effect.forkScoped,
+          );
+
+          const until = (connected: boolean) =>
+            Queue.take(states).pipe(
+              Effect.repeat({ until: (state) => state.connected === connected }),
+              Effect.timeout(Duration.seconds(10)),
+            );
+
+          yield* connection.call("query", "account:viewer", { ask: 1 });
+          const opened = yield* until(true);
+
+          yield* fake.reply("account:viewer", Reply.Drop());
+          yield* connection
+            .call("query", "account:viewer", { ask: 2 })
+            .pipe(Effect.timeoutOption(Duration.millis(500)));
+          const dropped = yield* until(false);
+
+          return { opened, dropped };
+        }),
+      ),
+    );
+
+    expect(seen).toEqual({
+      opened: { connected: true, waitingSince: null },
+      dropped: { connected: false, waitingSince: null },
+    });
+  }, 20_000);
+
+  it("reports nothing for a connection that opens per request", async () => {
+    const heard = await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const fake = yield* FakeConvex.make;
+
+          yield* fake.reply("account:viewer", Reply.Success({ value: "answered" }));
+          const context = yield* Layer.build(ConvexTransport.layerHttp(fake.url));
+          const connection = Context.get(context, ConvexTransport.ConvexTransport);
+
+          yield* connection.call("query", "account:viewer", {});
+
+          return yield* connection.connection.pipe(
+            Stream.runCollect,
+            Effect.timeoutOption(Duration.millis(300)),
+          );
+        }),
+      ),
+    );
+
+    expect(Option.isNone(heard)).toBe(true);
+  });
+});
+
 describe("clientTokenFetchers", () => {
   it("never asks a retired fetcher's source again", async () => {
     const fetchers = clientTokenFetchers();

@@ -1,4 +1,4 @@
-import { readHealth } from "@media/mobile-core/server";
+import { usePlatform, usePlatformStatus } from "@media/sdk/react";
 import { Option } from "effect";
 import {
   createContext,
@@ -8,105 +8,82 @@ import {
   useMemo,
   useRef,
   useState,
+  useSyncExternalStore,
 } from "react";
 import type { ReactNode } from "react";
 import { AppState } from "react-native";
 
 import { useDownloadsReach, useTrackHeld } from "@/downloads";
-import { probesReach, reachOf } from "@/lib/server-reach";
-import type { Reach, ServerReach } from "@/lib/server-reach";
+import { reachOf } from "@/lib/server-reach";
+import type { Observation, Reach, ServerReach } from "@/lib/server-reach";
 import type { SettledPhase } from "@/lib/session-phase";
 import { useServer } from "@/session/connection";
-
-const ONLINE_PROBE_MS = 10_000;
-
-/** How often it is asked while it does not, so the app notices it back soon. */
-const LOST_PROBE_MS = 3000;
-
-const LOST_AFTER = 2;
+import { listenForMediaRequests } from "@/session/media-requests";
+import { reachWatch } from "@/session/reach-watch";
+import type { ReachWatch } from "@/session/reach-watch";
+import { useServerHealth } from "@/session/sdk-provider";
 
 interface ReachState extends Reach {
-  readonly probe: () => void;
-  /** Tells whether this phone plays audio, which keeps the checks going in the background. */
-  readonly setAudible: (audible: boolean) => void;
+  readonly check: () => Promise<boolean>;
+  readonly hear: (observation: Observation) => void;
+  /** Tells whether this phone plays the server's queue, which needs the server in the background. */
+  readonly setPlaying: (playing: boolean) => void;
 }
 
 const ServerReachContext = createContext<ReachState | null>(null);
 
-interface Lost {
-  readonly lost: boolean;
-  readonly probe: () => void;
-}
+const noWatch = (): (() => void) => () => undefined;
 
 /**
- * Whether the media server answers its health check, asked on a timer while the app is on screen
- * or plays audio in the background, and at once when it comes back. The platform client keeps its
- * own connection and does not say how it stands; on an install the media server and the core run
- * in one place, so the media server answering stands for both.
+ * The `ReachWatch` of this connection and sign-in, fed by the core's socket, by the app's failed
+ * requests to the media service, by whether the app is on screen, and by whether the server's queue
+ * plays here. It checks the server's health on coming back on screen, with the read that also
+ * follows the server's release. Signing in or out starts a new watch, which hears only the requests
+ * sent from then on; the connection's first watch also hears its release read at launch.
  */
-const useLost = (mediaUrl: string, audible: boolean): Lost => {
-  const [failures, setFailures] = useState(0);
-  const [active, setActive] = useState(AppState.currentState === "active");
-  const lost = failures >= LOST_AFTER;
-  const watching = probesReach({ active, audible });
-  /** Asks at once and starts the timer over, while the checks run; null while they don't. */
-  const askNow = useRef<(() => void) | null>(null);
+const useWatch = (playing: boolean): ReachWatch | null => {
+  const platform = usePlatform();
+  const { mediaUrl } = useServer();
+  const signedOut = usePlatformStatus() === "signedOut";
+  const { read: readHealth, launch } = useServerHealth();
+  const [watch, setWatch] = useState<ReachWatch | null>(null);
+  const [foreground, setForeground] = useState(AppState.currentState === "active");
 
   useEffect(() => {
-    const subscription = AppState.addEventListener("change", (state) => {
-      setActive(state === "active");
+    const made = reachWatch(async () => Option.isSome(await readHealth()));
+    const stopConnection = platform.onConnection(made.connection);
+    const stopRequests = listenForMediaRequests(mediaUrl, made);
+    const stopLaunch = launch.take(made);
 
-      if (state === "active") askNow.current?.();
+    const foregrounding = AppState.addEventListener("change", (state) => {
+      setForeground(state === "active");
+
+      if (state === "active") void made.check();
     });
 
+    setWatch(made);
+
     return () => {
-      subscription.remove();
+      foregrounding.remove();
+      stopLaunch();
+      stopRequests();
+      void stopConnection();
+      made.close();
     };
-  }, []);
+  }, [platform, readHealth, mediaUrl, launch, signedOut]);
 
   useEffect(() => {
-    if (!watching) return undefined;
-    let stop = new AbortController();
-    let timer: ReturnType<typeof setInterval> | undefined;
+    watch?.need(foreground || playing);
+  }, [watch, foreground, playing]);
 
-    const ask = async (signal: AbortSignal): Promise<void> => {
-      const health = await readHealth(mediaUrl);
-
-      if (signal.aborted) return;
-      setFailures((count) => (Option.isSome(health) ? 0 : count + 1));
-    };
-
-    const begin = (): void => {
-      stop.abort();
-      clearInterval(timer);
-      stop = new AbortController();
-      const { signal } = stop;
-
-      void ask(signal);
-      timer = setInterval(() => void ask(signal), lost ? LOST_PROBE_MS : ONLINE_PROBE_MS);
-    };
-
-    begin();
-    askNow.current = begin;
-
-    return () => {
-      askNow.current = null;
-      stop.abort();
-      clearInterval(timer);
-    };
-  }, [mediaUrl, watching, lost]);
-
-  const probe = useCallback(() => {
-    askNow.current?.();
-  }, []);
-
-  return { lost, probe };
+  return watch;
 };
 
 /**
  * Works out, once for every screen below it, whether the server answers: `phase` is the phase on
  * show, offline when the app opened without the server. Tells the downloads, which fetch only
- * while it answers.
+ * while it answers. The core's socket stands for the core; a failed request to the media service
+ * doubts it, and a health check decides each doubt.
  */
 export function ServerReachProvider({
   phase,
@@ -115,14 +92,30 @@ export function ServerReachProvider({
   readonly phase: SettledPhase["kind"];
   readonly children: ReactNode;
 }) {
-  const { mediaUrl } = useServer();
-  const [audible, setAudible] = useState(false);
-  const { lost, probe } = useLost(mediaUrl, audible);
+  const [playing, setPlaying] = useState(false);
+  const watch = useWatch(playing);
+  const lost = useSyncExternalStore(watch?.subscribe ?? noWatch, () => watch?.lost() ?? false);
+  const latest = useRef(watch);
   const offlinePhase = phase === "offline";
 
+  useEffect(() => {
+    latest.current = watch;
+  }, [watch]);
+
+  const check = useCallback(async () => (await latest.current?.check()) ?? false, []);
+
+  const hear = useCallback((observation: Observation) => {
+    latest.current?.hear(observation);
+  }, []);
+
   const value = useMemo(
-    () => ({ ...reachOf({ offlinePhase, socketLost: lost, stalled: false }), probe, setAudible }),
-    [offlinePhase, lost, probe],
+    () => ({
+      ...reachOf({ offlinePhase, socketLost: lost, stalled: false }),
+      check,
+      hear,
+      setPlaying,
+    }),
+    [offlinePhase, lost, check, hear],
   );
 
   useDownloadsReach(value.reach === "online" && phase === "ready");
@@ -152,26 +145,40 @@ export const useServerReach = (): ServerReach => useReach("useServerReach").reac
  */
 export const useNoticeReach = (): ServerReach => useReach("useNoticeReach").notice;
 
-/** Asks the server now whether it answers, as the player does when a command goes unanswered. */
-export const useProbeReach = (): (() => void) => useReach("useProbeReach").probe;
-
 /**
- * Keeps asking whether the server answers while `audible`, in the background too: iOS keeps the
- * app running while it plays audio, and a server lost then (leaving home Wi-Fi with the phone in a
- * pocket) moves the player to the downloaded songs before it reaches one it can't stream.
+ * Checks the server's health now, as the player does when a command goes unanswered; resolves
+ * whether it answered.
  *
  * @throws When used outside `ServerReachProvider`, a programming error.
  */
-export const useReachWhileAudible = (audible: boolean): void => {
-  const { setAudible } = useReach("useReachWhileAudible");
+export const useCheckReach = (): (() => Promise<boolean>) => useReach("useCheckReach").check;
+
+/**
+ * Takes in what one of the player's requests said of the server, such as a stream that failed.
+ *
+ * @throws When used outside `ServerReachProvider`, a programming error.
+ */
+export const useHearReach = (): ((observation: Observation) => void) =>
+  useReach("useHearReach").hear;
+
+/**
+ * Keeps the server watched in the background while `playing` the server's queue: iOS keeps the
+ * app running while it plays audio, and a server lost then (leaving home Wi-Fi with the phone in a
+ * pocket) moves the player to the downloaded songs before it reaches one it can't stream. While it
+ * plays its own downloaded songs instead, nothing needs the server and nothing is sent.
+ *
+ * @throws When used outside `ServerReachProvider`, a programming error.
+ */
+export const useReachWhilePlaying = (playing: boolean): void => {
+  const { setPlaying } = useReach("useReachWhilePlaying");
 
   useEffect(() => {
-    setAudible(audible);
+    setPlaying(playing);
 
     return () => {
-      setAudible(false);
+      setPlaying(false);
     };
-  }, [setAudible, audible]);
+  }, [setPlaying, playing]);
 };
 
 /**

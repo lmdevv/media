@@ -176,6 +176,8 @@ export interface Interface {
   /** Every command as an Effect method, nested by name. */
   readonly methods: EffectMethods;
   readonly session: Session;
+  /** How the lasting connection to the core stands now and on each change. */
+  readonly connection: Stream.Stream<ConvexTransport.ConnectionState>;
 }
 
 /** Every command as an Effect method: `methods.core.server.info()` runs `core.server.info`. */
@@ -487,6 +489,7 @@ const make = Effect.fn("Platform.make")(function* (url: string, signInRoute: Aut
     run,
     watch,
     methods,
+    connection: transport.connection,
     session: {
       status: engine.status,
       currentStatus: engine.currentStatus,

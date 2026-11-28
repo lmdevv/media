@@ -274,6 +274,7 @@ const twoDevices = async (
             player: deskPlayer,
             lead: async () => undefined,
             playbackOf: (id) => devices.find((listed) => listed.id === id)?.playback ?? null,
+            onPlayback: () => () => undefined,
             serverNow: () => laptop.clock.now,
           };
 
