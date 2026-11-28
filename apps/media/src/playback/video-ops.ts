@@ -282,7 +282,7 @@ export interface FilterCall {
   readonly args: ReadonlyArray<string | readonly [string, OptionValue]>;
   /**
    * Adjacent calls of one filter that both fuse become one call: their named options merge, and a
-   * later option of the same name takes the earlier one's place.
+   * later option of the same name replaces the earlier one, in the later call's place.
    */
   readonly fuses?: true;
 }

@@ -384,13 +384,15 @@ const deinterlaceQsv: OpImpl<"Deinterlace"> = {
 };
 
 /**
- * The colour `vpp_qsv` must state as its output to leave SDR `frame` in its own: by default it
- * converts samples to limited range and BT.709's matrix and primaries but leaves the frame's tags,
- * so the samples no longer match them. On an Arc A380 under ffmpeg 7.1, full-range patches came
- * out with black at 16, and BT.601's 75 % cyan 9 apart in CIEDE2000; stated as the source's, every
- * patch matched (`out_color_matrix` alone left the primaries converted). Nothing for HDR frames,
- * which a tone map states, or for BT.709 in limited range or a frame that states nothing, which
- * keep main's arguments.
+ * The colour `vpp_qsv` must state as its output to leave `frame` in its own: when it resizes, by
+ * default it converts samples to limited range and BT.709's matrix and primaries but leaves the
+ * frame's tags, so the samples no longer match them. On an Arc A380 under ffmpeg 7.1, full-range
+ * patches came out with black at 16, BT.601's 75 % cyan 9 apart in CIEDE2000, and HDR10's
+ * saturated patches up to 17 codes of 10-bit luma off, scaled from 1920x1080 to 1280x720; stated
+ * as the source's, every patch matched (`out_color_matrix` alone left the primaries converted).
+ * ffmpeg 9 converted none of them. A tone map fused into the same `vpp_qsv` states BT.709 in their
+ * place. Nothing for BT.709 in limited range or a frame that states nothing, which keep their
+ * arguments.
  */
 const keptColour = (frame: Frame): FilterCall["args"] => {
   const { colour } = frame;
@@ -403,7 +405,7 @@ const keptColour = (frame: Frame): FilterCall["args"] => {
 
   const converted = stated.some(([, value]) => value !== undefined && value !== "bt709");
 
-  if (colour.signal !== "sdr" || (!converted && colour.range === "limited")) return [];
+  if (!converted && colour.range === "limited") return [];
 
   return [
     ...stated.flatMap(([option, value]): FilterCall["args"] =>
@@ -414,8 +416,8 @@ const keptColour = (frame: Frame): FilterCall["args"] => {
 };
 
 /**
- * `vpp_qsv` scaling, its output stated in an SDR source's own colour (`keptColour`); it fuses with
- * a following tone map into one `vpp_qsv`, whose tone map then states BT.709.
+ * `vpp_qsv` scaling, its output stated in the frame's own colour (`keptColour`); it fuses with a
+ * following tone map into one `vpp_qsv`, whose tone map then states BT.709.
  */
 const scaleQsv: OpImpl<"Scale"> = {
   id: ImplId("scale.qsv"),

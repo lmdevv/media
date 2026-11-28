@@ -343,8 +343,9 @@ describe("hlsCommandArgs", () => {
     expect(placeboRun("vaapi")).toBe(
       `scale_vaapi=w=1920:h=1080:format=p010,${placebo},format=nv12,hwupload=derive_device=vaapi`,
     );
+    // Quick Sync's scale states the frames' HDR10 colour, which ffmpeg 7.1 converts otherwise.
     expect(placeboRun("qsv")).toBe(
-      `hwmap=derive_device=qsv,format=qsv,vpp_qsv=w=1920:h=1080:format=p010,${placebo},fps=source_fps,format=nv12,hwupload=derive_device=qsv:extra_hw_frames=64,format=qsv`,
+      `hwmap=derive_device=qsv,format=qsv,vpp_qsv=w=1920:h=1080:format=p010:out_color_matrix=bt2020nc:out_color_primaries=bt2020:out_color_transfer=smpte2084,${placebo},fps=source_fps,format=nv12,hwupload=derive_device=qsv:extra_hw_frames=64,format=qsv`,
     );
     expect(placeboArgs("vaapi").join(" ")).toContain(
       "-init_hw_device vulkan=vk@va -filter_hw_device vk",

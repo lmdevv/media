@@ -106,7 +106,12 @@ const textOf = (call: FilterCall, files: RunFiles): string => {
   return args.length === 0 ? call.name : `${call.name}=${args.join(":")}`;
 };
 
-/** Merges `next` into `last` when both are fusing calls of one filter. */
+/**
+ * Merges `next` into `last` when both are fusing calls of one filter. A named option `next` repeats
+ * replaces the earlier one and moves to where `next` puts it, so the merged call reads as the
+ * earlier call's options followed by the later one's: a tone map fused after a scale that stated
+ * the frame's colour keeps its own options in its own order.
+ */
 const fused = (last: Owned | undefined, next: Owned): Owned | undefined => {
   if (
     last === undefined ||
@@ -124,8 +129,8 @@ const fused = (last: Owned | undefined, next: Owned): Owned | undefined => {
       ? -1
       : args.findIndex((known) => !Predicate.isString(known) && known[0] === arg[0]);
 
-    if (at === -1) args.push(arg);
-    else args[at] = arg;
+    if (at !== -1) args.splice(at, 1);
+    args.push(arg);
   }
 
   return { call: { ...last.call, args }, steps: [...last.steps, ...next.steps] };
