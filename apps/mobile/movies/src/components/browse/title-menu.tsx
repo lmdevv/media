@@ -4,7 +4,7 @@ import type { ReactElement } from "react";
 
 import { useDownloadMenuItem } from "@/components/downloads/use-download-menu-item";
 import { resumeOf } from "@/components/title/title-model";
-import { openTitle } from "@/lib/open-title";
+import { useTitlePress } from "@/lib/open-title";
 
 import { useTitleStates } from "./title-states";
 
@@ -32,6 +32,7 @@ export const useTitleMenu = ({ title, episode }: MenuTarget, playHref: string): 
   const titleState = states.watchState(title.id);
   const available = episode === null ? title.available : episode.available;
   const download = useDownloadMenuItem(title, episode?.id ?? null, available);
+  const openTitle = useTitlePress(title);
 
   const resuming =
     episode === null
@@ -92,7 +93,7 @@ export const useTitleMenu = ({ title, episode }: MenuTarget, playHref: string): 
           {download.title}
         </Link.MenuAction>
       )}
-      <Link.MenuAction icon="info.circle" onPress={() => openTitle(title.id)}>
+      <Link.MenuAction icon="info.circle" onPress={() => openTitle.onPress()}>
         Go to Title
       </Link.MenuAction>
     </Link.Menu>

@@ -10,7 +10,7 @@ import { ListRow } from "@/components/ui/list-row";
 import { Text } from "@/components/ui/text";
 import { artworkUrl } from "@/lib/artwork";
 import type { TitleCard, TitleDetail, TitleId } from "@/lib/catalog";
-import { openTitle } from "@/lib/open-title";
+import { useTitlePress } from "@/lib/open-title";
 import { useServer } from "@/session/connection";
 
 import { GUTTER } from "@/components/ui/page-layout";
@@ -28,7 +28,7 @@ function SectionHeading({ children }: { readonly children: string }) {
 }
 
 /** The row that opens About This Movie or About This Show (D09). */
-export function AboutRow({ title }: { readonly title: TitleDetail }) {
+export function AboutRow({ title }: { readonly title: Pick<TitleCard, "id" | "kind"> }) {
   return (
     <ListRow
       icon={Info}
@@ -127,12 +127,13 @@ export function AvailableVersions({ title }: { readonly title: TitleDetail }) {
 function SimilarTitle({ title }: { readonly title: TitleCard }) {
   const { mediaUrl } = useServer();
   const poster = artworkUrl(mediaUrl, title.artwork.poster, "poster");
+  const press = useTitlePress(title);
 
   return (
     <Pressable
       accessibilityRole="button"
       accessibilityLabel={title.name}
-      onPress={(press) => openTitle(title.id, press)}
+      {...press}
       className="w-28 gap-1.5 active:opacity-80 regular:w-36 wide:w-42"
     >
       <View className="h-42 w-28 overflow-hidden rounded-control bg-surface-raised regular:h-54 regular:w-36 wide:h-63 wide:w-42">

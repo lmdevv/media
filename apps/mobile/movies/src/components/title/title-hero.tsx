@@ -20,7 +20,7 @@ import { Image } from "@/components/ui/image";
 import { GUTTER } from "@/components/ui/page-layout";
 import { Text } from "@/components/ui/text";
 import { artworkUrl } from "@/lib/artwork";
-import type { TitleDetail } from "@/lib/catalog";
+import type { TitleCard, TitleDetail } from "@/lib/catalog";
 import { watchHref } from "@/lib/routes";
 import { useThemeColor } from "@/lib/theme-color";
 import type { WidthClass } from "@/lib/layout";
@@ -95,7 +95,13 @@ function HeroArtwork({
 
 /** Props for `TitleHero`. */
 export interface TitleHeroProps {
-  readonly title: TitleDetail;
+  /**
+   * What the page has of the title: its answer, or until then the card a press handed it, or null
+   * when the page opened from a link.
+   */
+  readonly title: TitleCard | null;
+  /** The title's answer, or null while it is on its way. */
+  readonly detail: TitleDetail | null;
   readonly scrollY: SharedValue<number>;
   readonly widthClass: WidthClass;
   /** The hero's height in points, from `heroHeight`. */
@@ -107,23 +113,28 @@ export interface TitleHeroProps {
 /**
  * The artwork, the title, its facts, the play row, and the overview. On an iPhone they stack
  * centered under the artwork; on an iPad they sit at the artwork's bottom left, with the title's
- * More button beside Play.
+ * More button beside Play. Until the title answers, it draws what a row's card holds (the artwork,
+ * the name, and the facts it has) and holds the play row's and the overview's places with blank
+ * shapes of their size.
  */
-export function TitleHero({ title, scrollY, widthClass, height, onMore }: TitleHeroProps) {
+export function TitleHero({ title, detail, scrollY, widthClass, height, onMore }: TitleHeroProps) {
   const insets = useSafeAreaInsets();
   const phone = widthClass === "compact";
   const { mediaUrl } = useServer();
-  const backdrop = artworkUrl(mediaUrl, title.artwork.backdrop ?? title.artwork.poster, "backdrop");
-  const logo = artworkUrl(mediaUrl, title.artwork.logo, "card");
-  const play = playAction(title);
-  const myList = useMyListToggle(title.id, title.inMyList);
+  const artwork = title === null ? null : (title.artwork.backdrop ?? title.artwork.poster);
+  const backdrop = artworkUrl(mediaUrl, artwork, "backdrop");
+  const logo = artworkUrl(mediaUrl, title?.artwork.logo ?? null, "card");
 
   return (
     <View className="regular:justify-end" style={phone ? undefined : { minHeight: height }}>
       <HeroArtwork uri={backdrop} height={height} besideText={!phone} scrollY={scrollY} />
       <View style={{ height: insets.top }} />
       <View className={`gap-3 pt-56 pb-1 regular:items-start regular:pt-16 regular:pb-8 ${GUTTER}`}>
-        {logo === undefined ? (
+        {title === null ? (
+          <View className="h-20 justify-center">
+            <Blank className="h-9 w-2/3 self-center regular:self-start" />
+          </View>
+        ) : logo === undefined ? (
           <Text
             variant={phone ? "largeTitle" : "displayName"}
             className="text-center regular:text-left"
@@ -142,47 +153,95 @@ export function TitleHero({ title, scrollY, widthClass, height, onMore }: TitleH
             accessibilityLabel={title.name}
           />
         )}
-        <Text variant={phone ? "metaStrong" : "label"} className="text-center regular:text-left">
-          {titleFacts(title)}
-        </Text>
-        <View className="flex-row items-center gap-3 regular:pt-2">
-          <Button
-            label={play.label}
-            icon={Play}
-            iconFilled
-            className="flex-1 regular:min-w-50 regular:flex-none regular:px-8"
-            disabled={!play.available}
-            onPress={() => router.push(watchHref({ titleId: title.id, episodeId: play.episodeId }))}
-          />
-          <IconButton
-            icon={myList.inList ? Check : Plus}
-            label={myList.inList ? "Remove from My List" : "Add to My List"}
-            variant="glass"
-            size="control"
-            onPress={() => void myList.toggle()}
-          />
-          {phone ? null : (
-            <IconButton
-              icon={Ellipsis}
-              label="More"
-              variant="glass"
-              size="control"
-              onPress={onMore}
-            />
-          )}
-        </View>
-        {myList.error === null ? null : (
-          <Text variant="meta" tone="danger" accessibilityLiveRegion="polite">
-            {myList.error}
+        {title === null ? (
+          <Blank className="h-4 w-1/2 self-center regular:self-start" />
+        ) : (
+          <Text variant={phone ? "metaStrong" : "label"} className="text-center regular:text-left">
+            {titleFacts(detail ?? title)}
           </Text>
         )}
-        {title.overview === null ? null : (
+        {detail === null ? (
+          <View className="flex-row items-center gap-3 regular:pt-2">
+            <Blank className="h-13 flex-1 rounded-pill regular:w-50 regular:flex-none" />
+            <Blank className="size-13 rounded-pill" />
+            {phone ? null : <Blank className="size-13 rounded-pill" />}
+          </View>
+        ) : (
+          <PlayRow title={detail} phone={phone} onMore={onMore} />
+        )}
+        {detail === null ? (
+          <View className="gap-2 regular:max-w-readable regular:pt-1">
+            <Blank className="h-4 w-full" />
+            <Blank className="h-4 w-full" />
+            <Blank className="h-4 w-3/4" />
+          </View>
+        ) : detail.overview === null ? null : (
           <Text numberOfLines={phone ? 4 : 3} className="regular:max-w-readable regular:pt-1">
-            {title.overview}
+            {detail.overview}
           </Text>
         )}
       </View>
     </View>
+  );
+}
+
+/** A blank shape holding the place of what the title's answer will draw. */
+export function Blank({ className }: { readonly className: string }) {
+  return (
+    <View
+      className={`rounded-control bg-surface-raised ${className}`}
+      accessibilityElementsHidden
+      importantForAccessibility="no-hide-descendants"
+    />
+  );
+}
+
+function PlayRow({
+  title,
+  phone,
+  onMore,
+}: {
+  readonly title: TitleDetail;
+  readonly phone: boolean;
+  readonly onMore: () => void;
+}) {
+  const play = playAction(title);
+  const myList = useMyListToggle(title.id, title.inMyList);
+
+  return (
+    <>
+      <View className="flex-row items-center gap-3 regular:pt-2">
+        <Button
+          label={play.label}
+          icon={Play}
+          iconFilled
+          className="flex-1 regular:min-w-50 regular:flex-none regular:px-8"
+          disabled={!play.available}
+          onPress={() => router.push(watchHref({ titleId: title.id, episodeId: play.episodeId }))}
+        />
+        <IconButton
+          icon={myList.inList ? Check : Plus}
+          label={myList.inList ? "Remove from My List" : "Add to My List"}
+          variant="glass"
+          size="control"
+          onPress={() => void myList.toggle()}
+        />
+        {phone ? null : (
+          <IconButton
+            icon={Ellipsis}
+            label="More"
+            variant="glass"
+            size="control"
+            onPress={onMore}
+          />
+        )}
+      </View>
+      {myList.error === null ? null : (
+        <Text variant="meta" tone="danger" accessibilityLiveRegion="polite">
+          {myList.error}
+        </Text>
+      )}
+    </>
   );
 }
 

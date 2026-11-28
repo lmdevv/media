@@ -5,7 +5,7 @@ import { Pressable, View } from "react-native";
 
 import { artworkUrl } from "@/lib/artwork";
 import { episodeCode, facts, progressFraction, progressLabel } from "@/lib/format";
-import { openTitle } from "@/lib/open-title";
+import { useTitlePress } from "@/lib/open-title";
 import { watchHref } from "@/lib/routes";
 import { useServer } from "@/session/connection";
 
@@ -37,6 +37,7 @@ export function ContinueCard({ item }: { readonly item: ContinueWatchingItem }) 
 
   const target = watchHref({ titleId: item.title.id, episodeId: item.episode?.id });
   const menu = useTitleMenu(item, target);
+  const openTitle = useTitlePress(item.title);
 
   // The card stays a plain button for VoiceOver: content inside a `Link.Trigger` loses its own
   // accessibility element. So the trigger is a view inside it, which holds the menu but takes no
@@ -87,7 +88,7 @@ export function ContinueCard({ item }: { readonly item: ContinueWatchingItem }) 
           label={`More info about ${item.title.name}`}
           variant="glass"
           className="absolute right-1 bottom-1"
-          onPress={(press) => openTitle(item.title.id, press)}
+          {...openTitle}
         />
       </View>
     </View>

@@ -10,6 +10,7 @@ import type {
   MediaVersion,
   Progress,
   Season,
+  TitleCard,
   TitleDetail,
 } from "@/lib/catalog";
 
@@ -199,6 +200,21 @@ describe("playAction", () => {
   });
 });
 
+/** The card a row holds of `title`. */
+const card = (title: TitleDetail): TitleCard => ({
+  id: title.id,
+  kind: title.kind,
+  name: title.name,
+  year: title.year,
+  certification: title.certification,
+  ageRating: title.ageRating,
+  runtimeMs: title.runtimeMs,
+  genres: title.genres,
+  artwork: title.artwork,
+  available: title.available,
+  addedAt: title.addedAt,
+});
+
 describe("titleFacts", () => {
   it("writes a movie's year, runtime, rating, and best picture", () => {
     expect(titleFacts(movie())).toBe("2024 · 2h 46m · PG-13 · 4K");
@@ -208,6 +224,11 @@ describe("titleFacts", () => {
   it("writes a show's genre, seasons, and rating", () => {
     expect(titleFacts(show())).toBe("Thriller · 2 seasons · TV-MA");
     expect(titleFacts(show({ seasons: [season(1, 8)] }))).toBe("Thriller · 1 season · TV-MA");
+  });
+
+  it("leaves out what only the title's answer holds when it has a row's card", () => {
+    expect(titleFacts(card(movie()))).toBe("2024 · 2h 46m · PG-13");
+    expect(titleFacts(card(show()))).toBe("Thriller · TV-MA");
   });
 });
 

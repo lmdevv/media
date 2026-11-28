@@ -16,7 +16,7 @@ import { heroFacts, playTarget } from "@/lib/browse";
 import { featuredDetailOf } from "@/lib/catalog";
 import type { FeaturedDetail, TitleCard } from "@/lib/catalog";
 import { billboardHeight, pageAt } from "@/lib/layout";
-import { openTitle } from "@/lib/open-title";
+import { useTitlePress } from "@/lib/open-title";
 import { useThemeColor } from "@/lib/theme-color";
 import { useWidthClass } from "@/lib/use-width-class";
 import { useServer } from "@/session/connection";
@@ -52,6 +52,7 @@ function HeroPage({ title, width }: { readonly title: TitleCard; readonly width:
   const scrim = useThemeColor("--color-scrim");
   const page = useThemeColor("--color-bg");
   const light = useUniwind().theme === "light";
+  const press = useTitlePress(title);
 
   return (
     <View style={{ width }} className="h-full justify-end">
@@ -75,7 +76,7 @@ function HeroPage({ title, width }: { readonly title: TitleCard; readonly width:
         accessibilityRole="button"
         accessibilityLabel={title.name}
         accessibilityHint="Opens the title."
-        onPress={(press) => openTitle(title.id, press)}
+        {...press}
         className="items-center px-5 pb-37 active:opacity-80"
       >
         {logo === undefined ? (
@@ -104,6 +105,7 @@ function BillboardPage({ title, width }: { readonly title: TitleCard; readonly w
   const scrim = useThemeColor("--color-scrim");
   const page = useThemeColor("--color-bg");
   const light = useUniwind().theme === "light";
+  const press = useTitlePress(title);
 
   return (
     <View style={{ width }} className="h-full">
@@ -140,7 +142,7 @@ function BillboardPage({ title, width }: { readonly title: TitleCard; readonly w
         accessibilityRole="button"
         accessibilityLabel={title.name}
         accessibilityHint="Opens the title."
-        onPress={(press) => openTitle(title.id, press)}
+        {...press}
         className="absolute inset-0"
       />
     </View>
@@ -269,6 +271,7 @@ function HeroActions({
   const states = useTitleStates();
   const play = playTarget(title.id, detail === null ? null : { kind: title.kind, ...detail });
   const inList = states.inMyList(title.id);
+  const openTitle = useTitlePress(title);
 
   return (
     <View className={`flex-row items-center gap-3 ${className}`} pointerEvents="box-none">
@@ -281,11 +284,7 @@ function HeroActions({
           onPress={() => router.push(play.href)}
         />
       ) : (
-        <Button
-          label="More Info"
-          className={playClassName}
-          onPress={(press) => openTitle(title.id, press)}
-        />
+        <Button label="More Info" className={playClassName} {...openTitle} />
       )}
       <IconButton
         icon={inList ? Check : Plus}

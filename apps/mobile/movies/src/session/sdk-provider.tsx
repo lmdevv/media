@@ -10,6 +10,7 @@ import type { ReactNode } from "react";
 import { AppState, Platform } from "react-native";
 
 import { appKeychains } from "@/lib/keychains";
+import { TitleHandoffProvider } from "@/lib/open-title";
 
 const THIS_APP: ThisApp = {
   version: Constants.expoConfig?.version,
@@ -36,7 +37,8 @@ const useServerRelease = (mediaUrl: string): void => {
 /**
  * The platform client for `connection`, provided to everything below. Its session lives in this
  * app's own keychain group (D48), and every sign-in goes through the media server's sign-in boundary.
- * It also follows the server's release, so an answer this app can't read asks to update it.
+ * It also follows the server's release, so an answer this app can't read asks to update it, and
+ * holds the cards pressed titles hand their pages.
  */
 export function SdkProvider({
   connection,
@@ -54,7 +56,7 @@ export function SdkProvider({
       storage={appKeychains().sessions}
       storageKey={sessionKeyFor(connection.mediaUrl)}
     >
-      {children}
+      <TitleHandoffProvider>{children}</TitleHandoffProvider>
     </PlatformProvider>
   );
 }
