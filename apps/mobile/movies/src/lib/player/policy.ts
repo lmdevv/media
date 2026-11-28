@@ -108,7 +108,10 @@ export const afterPlayerError = (
 
 /**
  * The capabilities without the path that just failed, so renegotiating picks the next rung: a
- * failed direct file drops progressive playback, and a failed stream, copied or encoded, drops its
+ * failed direct file drops progressive playback; a failed Dolby Vision stream drops Dolby Vision
+ * from what the client declares for its codec, so the service converts it or copies its base layer
+ * (a player may decode the codec and not Dolby Vision, as the iOS simulator decodes HEVC); and a
+ * failed stream, copied or encoded, drops its
  * video codec, so a copy becomes an encode and an HEVC or AV1 encode becomes H.264. H.264 is never
  * dropped: it is the codec every encode falls back to. Null when nothing is left to drop.
  */
@@ -120,6 +123,30 @@ export const withoutFailedPath = (
     return capabilities.containers.length === 0
       ? null
       : Struct.evolve(capabilities, { containers: () => [] });
+  }
+
+  if (stream.video.dynamicRange === "dolby-vision") {
+    const declared = capabilities.videoCodecs.some(
+      (support) =>
+        support.codec === stream.video.codec &&
+        support.dynamicRanges?.includes("dolby-vision") === true,
+    );
+
+    if (declared) {
+      return Struct.evolve(capabilities, {
+        videoCodecs: (supports) =>
+          supports.map((support) =>
+            support.codec === stream.video.codec
+              ? {
+                  ...support,
+                  dynamicRanges: (support.dynamicRanges ?? []).filter(
+                    (range) => range !== "dolby-vision",
+                  ),
+                }
+              : support,
+          ),
+      });
+    }
   }
 
   if (stream.video.codec === "h264") return null;

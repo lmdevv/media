@@ -143,6 +143,29 @@ const stream = (mode: "direct" | "remux" | "transcode-software", codec: string) 
 describe("withoutFailedPath", () => {
   const capabilities = detectCapabilities(chrome);
 
+  it("drops Dolby Vision first after a Dolby Vision stream failed, then the codec", () => {
+    const declared = Struct.evolve(capabilities, {
+      videoCodecs: (supports) => [
+        ...supports,
+        { codec: "hevc", maxBitDepth: 10, dynamicRanges: ["hdr10", "dolby-vision"] as const },
+      ],
+    });
+
+    const failed = {
+      mode: "remux" as const,
+      video: { codec: "hevc", width: 1920, height: 1080, dynamicRange: "dolby-vision" as const },
+    };
+
+    const without = withoutFailedPath(declared, failed);
+
+    expect(
+      without?.videoCodecs.find((support) => support.codec === "hevc")?.dynamicRanges,
+    ).toStrictEqual(["hdr10"]);
+    expect(
+      without && withoutFailedPath(without, failed)?.videoCodecs.map((support) => support.codec),
+    ).not.toContain("hevc");
+  });
+
   it("drops progressive playback after a failed direct file", () => {
     expect(withoutFailedPath(capabilities, stream("direct", "h264"))?.containers).toStrictEqual([]);
   });

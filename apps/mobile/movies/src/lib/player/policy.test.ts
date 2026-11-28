@@ -120,6 +120,24 @@ describe("afterPlayerError", () => {
 });
 
 describe("withoutFailedPath", () => {
+  it("drops Dolby Vision first after a Dolby Vision stream failed, then the codec", () => {
+    const dolbyVision = { ...video, dynamicRange: "dolby-vision" as const };
+    const without = withoutFailedPath(IOS_CAPABILITIES, { mode: "remux", video: dolbyVision });
+
+    expect(
+      without?.videoCodecs.map((support) => [support.codec, support.dynamicRanges ?? []]),
+    ).toStrictEqual([
+      ["h264", []],
+      ["hevc", ["hdr10", "hlg"]],
+    ]);
+    expect(
+      without &&
+        withoutFailedPath(without, { mode: "remux", video: dolbyVision })?.videoCodecs.map(
+          (support) => support.codec,
+        ),
+    ).toStrictEqual(["h264"]);
+  });
+
   it("drops direct play after a direct file failed", () => {
     expect(
       withoutFailedPath(IOS_CAPABILITIES, { mode: "direct", video })?.containers,
