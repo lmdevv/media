@@ -2,13 +2,13 @@ import { join } from "node:path";
 
 import { NodeServices } from "@effect/platform-node";
 import { assert, describe, it, layer } from "@effect/vitest";
-import { Effect, FileSystem, Layer, Path, Result } from "effect";
+import { Context, Effect, FileSystem, Layer, Path, Result } from "effect";
 
 import * as MediaTools from "../media/media-tools.ts";
 import { copyBytes } from "../testing/byte-copies.ts";
 import { ffmpegAvailable } from "../testing/fixture-library.ts";
 import { testConfigLayer } from "../testing/test-config.ts";
-import { PROBE_CLIPS, PROBE_SCRIPT, readbackVerdict } from "./probe-clips.ts";
+import { PROBE_CLIPS, readbackVerdict } from "./probe-clips.ts";
 import { probeFor } from "./video-pipeline.ts";
 import { filterValue, probeCommandArgs, type RunFiles } from "./video-render.ts";
 import { capabilityKey, ImplId } from "./video-ops.ts";
@@ -120,12 +120,60 @@ const drawText = Effect.fnUntraced(function* (root: string, files: RunFiles) {
   return { verdict: readbackVerdict("glyph", yield* fs.readFile(readback)), log };
 });
 
+/** A script that sets "L" in the block font over the probe's glyph window. */
+const BLOCK_SCRIPT = [
+  "[Script Info]",
+  "ScriptType: v4.00+",
+  "PlayResX: 320",
+  "PlayResY: 240",
+  "",
+  "[V4+ Styles]",
+  "Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding",
+  "Style: Default,Lar Blocks,96,&H00FFFFFF,&H00FFFFFF,&H00000000,&H00000000,0,0,0,0,100,100,0,0,1,0,0,5,0,0,0,1",
+  "",
+  "[Events]",
+  "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text",
+  "Dialogue: 0,0:00:00.00,0:00:10.00,Default,,0,0,0,,{\\pos(160,120)}L",
+  "",
+].join("\n");
+
 /**
- * The fonts file the NixOS module gives ffmpeg, which scripts/check-sandbox.sh passes on. ffmpeg
- * runs without HOME, so a fontconfig without the module's prebuilt cache logs that it has nowhere
- * to write one.
+ * The service's tools as `MediaTools` makes them, with `FONTCONFIG_FILE` naming `fonts`: the
+ * service picks its tools' environment when it starts, so the variable is set while a fresh one
+ * starts and put back after.
  */
-const moduleFonts = process.env["FONTCONFIG_FILE"];
+const toolsWith = (fonts: string) =>
+  Effect.acquireUseRelease(
+    Effect.sync(() => {
+      const previous = process.env["FONTCONFIG_FILE"];
+
+      process.env["FONTCONFIG_FILE"] = fonts;
+
+      return previous;
+    }),
+    () =>
+      Layer.build(Layer.fresh(MediaTools.layer).pipe(Layer.provide(testConfigLayer({})))).pipe(
+        Effect.map((context) => Context.get(context, MediaTools.Service)),
+      ),
+    (previous) =>
+      Effect.sync(() => {
+        if (previous === undefined) delete process.env["FONTCONFIG_FILE"];
+        else process.env["FONTCONFIG_FILE"] = previous;
+      }),
+  );
+
+/** Each file in `folder`, with its size and when it last changed. */
+const listing = Effect.fnUntraced(function* (folder: string) {
+  const fs = yield* FileSystem.FileSystem;
+  const path = yield* Path.Path;
+  const names = (yield* fs.readDirectory(folder)).toSorted();
+
+  return yield* Effect.forEach(names, (name) =>
+    fs
+      .stat(path.join(folder, name))
+      .pipe(Effect.map((info) => `${name} ${String(info.size)} ${String(info.mtime)}`)),
+  );
+});
 
 describe.skipIf(!hasFfmpeg)("a text subtitle's files at any path", () => {
   layer(
@@ -176,21 +224,46 @@ describe.skipIf(!hasFfmpeg)("a text subtitle's files at any path", () => {
       60_000,
     );
 
-    scoped.effect.skipIf(moduleFonts === undefined)(
-      "draws the probe's glyph from the fonts FONTCONFIG_FILE names, with no cache to write",
+    scoped.effect(
+      "draws from a fonts file whose cache its own fontconfig built, writing and saying nothing",
       () =>
         Effect.gen(function* () {
           const fs = yield* FileSystem.FileSystem;
           const path = yield* Path.Path;
-          const root = yield* fs.makeTempDirectoryScoped({ prefix: "media-module-fonts-" });
-          const script = path.join(root, "probe-script.ass");
+          const root = yield* fs.makeTempDirectoryScoped({ prefix: "media-fonts-cache-" });
+          const fonts = path.join(root, "fonts");
+          const cache = path.join(root, "cache");
+          const conf = path.join(root, "fonts.conf");
+          const script = path.join(root, "script.ass");
 
-          yield* fs.writeFileString(script, PROBE_SCRIPT);
+          yield* fs.makeDirectory(fonts);
+          yield* fs.makeDirectory(cache);
+          yield* copyBytes(FONT, path.join(fonts, "blocks.ttf"));
+          yield* fs.writeFileString(
+            conf,
+            `<?xml version="1.0"?>\n<!DOCTYPE fontconfig SYSTEM "urn:fontconfig:fonts.dtd">\n<fontconfig><dir>${fonts}</dir><cachedir>${cache}</cachedir></fontconfig>\n`,
+          );
+          yield* fs.writeFileString(script, BLOCK_SCRIPT);
 
-          const { verdict, log } = yield* drawText(root, { subtitle: script });
+          const tools = yield* toolsWith(conf);
+
+          const draw = drawText(root, { subtitle: script }).pipe(
+            Effect.provideService(MediaTools.Service, tools),
+          );
+
+          // The first run's fontconfig, the one ffmpeg links, writes the cache, as the image's
+          // `fc-cache` and the NixOS module's `makeFontsCache` do when they are built; a cache
+          // another fontconfig built is ignored, and fontconfig then writes or complains.
+          yield* draw;
+          const built = yield* listing(cache);
+
+          assert.isNotEmpty(built);
+
+          const { verdict, log } = yield* draw;
 
           assert.isTrue(verdict.passed, verdict.detail);
           assert.notInclude(log, "Fontconfig");
+          assert.deepStrictEqual(yield* listing(cache), built, "the cache was read, not written");
         }).pipe(Effect.scoped),
       60_000,
     );
