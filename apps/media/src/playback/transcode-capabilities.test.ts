@@ -1,6 +1,7 @@
 import { NodeServices } from "@effect/platform-node";
 import { assert, describe, layer } from "@effect/vitest";
 import {
+  Clock,
   Context,
   Duration,
   Effect,
@@ -350,6 +351,12 @@ const crashingInDiagnosis = await standIn({
 /** Making the generated MPEG-2 clip takes four seconds, longer than a negotiation waits. */
 const slowClip = await writeFakeFfmpeg({
   rules: [{ token: "mpeg2-8.mkv.part", runs: "any", delayMs: 4000 }],
+  logInvocations: true,
+});
+
+/** No probe ever answers, so nothing a probe proves is known within any negotiation's budget. */
+const probesHang = await writeFakeFfmpeg({
+  rules: [{ token: "-progress", runs: "probe", hang: true }],
   logInvocations: true,
 });
 
@@ -802,6 +809,39 @@ describe.skipIf(!hasFfmpeg)("TranscodeCapabilities", () => {
             Option.some([2, Duration.toMillis(Duration.hours(2))]),
           );
           assert.deepInclude(known.evidence[0], { _tag: "Probe", outcome: "crashed" });
+        }),
+      60_000,
+    );
+  });
+
+  layer(
+    servicesOf(probesHang, {}, Duration.seconds(5), Duration.seconds(3)),
+    live,
+  )((it) => {
+    it.effect(
+      "plans an interlaced source on the CPU at a cold service's first negotiation, with no probe answered",
+      () =>
+        Effect.gen(function* () {
+          const capabilities = yield* TranscodeCapabilities.Service;
+
+          const interlaced: SourceVideo = {
+            ...JPEG_RANGE,
+            codec: "mpeg2video",
+            pixelFormat: "yuv420p",
+            scan: "interlaced",
+          };
+
+          const started = yield* Clock.currentTimeMillis;
+          const snapshot = yield* capabilities.resolve(request(interlaced));
+          const answered = (yield* Clock.currentTimeMillis) - started;
+
+          // The listing proves every CPU row, its deinterlacer included, so no probe is waited on.
+          assert.deepStrictEqual(
+            plannedImpls(interlaced, snapshot).pipe(Result.getOrElse(() => [])),
+            ["decode.cpu", "deinterlace.cpu", "scale.cpu", "encode.cpu.h264"],
+          );
+          assert.isFalse(snapshot.verified.has(capabilityKey(ImplId("deinterlace.qsv"), "8")));
+          assert.isAtMost(answered, 5000, "within the 3-second budget and the listing");
         }),
       60_000,
     );

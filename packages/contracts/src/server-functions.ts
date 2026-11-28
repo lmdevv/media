@@ -562,7 +562,14 @@ export const serverFunctions = {
     name: "movies.scanner.reprobed",
     path: "movies/scanner:reprobed",
     args: Schema.Struct({ lease: Lease, files: Schema.Array(ReprobedFile) }),
-    result: LeaseAnswer(Schema.Struct({ written: Schema.Int, done: Schema.Int })),
+    result: LeaseAnswer(
+      Schema.Struct({
+        written: Schema.Int,
+        done: Schema.Int,
+        /** Paths whose probe could not fit beside the rest of their file, which keep the old. */
+        unfit: Schema.Array(Schema.String),
+      }),
+    ),
   }),
   musicKnown: serverMutation({
     name: "music.scanner.known",

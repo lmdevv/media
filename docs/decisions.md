@@ -153,11 +153,16 @@ Old movies' Convex project, its SDK client, and its command registry were delete
   frame late, so every seek would start late.
 - Reading files again: a stored probe whose reader revision (`PROBE_REVISION`) is older than the
   service's is read again by the next scan (the one at start, then each reconcile), which writes
-  that file's probe and revision and nothing else: no matching, and no change to its title, its
-  identity, the date it was added, artwork, versions, or progress. A file whose size, modification
-  time, or companions changed is a changed file, read and matched as any scan does. Until its new
-  probe is written a file plays as before, progressive; one ffprobe fails on keeps its stored probe
-  and revision, and each scan tries it again.
+  that file's probe, revision, and HDR flag and nothing else: no matching, and no change to its
+  title, its identity, the date it was added, its edition name, subtitle files, artwork, versions,
+  or progress. A probe that has grown past the media-file bound gives up room from itself alone,
+  as the shared fitter shrinks a probe (its longest chapter titles, track names, and codec names
+  first, then the later half of its longest list of chapters, subtitle tracks, or audio tracks);
+  one that cannot fit without dropping its video tracks, which hold the field order, is not
+  written. A file whose size, modification time, or companions changed is a changed file, read and
+  matched as any scan does. Until its new probe is written a file plays as before, progressive; one
+  ffprobe fails on, or whose probe does not fit, keeps its stored probe and revision, is logged
+  once a scan, and each scan tries it again.
 - A stream's ffmpeg pauses (`SIGSTOP`) once its output runs `STREAM_BUFFER_AHEAD_SECONDS` (120)
   past the furthest segment the player asked for, and continues (`SIGCONT`) when the player is
   within half of that. A remux copies at disk speed, and without the pause every play wrote most of

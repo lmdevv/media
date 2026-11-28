@@ -435,7 +435,6 @@ const seekAnswer = Effect.fn(function* (token: string, streamId: string, positio
   return { status: response.status, body: yield* response.json.pipe(Effect.orDie) };
 });
 
-/** The index of the segment of the playlist at `url` that holds `seconds` into the stream. */
 /** The length of each segment the playlist at `url` lists, in order. */
 const durationsOf = Effect.fn(function* (url: string) {
   const playlist = yield* fetchAnswer(url);
@@ -453,6 +452,7 @@ const segmentStart = Effect.fn(function* (url: string, index: number) {
   return durations.slice(0, index).reduce((start, duration) => start + duration, 0);
 });
 
+/** The index of the segment of the playlist at `url` that holds `seconds` into the stream. */
 const segmentHolding = Effect.fn(function* (url: string, seconds: number) {
   const durations = yield* durationsOf(url);
 

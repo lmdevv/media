@@ -15,6 +15,7 @@ import {
   insertTitleGenre,
   patchEpisode,
   patchMediaFile,
+  patchMediaFileProbe,
   patchSeason,
   replaceMediaFile,
   patchTitle,
@@ -664,18 +665,23 @@ export const upsertScannedItem = async (
 /** The worst case of `refreshProbe`: the file looked up and written. */
 export const REFRESH_COST = work(4, 2);
 
+/** What `refreshProbe` did with a probe read again. */
+export type Refreshed = "written" | "unfit" | "skipped";
+
 /**
  * Writes the probe a scan read again of a file it found unchanged, the reader revision that read
  * it, and the HDR flag that probe decides, and nothing else: the file keeps its title, episode,
  * version name, added date, subtitles, scrub thumbnails, and the history pointing at its title.
- * A file missing, gone, or changed since the scan found it (another size or modification time) is
- * left for the scan that reads it as changed. Answers whether it wrote.
+ * Room for a larger probe comes out of the probe alone (`patchMediaFileProbe`); a probe that
+ * cannot fit without its video tracks is not written (`unfit`), so the file keeps its old probe
+ * and revision. A file missing, gone, or changed since the scan found it (another size or
+ * modification time) is left for the scan that reads it as changed (`skipped`).
  */
 export const refreshProbe = async (
   db: Db,
   libraryId: Id<"libraries">,
   file: Infer<typeof reprobedFile>,
-): Promise<boolean> => {
+): Promise<Refreshed> => {
   const stored = await fileAt(db, libraryId, file.path);
 
   if (
@@ -684,16 +690,12 @@ export const refreshProbe = async (
     stored.sizeBytes !== file.sizeBytes ||
     stored.mtimeMs !== file.mtimeMs
   ) {
-    return false;
+    return "skipped";
   }
 
-  await patchMediaFile(db, stored, {
-    probe: file.probe,
-    probeRevision: file.probeRevision,
-    hdr: (file.probe.video[0]?.hdr ?? "none") !== "none",
-  });
-
-  return true;
+  return (await patchMediaFileProbe(db, stored, file.probe, file.probeRevision))
+    ? "written"
+    : "unfit";
 };
 
 /**

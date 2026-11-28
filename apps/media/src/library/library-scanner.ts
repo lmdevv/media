@@ -62,8 +62,16 @@ export interface ScanSummary {
   readonly discovered: number;
   readonly unchanged: number;
   readonly processed: number;
-  /** Unchanged files probed again because an older reader revision made their stored probe. */
+  /**
+   * Unchanged files probed again because an older reader revision made their stored probe, and the
+   * new probe stored.
+   */
   readonly reprobed: number;
+  /**
+   * Unchanged files probed again whose new probe the store left out, as each changed since or its
+   * probe could not fit beside the rest of its row; they keep their old probe and revision.
+   */
+  readonly reprobeKept: number;
   readonly failed: number;
   readonly missing: number;
   /** Symbolic links skipped because they point outside the library root. */
@@ -290,6 +298,7 @@ interface Counters {
   unchanged: number;
   processed: number;
   reprobed: number;
+  reprobeKept: number;
   failed: number;
   missing: number;
 }
@@ -432,6 +441,7 @@ export const make = Effect.gen(function* () {
         unchanged: 0,
         processed: 0,
         reprobed: 0,
+        reprobeKept: 0,
         failed: 0,
         missing: 0,
       };
@@ -445,6 +455,7 @@ export const make = Effect.gen(function* () {
           unchanged: counters.unchanged,
           processed: counters.processed,
           reprobed: counters.reprobed,
+          reprobeKept: counters.reprobeKept,
           failed: counters.failed,
           missing: counters.missing,
         });
@@ -882,10 +893,23 @@ export const make = Effect.gen(function* () {
 
             if (scanned.length > 0) yield* sink.upsertBatch(libraryFolder, scanned);
 
-            if (reprobed.length > 0) yield* sink.reprobed(libraryFolder, reprobed);
+            const stored =
+              reprobed.length > 0
+                ? yield* sink.reprobed(libraryFolder, reprobed)
+                : { written: 0, unfit: [] };
+
+            for (const relativePath of stored.unfit) {
+              yield* Effect.logWarning("LibraryScanner.probe_kept").pipe(
+                Effect.annotateLogs({
+                  relativePath,
+                  reason: "the new probe does not fit beside the rest of the file's row",
+                }),
+              );
+            }
 
             counters.processed += scanned.length;
-            counters.reprobed += reprobed.length;
+            counters.reprobed += stored.written;
+            counters.reprobeKept += reprobed.length - stored.written;
             yield* report("processing");
           }),
         ),
@@ -913,6 +937,7 @@ export const make = Effect.gen(function* () {
         unchanged: counters.unchanged,
         processed: counters.processed,
         reprobed: counters.reprobed,
+        reprobeKept: counters.reprobeKept,
         failed: counters.failed,
         missing: counters.missing,
         rejectedLinks: walked.rejectedLinks,

@@ -86,6 +86,8 @@ export const layer: Layer.Layer<Service | LibrarySink.Service | FileResolver.Ser
           });
         }),
         reprobed: Effect.fn("MemoryLibrary.reprobed")(function* (folder, reprobedFiles) {
+          let written = 0;
+
           yield* updateFiles((files) => {
             for (const reprobedFile of reprobedFiles) {
               const fileId = fileIdOf(folder.libraryId, reprobedFile.relativePath);
@@ -104,9 +106,13 @@ export const layer: Layer.Layer<Service | LibrarySink.Service | FileResolver.Ser
                     probeRevision: reprobedFile.probeRevision,
                   }),
                 });
+                written += 1;
               }
             }
           });
+
+          // Its records have no size bound, so every probe fits.
+          return { written, unfit: [] };
         }),
         markMissing: Effect.fn("MemoryLibrary.markMissing")(function* (folder, relativePaths) {
           yield* updateFiles((files) => {

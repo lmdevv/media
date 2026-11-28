@@ -150,25 +150,33 @@ export const missing = serverMutation({
  * revision reads more: each file's probe and revision, and nothing else of it, as many as the
  * call's budget admits. It never matches a title, so a probe read again cannot move a file. A
  * file changed since the scan found it is skipped and counted done; the scan that reads it as
- * changed writes it. Answers how many it got through (`done`) and how many it wrote.
+ * changed writes it. Answers how many it got through (`done`), how many it wrote, and the paths
+ * whose probe could not fit beside the rest of their file (`unfit`), which keep their old probe.
  */
 export const reprobed = serverMutation({
   args: { lease, files: v.array(reprobedFile) },
-  returns: leaseAnswer(v.object({ written: v.number(), done: v.number() })),
+  returns: leaseAnswer(
+    v.object({ written: v.number(), done: v.number(), unfit: v.array(v.string()) }),
+  ),
   handler: (ctx, { lease: held, files }) =>
     withScanLease(ctx, "movies", held, async (scan) => {
       checkBatch(files.length);
       scan.admit(files.map((file) => file.path));
 
-      const written = await whileBudget(
+      const refreshed = await whileBudget(
         budgetFor(CALL_COST),
         files,
         (file) => (pathFits(file.path) ? REFRESH_COST : NO_WORK),
-        async (file) => pathFits(file.path) && refreshProbe(ctx.db, scan.library._id, file),
+        async (file) =>
+          pathFits(file.path) ? refreshProbe(ctx.db, scan.library._id, file) : "skipped",
       );
 
       return {
-        value: { written: written.filter(Boolean).length, done: written.length },
+        value: {
+          written: refreshed.filter((outcome) => outcome === "written").length,
+          done: refreshed.length,
+          unfit: files.filter((_, index) => refreshed[index] === "unfit").map((file) => file.path),
+        },
         added: 0,
         removed: 0,
       };

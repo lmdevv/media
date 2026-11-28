@@ -77,6 +77,7 @@ const describe = (summaries: ReadonlyArray<ScanSummary>): string => {
     `${String(total((s) => s.processed))} new or changed`,
     `${String(total((s) => s.unchanged))} unchanged`,
     `${String(total((s) => s.reprobed))} probed again`,
+    `${String(total((s) => s.reprobeKept))} kept their probe`,
     `${String(total((s) => s.missing))} missing`,
     `${String(total((s) => s.failed))} unreadable`,
   ].join(", ");
@@ -294,7 +295,15 @@ const makeSink = Effect.fnUntraced(function* (
       files.map((file) => toReprobedFile(folder, file)),
       SCANNER_BATCH_MAX,
       (batch) => leased(session.call(serverFunctions.moviesReprobed, { lease, files: batch })),
-    ).pipe(Effect.asVoid, Effect.mapError(fail("reprobed")));
+    ).pipe(
+      Effect.map((answers): LibrarySink.Reprobing => ({
+        written: answers.reduce((sum, { answer }) => sum + answer.written, 0),
+        unfit: answers.flatMap(({ answer }) =>
+          answer.unfit.flatMap((path) => Option.toArray(relativeTo(folder.root, path))),
+        ),
+      })),
+      Effect.mapError(fail("reprobed")),
+    );
 
   const markMissing = (folder: LibrarySink.LibraryFolder, relativePaths: ReadonlyArray<string>) =>
     sendAll(
@@ -448,7 +457,12 @@ export const handler = Effect.gen(function* () {
             onNone: () => Effect.void,
             onSome: (latest) =>
               report({
-                done: latest.processed + latest.reprobed + latest.unchanged + latest.failed,
+                done:
+                  latest.processed +
+                  latest.reprobed +
+                  latest.reprobeKept +
+                  latest.unchanged +
+                  latest.failed,
                 total: latest.discovered,
                 message: latest.phase,
               }),

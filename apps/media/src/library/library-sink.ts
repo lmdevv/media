@@ -60,6 +60,12 @@ export const ReprobedFile = Schema.Struct({
 /** A file probed again. */
 export interface ReprobedFile extends Schema.Schema.Type<typeof ReprobedFile> {}
 
+/** What the store did with probes read again: how many it stored, and the files it could not fit. */
+export interface Reprobing {
+  readonly written: number;
+  readonly unfit: ReadonlyArray<string>;
+}
+
 /** Scan progress counters. */
 export const ScanProgress = Schema.Struct({
   phase: Schema.Literals(["walking", "processing", "reconciling", "done"]),
@@ -74,6 +80,11 @@ export const ScanProgress = Schema.Struct({
   processed: Schema.Int,
   /** Unchanged files whose stored probe an older reader made, probed again and stored. */
   reprobed: Schema.Int,
+  /**
+   * Unchanged files probed again whose new probe was not stored, as each changed since or its
+   * probe could not fit beside the rest of its row; they keep their old probe and revision.
+   */
+  reprobeKept: Schema.Int,
   /** Files that could not be probed. */
   failed: Schema.Int,
   /** Previously known files no longer on disk. */
@@ -115,12 +126,13 @@ export interface Interface {
   /**
    * Stores the probes of files probed again and the revision that read them, and nothing else of
    * them: no title, episode, or companion changes, so a probe read again never moves a file. A
-   * file changed since (another size or modification time) is left as stored.
+   * file changed since (another size or modification time) is left as stored, as is one whose
+   * probe cannot fit beside the rest of its row (`unfit`, relative to the folder).
    */
   readonly reprobed: (
     folder: LibraryFolder,
     files: ReadonlyArray<ReprobedFile>,
-  ) => Effect.Effect<void, LibrarySinkFailed>;
+  ) => Effect.Effect<Reprobing, LibrarySinkFailed>;
   /** Marks files missing. The store keeps their watch history until an administrator purges them. */
   readonly markMissing: (
     folder: LibraryFolder,
