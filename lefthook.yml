@@ -16,6 +16,8 @@ pre-commit:
       run: scripts/check-deploy.sh
     - name: history
       run: scripts/check-history.sh apps packages scripts nix deploy .agents tools docs README.md AGENTS.md
+    - name: path-case
+      run: scripts/check-path-case.sh
     - name: commands
       run: pnpm --filter @media/commands check
     - name: pnpm-deps-hash
