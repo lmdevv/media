@@ -38,7 +38,7 @@ import { realPathInsideApprovedRoots } from "../playback/file-resolver.ts";
 import * as PlaybackToken from "../playback/playback-grants.ts";
 import { artPath, imageContentType, isArtHash } from "./art-store.ts";
 import { contentTypeFor, isBrowserPlayable } from "./audio-format.ts";
-import { type Classified, COPIED_KINDS, coverKind } from "./cover-copy.ts";
+import { type Classified, ClassifyWithin, COPIED_KINDS, coverKind } from "./cover-copy.ts";
 import { isFragmentedProfile } from "./ffmpeg-args.ts";
 import * as Files from "./music-files.ts";
 import {
@@ -111,6 +111,7 @@ export const layer: Layer.Layer<
     const transcoder = yield* MusicTranscoder.Service;
     const fs = yield* FileSystem.FileSystem;
     const paths = yield* Path.Path;
+    const classifyWithin = yield* ClassifyWithin;
 
     // A cover's kind, by its content hash, which names the same bytes for good, told in one
     // forward pass over one open handle (`coverKind`). An `undecided` kind is told again later.
@@ -125,13 +126,16 @@ export const layer: Layer.Layer<
           const file = yield* fs.open(path).pipe(Effect.mapError(failed("open")));
           const info = yield* file.stat.pipe(Effect.mapError(failed("stat")));
 
-          return yield* coverKind(Number(info.size), (offset, length) =>
-            file
-              .readAlloc(length, { position: BigInt(offset) })
-              .pipe(
-                Effect.map(Option.getOrElse(() => new Uint8Array(0))),
-                Effect.mapError(failed("read")),
-              ),
+          return yield* coverKind(
+            Number(info.size),
+            (offset, length) =>
+              file
+                .readAlloc(length, { position: BigInt(offset) })
+                .pipe(
+                  Effect.map(Option.getOrElse(() => new Uint8Array(0))),
+                  Effect.mapError(failed("read")),
+                ),
+            classifyWithin,
           );
         }).pipe(Effect.scoped);
       },

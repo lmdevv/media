@@ -67,11 +67,16 @@ beforeAll(async () => {
   photoPng = cover("photo.png");
 });
 
+/** The server's time for telling a cover's kind (`ClassifyWithin`). */
+const WITHIN = Duration.seconds(2);
+
 /** The kind of the cover whose whole file is `bytes`. */
 const kindOf = (bytes: Uint8Array) =>
   Effect.runSync(
-    coverKind(bytes.length, (offset, length) =>
-      Effect.succeed(bytes.subarray(offset, offset + length)),
+    coverKind(
+      bytes.length,
+      (offset, length) => Effect.succeed(bytes.subarray(offset, offset + length)),
+      WITHIN,
     ),
   );
 
@@ -194,14 +199,17 @@ const readsOf = async (bytes: Uint8Array, size = bytes.length) => {
     [];
 
   const kind = await Effect.runPromise(
-    coverKind(size, (offset, length) =>
-      Effect.sync(() => {
-        const got = bytes.subarray(offset, offset + length);
+    coverKind(
+      size,
+      (offset, length) =>
+        Effect.sync(() => {
+          const got = bytes.subarray(offset, offset + length);
 
-        reads.push({ offset, asked: length, got: got.length });
+          reads.push({ offset, asked: length, got: got.length });
 
-        return got;
-      }),
+          return got;
+        }),
+      WITHIN,
     ),
   );
 
@@ -263,11 +271,14 @@ describe("telling a cover's kind", () => {
         Effect.all(
           [
             // A read that never answers, and reads that answer slowly.
-            coverKind(photo.length, () => Effect.never),
-            coverKind(fine.length, (offset, length) =>
-              Effect.sleep(Duration.millis(500)).pipe(
-                Effect.as(fine.subarray(offset, offset + length)),
-              ),
+            coverKind(photo.length, () => Effect.never, WITHIN),
+            coverKind(
+              fine.length,
+              (offset, length) =>
+                Effect.sleep(Duration.millis(500)).pipe(
+                  Effect.as(fine.subarray(offset, offset + length)),
+                ),
+              WITHIN,
             ),
           ],
           { concurrency: 2 },

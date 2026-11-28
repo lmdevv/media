@@ -1,6 +1,6 @@
 import { crc32 } from "node:zlib";
 
-import { Duration, Effect } from "effect";
+import { Context, Duration, Effect } from "effect";
 
 import type { CoverFormat } from "../artwork/artwork-store.ts";
 import type { FileError } from "./music-files.ts";
@@ -144,9 +144,13 @@ export const MAX_COVER_BYTES = 16 * 1024 * 1024;
 
 /**
  * How long telling a cover's kind may take. One pass over `MAX_COVER_BYTES` from a local disk takes
- * tens of milliseconds; a walk still going after this is `undecided`.
+ * tens of milliseconds; a walk still going after this is `undecided`. The time is the server's
+ * clock from the walk's start, so it also counts time the server spent on other work.
  */
-const CLASSIFY_WITHIN = Duration.seconds(2);
+export const ClassifyWithin = Context.Reference<Duration.Duration>(
+  "@media/server/CoverCopy/ClassifyWithin",
+  { defaultValue: () => Duration.seconds(2) },
+);
 
 /** A cover read in one forward pass. */
 interface Forward {
@@ -497,7 +501,7 @@ const pngKind = Effect.fnUntraced(function* (
 
 /**
  * What telling a cover's kind gives: its kind, or `undecided` when the walk took longer than
- * `CLASSIFY_WITHIN`, served as stored this time and told again on a later request.
+ * `ClassifyWithin`, served as stored this time and told again on a later request.
  */
 export type Classified = CoverKind | "undecided";
 
@@ -520,18 +524,23 @@ const walk = Effect.fnUntraced(function* (
 /**
  * The kind of the cover `read` gives, `size` bytes long: one of `COPIED_KINDS` when one forward pass
  * over the whole file shows it as one, or `unproven`, served as stored. A cover over
- * `MAX_COVER_BYTES` is `unproven` unread; a pass longer than `CLASSIFY_WITHIN` is `undecided`.
+ * `MAX_COVER_BYTES` is `unproven` unread; a pass longer than `within` (`ClassifyWithin`) is
+ * `undecided`.
  *
  * The pass reads at most `size` bytes, in order, each at most once, in about `size / READ_BLOCK`
  * reads, plus one for each range of a PNG it skips, and scans them once: its cost grows with the
  * file's size alone.
  */
-export const coverKind = (size: number, read: ReadCover): Effect.Effect<Classified, FileError> =>
+export const coverKind = (
+  size: number,
+  read: ReadCover,
+  within: Duration.Duration,
+): Effect.Effect<Classified, FileError> =>
   size > MAX_COVER_BYTES
     ? Effect.succeed("unproven")
     : walk(size, read).pipe(
         Effect.timeoutOrElse({
-          duration: CLASSIFY_WITHIN,
+          duration: within,
           orElse: () => Effect.succeed("undecided" as const),
         }),
       );
