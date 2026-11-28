@@ -119,6 +119,8 @@ export interface Session {
    * it, signing in as another account or session changes it. None while signed out.
    */
   readonly identity: Stream.Stream<Option.Option<string>>;
+  /** Who is signed in now, as `identity` names them, without waiting for a change. */
+  readonly currentIdentity: Effect.Effect<Option.Option<string>>;
   /**
    * Signs in and stores the session. Refused credentials fail with `Unauthenticated`, a setup once
    * the server has an owner with `Conflict`, and a used or expired invite or reset code with
@@ -494,6 +496,7 @@ const make = Effect.fn("Platform.make")(function* (url: string, signInRoute: Aut
       status: engine.status,
       currentStatus: engine.currentStatus,
       identity: engine.identity,
+      currentIdentity: engine.currentIdentity,
       signIn,
       signInAsGuest: (guest) => signIn(Credentials.Guest(guest)),
       startDeviceSignIn,

@@ -3,6 +3,7 @@ import {
   Data,
   Effect,
   Fiber,
+  Layer,
   ManagedRuntime,
   Match,
   Option,
@@ -21,6 +22,8 @@ import type { KeyValueStore } from "../token-storage";
 import * as Client from "./client";
 import type { Command, Id, Params, PromiseBuilder, PromiseQuery } from "./command";
 import { promiseMethods } from "./generated/commands";
+import * as SavedAnswers from "./saved-answers";
+import type { SaveAnswers } from "./saved-answers";
 
 /** Where the platform client connects and where it keeps its session. */
 export interface PlatformOptions {
@@ -48,6 +51,11 @@ export interface PlatformOptions {
    * use the same key share one sign-in (ADR 0020).
    */
   readonly storageKey?: string | undefined;
+  /**
+   * The queries whose answers this client saves for the next launch, which shows them until the
+   * server answers, and where; nothing is saved when omitted.
+   */
+  readonly saved?: SaveAnswers | undefined;
 }
 
 /** A username and password to sign in with. */
@@ -208,18 +216,30 @@ const storageLayer = (storage: KeyValueStore | SharedStore | undefined, key: str
     : TokenStorage.layerKeyValue(storage, key);
 };
 
-/** Opens the platform client. The connection opens on the first call. */
+const savedLayer = (options: PlatformOptions) =>
+  options.saved === undefined
+    ? SavedAnswers.layerNone
+    : SavedAnswers.layer(options.saved, options.url, SavedAnswers.startReading(options.saved.file));
+
+/**
+ * Opens the platform client. The connection opens on the first call, and the file of saved answers
+ * is read at once.
+ */
 export const createPlatform = (options: PlatformOptions): PlatformSdk => {
   const runtime = ManagedRuntime.make(
-    Client.layer({
-      url: options.url,
-      connection: options.connection ?? "websocket",
-      storage: storageLayer(options.storage, options.storageKey ?? DEFAULT_STORAGE_KEY),
-      signIn:
-        options.signInFetch === undefined
-          ? SignInRoute.Boundary({ url: options.signInUrl })
-          : SignInRoute.Boundary({ url: options.signInUrl, fetch: options.signInFetch }),
-    }),
+    savedLayer(options).pipe(
+      Layer.provideMerge(
+        Client.layer({
+          url: options.url,
+          connection: options.connection ?? "websocket",
+          storage: storageLayer(options.storage, options.storageKey ?? DEFAULT_STORAGE_KEY),
+          signIn:
+            options.signInFetch === undefined
+              ? SignInRoute.Boundary({ url: options.signInUrl })
+              : SignInRoute.Boundary({ url: options.signInUrl, fetch: options.signInFetch }),
+        }),
+      ),
+    ),
   );
 
   const withClient = <A, E>(f: (client: Client.Interface) => Effect.Effect<A, E>) =>
@@ -267,13 +287,31 @@ export const createPlatform = (options: PlatformOptions): PlatformSdk => {
         Stream.unwrap(Effect.map(Client.Client, (client) => client.watch(command, params))),
       );
 
+    const openSavedOf = (params: Params<Args>, key: string) => () =>
+      QueryWatch.fromStream(
+        runtime,
+        Stream.unwrap(
+          Effect.gen(function* () {
+            const client = yield* Client.Client;
+            const saved = yield* SavedAnswers.SavedAnswers;
+
+            return Stream.tap(client.watch(command, params), (result) =>
+              saved.keep(command, key, result),
+            );
+          }),
+        ),
+        Stream.unwrap(
+          Effect.map(SavedAnswers.SavedAnswers, (saved) => saved.standIn(command, key)),
+        ),
+      );
+
     const watch = (...params: Params<Args>): QueryWatch.QueryWatch<Result> =>
       Option.match(keyInSchemaOrder(params), {
         onNone: openOf(params),
         onSome: (key) => {
           releaseKeptOnSessionChange();
 
-          return group.watch(key, openOf(params));
+          return group.watch(key, openSavedOf(params, key));
         },
       });
 
@@ -283,7 +321,7 @@ export const createPlatform = (options: PlatformOptions): PlatformSdk => {
         onSome: (key) => {
           releaseKeptOnSessionChange();
 
-          return group.preload(key, openOf(params));
+          return group.preload(key, openSavedOf(params, key));
         },
       });
 

@@ -20,10 +20,13 @@ import { createPlatform } from "./platform/promise";
 import type { PlatformSdk } from "./platform/promise";
 import * as QueryWatch from "./query-watch";
 import type { QueryState } from "./query-watch";
+import type { SaveAnswers } from "./platform/saved-answers";
 import type { SharedStore } from "./shared-store";
 import type { KeyValueStore } from "./token-storage";
 
 export type { QueryState } from "./query-watch";
+
+export type { SaveAnswers, SavedAnswersFile } from "./platform/saved-answers";
 
 /** The session's status, read by every `usePlatformStatus` from one subscription. */
 interface StatusStore {
@@ -77,6 +80,12 @@ export interface PlatformProviderProps {
    * origin shares, so one sign-in serves them all (ADR 0020).
    */
   readonly storageKey?: string;
+  /**
+   * The queries whose answers the client saves for the next launch, and where (`SaveAnswers`);
+   * nothing is saved when omitted. Pass the same object on every render: a new one opens a new
+   * client.
+   */
+  readonly saved?: SaveAnswers;
   readonly children: ReactNode;
 }
 
@@ -86,7 +95,7 @@ export interface PlatformProviderProps {
  * use; children render once it exists.
  */
 export const PlatformProvider = (props: PlatformProviderProps): ReactNode => {
-  const { url, signInUrl, storage, storageKey } = props;
+  const { url, signInUrl, storage, storageKey, saved } = props;
   const [open, setOpen] = useState<OpenPlatform | null>(null);
 
   useEffect(() => {
@@ -96,6 +105,7 @@ export const PlatformProvider = (props: PlatformProviderProps): ReactNode => {
       connection: "websocket",
       storage,
       storageKey,
+      saved,
     });
 
     setOpen({ platform, status: followStatus(platform) });
@@ -104,7 +114,7 @@ export const PlatformProvider = (props: PlatformProviderProps): ReactNode => {
       setOpen(null);
       void platform.dispose();
     };
-  }, [url, signInUrl, storage, storageKey]);
+  }, [url, signInUrl, storage, storageKey, saved]);
 
   if (open === null) return null;
 
