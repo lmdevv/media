@@ -107,14 +107,30 @@ describe.runIf(domains.length > 0)("image subtitles burned in on this machine's 
           const root = yield* fs.makeTempDirectoryScoped({ prefix: "media-pgs-4k-" });
 
           for (const sup of ["pgs-1080.sup", "pgs-720.sup"]) {
-            // Noise keeps the picture at 40 Mbit/s, so ffmpeg's probe reads about a second and
-            // the bar, from 6 s to 8 s, is past it. The noise never reaches the bar's white.
+            // x264's CBR filler holds the flat gray picture at 40 Mbit/s, so ffmpeg's probe reads
+            // about a second and the bar, from 6 s to 8 s, is past it. Nothing in the picture
+            // comes near the 200 `brightBox` counts from but the bar's white.
             const late = yield* film(
               root,
               `${sup}.mkv`,
-              "color=c=gray:s=3840x2160:r=24:d=9,noise=alls=30:allf=t",
+              "color=c=gray:s=3840x2160:r=24:d=9",
               ["-itsoffset", "6", "-i", join(FIXTURES, sup)],
-              ["-b:v", "40M", "-g", "24", "-c:s", "copy"],
+              [
+                "-b:v",
+                "40M",
+                "-minrate",
+                "40M",
+                "-maxrate",
+                "40M",
+                "-bufsize",
+                "40M",
+                "-x264-params",
+                "nal-hrd=cbr",
+                "-g",
+                "24",
+                "-c:s",
+                "copy",
+              ],
             );
 
             for (const domain of domains) {
@@ -134,7 +150,7 @@ describe.runIf(domains.length > 0)("image subtitles burned in on this machine's 
     );
 
     it.effect(
-      "draws a 3840x2160 PGS canvas over a 4K picture at its full detail",
+      "draws a 3840x2160 PGS canvas over a 4K picture where the CPU chain does, held at 1920x1080",
       () =>
         Effect.gen(function* () {
           const fs = yield* FileSystem.FileSystem;
@@ -164,17 +180,150 @@ describe.runIf(domains.length > 0)("image subtitles burned in on this machine's 
             );
 
             near(brightBox(gray, UHD.width), brightBox(cpu, UHD.width), domain);
-            // Uploaded at its own size, not halved and scaled back up: its edge as sharp as the
-            // CPU's, which steps from the frame to the white in one sample where a canvas held at
-            // 1920x1080 and scaled up on the device ramps over four.
-            assert.isAtMost(
-              edgeWidth(gray, UHD.width, 984, 1920),
-              edgeWidth(cpu, UHD.width, 984, 1920) + 1,
-              `${domain}: the bar's edge`,
-            );
+            // A GPU row scales no subtitle up on the CPU, so the canvas is held at its stated
+            // 1920x1080 and scaled back up on the device: its edge ramps where the CPU's steps
+            // from the frame to the white in one sample.
+            assert.isAtMost(edgeWidth(cpu, UHD.width, 984, 1920), 1, "the CPU's edge");
+            assert.isAtMost(edgeWidth(gray, UHD.width, 984, 1920), 6, `${domain}: the bar's edge`);
           }
         }).pipe(Effect.scoped),
       300_000,
+    );
+
+    it.effect(
+      "draws a PGS canvas over 2.39:1 pictures, whose drawn widths are odd, where the CPU chain does",
+      () =>
+        Effect.gen(function* () {
+          const fs = yield* FileSystem.FileSystem;
+          const root = yield* fs.makeTempDirectoryScoped({ prefix: "media-pgs-scope-" });
+
+          // At the pictures' heights the 16:9 canvas is 1429 and 2859 samples wide.
+          for (const size of [
+            { width: 1920, height: 804 },
+            { width: 3840, height: 1608 },
+          ]) {
+            const name = `${String(size.width)}x${String(size.height)}`;
+
+            const scope = yield* film(
+              root,
+              `${name}.mkv`,
+              `color=c=gray:s=${name}:r=24:d=4`,
+              ["-itsoffset", "1", "-i", join(FIXTURES, "pgs-1080.sup")],
+              ["-c:s", "copy"],
+            );
+
+            const cpu = yield* burnedFrame(
+              scope,
+              burnPlan(size, "hdmv_pgs_subtitle", 1, "cpu"),
+              join(root, `${name}-cpu`),
+              2,
+            );
+
+            for (const domain of domains) {
+              const gray = yield* burnedFrame(
+                scope,
+                burnPlan(size, "hdmv_pgs_subtitle", 1, domain),
+                join(root, `${name}-${domain}`),
+                2,
+              );
+
+              near(brightBox(gray, size.width), brightBox(cpu, size.width), `${name} on ${domain}`);
+            }
+          }
+        }).pipe(Effect.scoped),
+      300_000,
+    );
+
+    it.effect(
+      "draws PGS, DVB, XSUB, and DVD tracks intact over 480-line and 2.39:1 pictures, as the CPU does",
+      () =>
+        Effect.gen(function* () {
+          const fs = yield* FileSystem.FileSystem;
+          const root = yield* fs.makeTempDirectoryScoped({ prefix: "media-image-small-" });
+
+          // VA-API's upload tears some sizes into slanted bands, such as the 853x480 a PGS canvas
+          // is drawn at over 1126x480, so the GPU rows upload none taken from the picture.
+          for (const size of [
+            { width: 1126, height: 480 },
+            { width: 854, height: 480 },
+            { width: 1920, height: 804 },
+          ]) {
+            const name = `${String(size.width)}x${String(size.height)}`;
+
+            const picture = `color=c=gray:s=${name}:r=25:d=5`;
+
+            const tracks = [
+              {
+                codec: "hdmv_pgs_subtitle",
+                file: yield* film(
+                  root,
+                  `${name}-pgs.mkv`,
+                  picture,
+                  ["-itsoffset", "1", "-i", join(FIXTURES, "pgs-1080.sup")],
+                  ["-c:s", "copy"],
+                ),
+                at: 2,
+              },
+              {
+                codec: "dvb_subtitle",
+                file: yield* film(
+                  root,
+                  `${name}-dvb.ts`,
+                  picture,
+                  ["-itsoffset", "1", "-i", join(FIXTURES, "pgs-1080.sup")],
+                  ["-c:s", "dvbsub"],
+                ),
+                at: 3.5,
+              },
+              {
+                codec: "xsub",
+                file: yield* film(
+                  root,
+                  `${name}-xsub.avi`,
+                  picture,
+                  ["-canvas_size", "720x576", "-i", VOBSUB],
+                  ["-c:s", "xsub"],
+                ),
+                at: 1,
+              },
+              {
+                codec: "dvd_subtitle",
+                file: yield* film(
+                  root,
+                  `${name}-dvd.mkv`,
+                  picture,
+                  ["-i", VOBSUB],
+                  ["-c:s", "copy"],
+                ),
+                at: 1,
+              },
+            ];
+
+            for (const track of tracks) {
+              const cpu = brightBox(
+                yield* burnedFrame(
+                  track.file,
+                  burnPlan(size, track.codec, 1, "cpu"),
+                  join(root, `${name}-${track.codec}-cpu`),
+                  track.at,
+                ),
+                size.width,
+              );
+
+              for (const domain of domains) {
+                const gray = yield* burnedFrame(
+                  track.file,
+                  burnPlan(size, track.codec, 1, domain),
+                  join(root, `${name}-${track.codec}-${domain}`),
+                  track.at,
+                );
+
+                near(brightBox(gray, size.width), cpu, `${track.codec} over ${name} on ${domain}`);
+              }
+            }
+          }
+        }).pipe(Effect.scoped),
+      600_000,
     );
 
     it.effect(

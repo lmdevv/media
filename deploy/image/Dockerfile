@@ -79,7 +79,10 @@ ARG S6_OVERLAY_AARCH64_SHA256=c8fd6b1f0380d399422fc986a1e6799f6a287e2cfa24813ad0
 # VA-API drivers for AMD GPUs. xz-utils unpacks s6-overlay; curl is the health check. DejaVu
 # (the Bitstream Vera licence, free to use and redistribute) is the font libass falls back to for
 # burned-in text subtitles; its cache is built here, as ffmpeg's user can write none and otherwise
-# logs an error for every run that draws text.
+# logs an error for every run that draws text. Fontconfig keeps a folder's cache only while the
+# folder's modification time matches the cache to the nanosecond, and an image's layers keep whole
+# seconds (BuildKit's export and registries drop the rest), so the font folders get whole-second
+# times before the cache records them.
 RUN set -eux; \
     sed -i 's/^Components: main$/Components: main non-free non-free-firmware/' /etc/apt/sources.list.d/debian.sources; \
     apt-get update; \
@@ -88,6 +91,7 @@ RUN set -eux; \
       packages="$packages intel-media-va-driver-non-free libmfx-gen1.2 libvpl2 mesa-va-drivers vainfo"; \
     fi; \
     apt-get install -y --no-install-recommends $packages; \
+    find /usr/share/fonts /usr/local/share/fonts -type d -exec touch -m -d "@$(date +%s)" {} +; \
     fc-cache -s; \
     rm -rf /var/lib/apt/lists/*
 RUN set -eux; \

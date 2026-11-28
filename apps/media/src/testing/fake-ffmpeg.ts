@@ -177,8 +177,8 @@ for (const [index, rule] of (behavior.rules ?? []).entries()) {
 
 // The stand-in plays any Quick Sync or VA-API device in software, so the service's probes and
 // runs work without one: GPU options go, GPU filters become their software equivalents (an overlay
-// at the canvas's own place and size), and GPU encoders of H.264 and HEVC become libx264 and
-// libx265.
+// scaling and placing its top input as the GPU overlay's options say), and GPU encoders of H.264
+// and HEVC become libx264 and libx265.
 const SOFTWARE_DEINTERLACE = "bwdif=mode=send_frame:deint=interlaced";
 const optionsOf = (text) =>
   Object.fromEntries(text.split(":").map((pair) => [pair.split("=")[0], pair.split("=")[1]]));
@@ -190,8 +190,27 @@ const inSoftware = (options) => {
 
   return parts.length === 0 ? "null" : parts.join(",");
 };
+const overlayInSoftware = (main, top, text) => {
+  const options = optionsOf(text);
+  const place = options.x === undefined ? "" : "x=" + options.x + ":y=" + options.y + ":";
+
+  if (options.w === "main_w" && options.h === "main_h") {
+    return "[" + top + "][" + main + "]scale2ref=w=rw:h=rh[played_top][played_main];" +
+      "[played_main][played_top]overlay=eof_action=pass:repeatlast=0";
+  }
+  if (options.w !== undefined && options.h !== undefined) {
+    return "[" + top + "]scale=" + options.w + ":" + options.h + "[played_top];" +
+      "[" + main + "][played_top]overlay=" + place + "eof_action=pass:repeatlast=0";
+  }
+
+  return "[" + main + "][" + top + "]overlay=" + place + "eof_action=pass:repeatlast=0";
+};
 const graphInSoftware = (text) =>
   text
+    .replace(
+      /\\[([^\\]]+)\\]\\[([^\\]]+)\\]overlay_(?:qsv|vaapi)=((?:\\\\.|[^,;\\[\\\\])*)/g,
+      (_, main, top, options) => overlayInSoftware(main, top, options),
+    )
     .replace(/vpp_qsv=([^,;\\[]*)/g, (_, options) => inSoftware(optionsOf(options)))
     .replace(/scale_vaapi=([^,;\\[]*)/g, (_, options) => inSoftware(optionsOf(options)))
     .replace(/tonemap_vaapi=[^,;\\[]*/g, "format=nv12")

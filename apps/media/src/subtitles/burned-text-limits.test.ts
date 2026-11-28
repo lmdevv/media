@@ -2,7 +2,7 @@ import { join } from "node:path";
 
 import { NodeServices } from "@effect/platform-node";
 import { assert, describe, it, layer } from "@effect/vitest";
-import { Effect, Fiber, FileSystem, Layer, Path } from "effect";
+import { Duration, Effect, Fiber, FileSystem, Layer, Path } from "effect";
 
 import * as DiskCache from "../disk-cache.ts";
 import * as MediaTools from "../media/media-tools.ts";
@@ -81,36 +81,39 @@ const film = Effect.fn(function* (folder: string, script: string) {
   const output = join(folder, "Film (2020).mkv");
 
   yield* fs.writeFileString(input, script);
-  yield* tools.ffmpeg([
-    "-hide_banner",
-    "-nostdin",
-    "-v",
-    "error",
-    "-y",
-    "-f",
-    "lavfi",
-    "-i",
-    "color=c=gray:size=320x240:rate=10:duration=2",
-    "-f",
-    "ass",
-    "-i",
-    input,
-    "-map",
-    "0:v",
-    "-map",
-    "1:s",
-    "-c:v",
-    "libx264",
-    "-preset",
-    "ultrafast",
-    "-c:s",
-    "copy",
-    "-attach",
-    FONT,
-    "-metadata:s:t:0",
-    "mimetype=application/x-truetype-font",
-    output,
-  ]);
+  yield* tools.ffmpeg(
+    [
+      "-hide_banner",
+      "-nostdin",
+      "-v",
+      "error",
+      "-y",
+      "-f",
+      "lavfi",
+      "-i",
+      "color=c=gray:size=320x240:rate=10:duration=2",
+      "-f",
+      "ass",
+      "-i",
+      input,
+      "-map",
+      "0:v",
+      "-map",
+      "1:s",
+      "-c:v",
+      "libx264",
+      "-preset",
+      "ultrafast",
+      "-c:s",
+      "copy",
+      "-attach",
+      FONT,
+      "-metadata:s:t:0",
+      "mimetype=application/x-truetype-font",
+      output,
+    ],
+    { timeout: Duration.minutes(2) },
+  );
 
   return output;
 });
@@ -360,22 +363,18 @@ describe.skipIf(!hasFfmpeg)("a burned-in text track's limits", () => {
     );
   });
 
-  layer(
-    preparerLayer({
-      FFMPEG_PATH: hanging,
-      FILE_SCAN_TIMEOUT_SECONDS: "1",
-      PROBE_TIMEOUT_SECONDS: "3",
-    }),
-    { excludeTestServices: true },
-  )((scoped) => {
+  // Only runs that never finish meet a short limit here: the film is written within two minutes,
+  // and the sidecar converts within the default limit, however busy the machine is.
+  layer(preparerLayer({ FFMPEG_PATH: hanging, FILE_SCAN_TIMEOUT_SECONDS: "1" }), {
+    excludeTestServices: true,
+  })((scoped) => {
     scoped.effect(
-      "stops a conversion at its time limit, and draws without fonts whose extraction stops at its",
+      "stops a conversion at its time limit",
       () =>
         Effect.gen(function* () {
           const fs = yield* FileSystem.FileSystem;
           const path = yield* Path.Path;
           const root = yield* fs.makeTempDirectoryScoped({ prefix: "media-burn-" });
-          // The stand-in runs the real ffmpeg for this, within the probe timeout.
           const output = yield* film(root, SCRIPT);
           const preparer = yield* BurnedText.Service;
 
@@ -384,9 +383,25 @@ describe.skipIf(!hasFfmpeg)("a burned-in text track's limits", () => {
             .pipe(Effect.flip);
 
           assert.strictEqual(failed.reason, "timed-out");
+        }).pipe(Effect.scoped),
+      60_000,
+    );
+  });
 
-          // A sidecar still converts, and the film's attachment never comes out, so the subtitle
-          // draws in the fallback font.
+  layer(preparerLayer({ FFMPEG_PATH: hanging, PROBE_TIMEOUT_SECONDS: "5" }), {
+    excludeTestServices: true,
+  })((scoped) => {
+    scoped.effect(
+      "draws without fonts whose extraction stops at its time limit",
+      () =>
+        Effect.gen(function* () {
+          const fs = yield* FileSystem.FileSystem;
+          const path = yield* Path.Path;
+          const root = yield* fs.makeTempDirectoryScoped({ prefix: "media-burn-" });
+          const output = yield* film(root, SCRIPT);
+          const preparer = yield* BurnedText.Service;
+
+          // The film's attachment never comes out, so the sidecar draws in the fallback font.
           const sidecar = path.join(root, "Film (2020).en.srt");
 
           yield* fs.writeFileString(sidecar, "1\n00:00:01,000 --> 00:00:02,000\nA line\n");
@@ -401,4 +416,31 @@ describe.skipIf(!hasFfmpeg)("a burned-in text track's limits", () => {
       60_000,
     );
   });
+
+  layer(preparerLayer({ FFMPEG_PATH: "/nonexistent/ffmpeg" }), { excludeTestServices: true })(
+    (scoped) => {
+      scoped.effect("answers a conversion whose ffmpeg never starts as unreadable", () =>
+        Effect.gen(function* () {
+          const fs = yield* FileSystem.FileSystem;
+          const path = yield* Path.Path;
+          const root = yield* fs.makeTempDirectoryScoped({ prefix: "media-burn-" });
+          const sidecar = path.join(root, "Film (2020).en.srt");
+
+          yield* fs.writeFileString(sidecar, "1\n00:00:01,000 --> 00:00:02,000\nA line\n");
+
+          const failed = yield* BurnedText.Service.pipe(
+            Effect.flatMap((preparer) =>
+              preparer.prepare(
+                { ...sourceOf(sidecar, TextSource.Sidecar({ path: sidecar })), style: "plain" },
+                path.join(root, "a"),
+              ),
+            ),
+            Effect.flip,
+          );
+
+          assert.strictEqual(failed.reason, "unreadable");
+        }).pipe(Effect.scoped),
+      );
+    },
+  );
 });

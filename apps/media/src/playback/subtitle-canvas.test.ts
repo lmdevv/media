@@ -53,6 +53,22 @@ const film = Effect.fn(function* (
 /** A gray 5 s lavfi picture of `size` (`WxH`). */
 const picture = (size: string) => `color=c=gray:s=${size}:r=25:d=5`;
 
+/** x264 options that hold a picture at a constant 40 Mbit/s with filler, however flat it is. */
+const FILLED = [
+  "-b:v",
+  "40M",
+  "-minrate",
+  "40M",
+  "-maxrate",
+  "40M",
+  "-bufsize",
+  "40M",
+  "-x264-params",
+  "nal-hrd=cbr",
+  "-g",
+  "24",
+];
+
 /** Asserts `box` is within two samples of `expected` on every side. */
 const near = (
   box: readonly [number, number, number, number] | undefined,
@@ -197,14 +213,15 @@ describe.skipIf(!hasFfmpeg)("an image subtitle's canvas on the CPU chain", () =>
     );
 
     it.effect(
-      "draws a PGS canvas ffmpeg learns only from its first packet where it belongs",
+      "draws a PGS canvas ffmpeg learns only from its first packet at the picture's height, centred",
       () =>
         Effect.gen(function* () {
           const fs = yield* FileSystem.FileSystem;
           const root = yield* fs.makeTempDirectoryScoped({ prefix: "media-pgs-late-" });
 
-          // Noise keeps each picture at 40 Mbit/s, so ffmpeg's probe reads about a second and the
-          // bar, from 2.5 s, is past it; the noise never reaches the bar's white.
+          // x264's CBR filler holds each flat gray picture at 40 Mbit/s, so ffmpeg's probe reads
+          // about a second and the bar, from 2.5 s, is past it. Nothing in the picture comes near
+          // the 200 `brightBox` counts from but the bar's white.
           const cases = [
             {
               name: "1280x720 canvas over 1920x1080",
@@ -224,20 +241,9 @@ describe.skipIf(!hasFfmpeg)("an image subtitle's canvas on the CPU chain", () =>
             const late = yield* film(
               root,
               `${item.sup}-${String(item.size.height)}.mkv`,
-              `color=c=gray:s=${String(item.size.width)}x${String(item.size.height)}:r=24:d=5,noise=alls=30:allf=t`,
+              `color=c=gray:s=${String(item.size.width)}x${String(item.size.height)}:r=24:d=5`,
               ["-itsoffset", "2.5", "-i", join(FIXTURES, item.sup)],
-              [
-                "-c:v",
-                "libx264",
-                "-preset",
-                "ultrafast",
-                "-b:v",
-                "40M",
-                "-g",
-                "24",
-                "-c:s",
-                "copy",
-              ],
+              ["-c:v", "libx264", "-preset", "ultrafast", ...FILLED, "-c:s", "copy"],
             );
 
             const gray = yield* burnedFrame(

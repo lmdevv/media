@@ -50,7 +50,10 @@ interface EncodeOptions {
   readonly without?: ReadonlyArray<string>;
   /** A text track drawn in, styled (ASS) or plain, in place of an image subtitle. */
   readonly burnText?: "styled" | "plain";
-  /** The source's picture, 1920x1080 when absent; it is encoded at its own size. */
+  /**
+   * The source's picture, 1920x1080 when absent; a GPU encodes it at its own size, the CPU within
+   * 1920x1080.
+   */
   readonly size?: { readonly width: number; readonly height: number };
 }
 
@@ -79,7 +82,7 @@ const encode = (domain: "qsv" | "vaapi" | "software", options: EncodeOptions) =>
   const intent: VideoIntent = {
     targets: [{ ...sdrTarget(options.output ?? "h264"), level: options.level }],
     frameRate: undefined,
-    bounds: { width: 1920, height: 1080 },
+    bounds: options.size ?? { width: 1920, height: 1080 },
     cpuEncodeBounds: { width: 1920, height: 1080 },
     maxBitrate: undefined,
     burn:
@@ -134,13 +137,6 @@ const dvd = (from: number) =>
     from,
     video: encode("software", { burnSubtitle: 3, subtitleCodec: "dvd_subtitle" }),
   });
-
-/** Where a GPU overlay puts a PGS canvas uploaded at the size it is drawn at: centred. */
-const BY_HEIGHT = "x=(main_w-overlay_w)/2:y=(main_h-overlay_h)/2";
-
-/** What a GPU row does on the CPU to a PGS canvas before it uploads it: as the CPU row does. */
-const pgsOnGpu = (width: number, height: number) =>
-  `${pgsOnCpu(width, height)},format=bgra,hwupload`;
 
 /** What the CPU row does to a PGS canvas: scales it to the picture's height, then keeps its middle. */
 const pgsOnCpu = (width: number, height: number) => {
@@ -470,10 +466,18 @@ describe("hlsCommandArgs", () => {
   });
 
   it("places a PGS canvas at a 2.39:1, 16:9, or 4:3 picture's height, its sides cut to fit", () => {
+    // On a GPU row the canvas is held at its stated 1920x1080, never scaled up on the CPU, only
+    // the middle a picture shows is uploaded, and the overlay scales and places it in even samples.
+    // The CPU encodes a 4K picture at half its size.
     const sizes = [
-      { width: 1920, height: 800 },
-      { width: 1920, height: 1080 },
-      { width: 1440, height: 1080 },
+      { width: 1126, height: 480, cpu: 1, cut: "", place: "x=136:y=0:w=852:h=480" },
+      { width: 1920, height: 800, cpu: 1, cut: "", place: "x=248:y=0:w=1422:h=800" },
+      { width: 1920, height: 804, cpu: 1, cut: "", place: "x=246:y=0:w=1428:h=804" },
+      { width: 1920, height: 1080, cpu: 1, cut: "", place: "x=0:y=0:w=1920:h=1080" },
+      { width: 1440, height: 1080, cpu: 1, cut: ",crop=1440:1080", place: "x=0:y=0:w=1440:h=1080" },
+      { width: 3840, height: 1608, cpu: 2, cut: "", place: "x=490:y=0:w=2858:h=1608" },
+      { width: 3840, height: 2160, cpu: 2, cut: "", place: "x=0:y=0:w=3840:h=2160" },
+      { width: 2880, height: 2160, cpu: 2, cut: ",crop=1440:1080", place: "x=0:y=0:w=2880:h=2160" },
     ] as const;
 
     for (const size of sizes) {
@@ -486,11 +490,15 @@ describe("hlsCommandArgs", () => {
           "-filter_complex",
         );
 
-      expect(graph("software")).toContain(`[0:3]${pgsOnCpu(size.width, size.height)}[subtitle]`);
-      expect(graph("qsv")).toContain(`[0:3]${pgsOnGpu(size.width, size.height)}[subtitle]`);
-      expect(graph("qsv")).toContain(`overlay_qsv=${BY_HEIGHT}:`);
-      expect(graph("vaapi")).toContain(`[0:3]${pgsOnGpu(size.width, size.height)}[subtitle]`);
-      expect(graph("vaapi")).toContain(`overlay_vaapi=${BY_HEIGHT}:`);
+      const uploaded = `[0:3]scale=1920:1080${size.cut},format=bgra,hwupload[subtitle]`;
+
+      expect(graph("software")).toContain(
+        `[0:3]${pgsOnCpu(size.width / size.cpu, size.height / size.cpu)}[subtitle]`,
+      );
+      expect(graph("qsv")).toContain(uploaded);
+      expect(graph("qsv")).toContain(`overlay_qsv=${size.place}:`);
+      expect(graph("vaapi")).toContain(uploaded);
+      expect(graph("vaapi")).toContain(`overlay_vaapi=${size.place}:`);
     }
   });
 
@@ -511,6 +519,26 @@ describe("hlsCommandArgs", () => {
       expect(graph("qsv")).toContain("[0:3]scale=1920:1080,format=bgra,hwupload[subtitle]");
       expect(graph("qsv")).toContain("overlay_qsv=w=main_w:h=main_h:");
       expect(graph("vaapi")).toContain("[0:3]scale=1920:1080,format=bgra,hwupload[subtitle]");
+
+      // A GPU row uploads it on 1920x1080 over any taller picture, and on 720x576 over one of 576
+      // rows or fewer: never on a size taken from the picture.
+      for (const [size, uploaded] of [
+        [{ width: 3840, height: 1600 }, "1920:1080"],
+        [{ width: 1126, height: 480 }, "720:576"],
+        [{ width: 854, height: 480 }, "720:576"],
+        [{ width: 1920, height: 804 }, "1920:1080"],
+      ] as const) {
+        const onVaapi = after(
+          hlsCommandArgs({
+            ...command(AudioPlan.Copy({ index: 1 }), "aac"),
+            video: encode("vaapi", { burnSubtitle: 3, subtitleCodec, size }),
+          }),
+          "-filter_complex",
+        );
+
+        expect(onVaapi).toContain(`[0:3]scale=${uploaded},format=bgra,hwupload[subtitle]`);
+        expect(onVaapi).toContain("overlay_vaapi=w=main_w:h=main_h:");
+      }
     }
   });
 
@@ -525,8 +553,8 @@ describe("hlsCommandArgs", () => {
     expect(after(vaapi, "-filter_complex")).toBe(
       [
         "[0:0]scale_vaapi=w=1920:h=1080:format=p010,tonemap_vaapi=format=nv12:p=bt709:t=bt709:m=bt709,setparams=color_primaries=bt709:color_trc=bt709:colorspace=bt709:range=tv,setparams=color_primaries=unknown[picture]",
-        `[0:3]${pgsOnGpu(1920, 1080)}[subtitle]`,
-        `[picture][subtitle]overlay_vaapi=${BY_HEIGHT}:eof_action=pass:repeatlast=0[video]`,
+        "[0:3]scale=1920:1080,format=bgra,hwupload[subtitle]",
+        "[picture][subtitle]overlay_vaapi=x=0:y=0:w=1920:h=1080:eof_action=pass:repeatlast=0[video]",
       ].join(";"),
     );
 

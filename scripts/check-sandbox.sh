@@ -136,16 +136,26 @@ expected="$(printf '%s\n' "$node_dir/node" "$ffmpeg_dir/ffmpeg" "$ffmpeg_dir/ffp
 [[ "$tools" == "$expected" ]] ||
   fail "the unit finds ${tools//$'\n'/ } on PATH, not the module's node, ffmpeg and setpriv"
 
-# libass draws with the unit's fonts file in the environment the service gives its tools, and
-# fontconfig, whose cache the module built, has nothing to write or say.
+# libass draws with the unit's fonts file in the environment the service gives its tools. At the
+# service's `-v error` fontconfig, whose cache the module built, has nothing to write or say; and a
+# style naming a family the unit lacks draws in DejaVu Sans's faces at their size, as the frames
+# and libass's choices at `-v info` show (scripts/font-fallback.ts).
+"$node_dir/node" scripts/font-fallback.ts script >"$canary/fallback.ass"
 cat >"$canary/libass.sh" <<'EOF'
-printf '[Script Info]\nScriptType: v4.00+\n\n[Events]\nFormat: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\nDialogue: 0,0:00:00.00,0:00:01.00,Default,,0,0,0,,LAR\n' >"$1/line.ass"
-env -i PATH="$PATH" FONTCONFIG_FILE="$FONTCONFIG_FILE" ffmpeg -hide_banner -nostdin -v error \
-  -f lavfi -i color=c=gray:s=320x240:d=1 -vf "subtitles=filename=$1/line.ass" -frames:v 1 -f null - 2>&1
+script="$1/fallback.ass"
+draw() {
+  env -i PATH="$PATH" FONTCONFIG_FILE="$FONTCONFIG_FILE" ffmpeg -hide_banner -nostdin -v "$1" \
+    -f lavfi -i color=c=black:s=640x360:r=1:d=6 -vf "subtitles=filename=$script,format=gray" \
+    -f rawvideo -y "$2" 2>&1
+}
+said="$(draw error /dev/null)" || { echo "$said"; exit 1; }
+[ -z "$said" ] || { echo "ffmpeg said this at -v error: $said"; exit 1; }
+draw info "$1/frames.gray" >"$1/draw.log" || { cat "$1/draw.log"; exit 1; }
 EOF
 said="$(sandboxed "$(command -v bash)" "$canary/libass.sh" "$canary")" ||
-  fail "libass could not draw under the filter: $said"
-[[ -z "$said" ]] || fail "ffmpeg said this drawing text with the unit's fonts: $said"
+  fail "libass did not draw silently under the filter with the unit's fonts: $said"
+judged="$("$node_dir/node" scripts/font-fallback.ts judge "$canary/frames.gray" "$canary/draw.log" 2>&1)" ||
+  fail "libass drew with the wrong faces under the filter with the unit's fonts: $judged"
 
 if [[ $# -eq 0 ]]; then
   set -- apps/media/src

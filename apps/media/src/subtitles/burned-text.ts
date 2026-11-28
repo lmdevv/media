@@ -266,18 +266,14 @@ const NAMESPACE = "burned-subtitles";
 const CACHE_MAX_AGE = Duration.days(3650);
 
 /**
- * Why converting the track failed: it ran out of time, ffmpeg needed more than `MAX_ALLOCATION` in
- * one block for it (a header past the bound), or ffmpeg could not read it.
+ * Why converting the track failed: ffmpeg needed more than `MAX_ALLOCATION` in one block for it (a
+ * header past the bound), or ffmpeg could not read it or did not start. Running out of time is the
+ * conversion's own limit (`timed-out`), not a failure of the run.
  */
-const failed = (error: MediaTools.MediaToolFailed) => {
-  if (error.exitCode === null && error.signal === null) {
-    return new BurnTextFailed({ reason: "timed-out" });
-  }
-
-  return new BurnTextFailed({
+const failed = (error: MediaTools.MediaToolFailed) =>
+  new BurnTextFailed({
     reason: error.stderr.includes("Cannot allocate memory") ? "too-large" : "unreadable",
   });
-};
 
 /**
  * The most ffmpeg allocates in one block while it converts a track: twice `MAX_SCRIPT_BYTES`, as

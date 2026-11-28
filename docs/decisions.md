@@ -183,17 +183,24 @@ Old movies' Convex project, its SDK client, and its command registry were delete
   tone-mapped as usual (on the GPU when one encodes), then the subtitle is drawn on the SDR frame,
   its canvas stretched over the picture (DVD subtitles carry none and are read on a 720x576 canvas)
   or, for PGS, scaled to the picture's height at its own aspect and centred, as players place it,
-  its sides cut where the picture is narrower (a 4:3 one). On a GPU the subtitle's frames are
-  decoded on the CPU, uploaded at the canvas's size, and scaled and blended by the GPU's overlay,
-  so the picture stays on the device; a device or build without the overlay draws it on the CPU
-  between a download and an upload. The service states a canvas to ffmpeg only where leaving it
-  unstated is the defect: 720x576 for DVD, which carries none, and 1920x1080 for PGS, whose canvas
-  ffmpeg learns only from the first packet and sizes to the picture until then; a DVB stream's
-  display definition and an XSUB stream's stored size stand, as a stated canvas drops every caption
-  outside it. Every path then scales the subtitle's frames, at whatever canvas ffmpeg makes them,
-  to a size the service chooses from the picture before anything else, since only `scale` takes a
-  canvas that changes mid-run: Quick Sync's upload failed, and ffmpeg 9 aborted, where a 4K file's
-  first PGS packet came after the probe. VA-API's overlay blends the subtitle's black as full range
+  its sides cut where the picture is narrower (a 4:3 one). The service states a canvas to ffmpeg
+  only where leaving it unstated is the defect: 720x576 for DVD, which carries none, and 1920x1080
+  for PGS, whose canvas ffmpeg learns only from the first packet and sizes to the picture until
+  then; a DVB stream's display definition and an XSUB stream's stored size stand, as a stated
+  canvas drops every caption outside it. Every path scales the subtitle's frames, at whatever
+  canvas ffmpeg makes them, to a fixed size before anything else, since only `scale` takes a canvas
+  that changes mid-run: Quick Sync's upload failed, and ffmpeg 9 aborted, where a 4K file's first
+  PGS packet came after the probe. The CPU draws at the size the subtitle covers on the picture. On
+  a GPU the subtitle's frames are decoded on the CPU, scaled there to the stated canvas (or, with
+  none, 1920x1080, and 720x576 over a picture of 576 rows or fewer), never up past it, as that
+  costs every frame (scaled to 3840x2160 for a 4K picture, a 1080p PGS cost Quick Sync 35 ms of
+  CPU a frame against 2.7), only the middle the picture shows uploaded, and scaled and blended by
+  the GPU's overlay, so the picture stays on the device. Those are the only sizes uploaded: on an
+  Arc A380 VA-API's upload tears BGRA frames of some others into slanted bands (853x480, the
+  canvas over a 480-line picture, among them), while every even width at 1080 rows and 720x576
+  come through intact. A 3840x2160 PGS canvas is drawn softer on a GPU than on the CPU until the
+  probe keeps a subtitle stream's canvas. A device or build without the overlay draws it on the
+  CPU between a download and an upload. VA-API's overlay blends the subtitle's black as full range
   over frames that name BT.709 primaries, so it blends over a picture whose primaries are cleared,
   and a stream it draws on names none. After a seek the subtitle comes from a second reading of
   the file from 30 seconds earlier, so a line already on screen is drawn. Choosing a text subtitle or none negotiates again
