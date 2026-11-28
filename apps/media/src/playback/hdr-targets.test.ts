@@ -3,6 +3,7 @@ import { ClientCapabilities } from "@media/contracts/media-playback";
 import { Result, Schema } from "effect";
 import * as fc from "fast-check";
 
+import { decideDownload, DownloadPlan } from "../downloads/download-plan.ts";
 import type { AudioTrack, MediaProbe, VideoStream } from "../media/media-probe.ts";
 import { verifiedFor } from "../testing/capability-snapshots.ts";
 import { renderMultivariant } from "./hls-plan.ts";
@@ -517,6 +518,7 @@ describe("the HDR target", () => {
         "scale=1920:1080:flags=bicubic",
         "format=yuv420p10le",
         "sidedata=mode=delete:type=DYNAMIC_HDR_PLUS",
+        "sidedata=mode=delete:type=DYNAMIC_HDR_VIVID",
         "sidedata=mode=delete:type=DOVI_METADATA",
         "sidedata=mode=delete:type=DOVI_RPU_BUFFER",
       ].join(","),
@@ -570,6 +572,21 @@ describe("the HDR target", () => {
         undefined,
       ),
     ).toBeUndefined();
+  });
+
+  it("leaves downloads SDR, whatever screen the device declares", () => {
+    const download = decideDownload(probe(SOURCES.hdr10), iphone, "standard", {
+      audioIndex: undefined,
+      capabilities: verifiedFor(probe(SOURCES.hdr10), ["qsv"]),
+      sizeBytes: 4_000_000_000,
+    });
+
+    assert.isTrue(DownloadPlan.$is("Mp4")(download) && VideoPlan.$is("Encode")(download.video));
+    expect(
+      DownloadPlan.$is("Mp4")(download) && VideoPlan.$is("Encode")(download.video)
+        ? download.video.output.dynamicRange
+        : undefined,
+    ).toBe("sdr");
   });
 
   it("decodes a screen's HDR format it does not know, and matches nothing with it", () => {
